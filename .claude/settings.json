@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(/Users/chris/vcs/git/beads/**)",
+      "Read(/Users/chris/vcs/git/gastown/**)",
+      "Read(/Users/chris/vcs/git/overstory/**)",
+      "Bash(git -C /Users/chris/vcs/git/beads *)",
+      "Bash(git -C /Users/chris/vcs/git/gastown *)",
+      "Bash(git -C /Users/chris/vcs/git/overstory *)"
+    ]
+  }
+}
