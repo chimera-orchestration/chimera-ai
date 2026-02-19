@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)"
+      "Bash(git -C /Users/chris/vcs/git/beads grep -n \"stealth\\\\|contributor\\\\|BEADS_DB\\\\|no-commit\\\\|nocommit\" -- \"*.go\" \"*.md\")",
+      "Bash(git -C /Users/chris/vcs/git/beads grep -n \"stealth\" -- \"cmd/bd/init.go\")",
+      "Bash(git add:*)",
+      "Bash(grep:*)",
+      "Bash(git grep:*)",
+      "Bash(brew info:*)",
+      "Bash(cat:*)"
     ]
   }
 }
