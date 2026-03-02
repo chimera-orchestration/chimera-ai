@@ -29,3 +29,7 @@ BEADS -> for tasks ets
 
 how much history on each bead issue?
 beads offline on compact/tidy? Want the log forever, just out of context.
+
+
+lycia for home directory: https://en.wikipedia.org/wiki/Chimera_(mythology)
+
