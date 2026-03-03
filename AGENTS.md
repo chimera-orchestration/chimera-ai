@@ -1,12 +1,8 @@
 # Agent Instructions
 
-## Self-Improvement
-
-Read `.agents/lessons.md` at session start. After any correction from the user, add a rule preventing the same mistake. Write rules for yourself — not descriptions of what went wrong. Ruthlessly iterate until mistake rate drops.
-
 ## What Chimera Is
 
-Chimera orchestrates AI agents working on goals across projects. It manages the `~/lycia/` directory tree and provides the `ch` CLI.
+Chimera orchestrates AI agents working on goals across projects. It manages a `lycia` directory tree, usually `~/lycia` and provides the `ch` CLI.
 
 **Core concepts** (use this terminology consistently):
 - **Goal** — a thing that needs doing (e.g. "implement feature X")
@@ -26,6 +22,10 @@ Chimera orchestrates AI agents working on goals across projects. It manages the 
 ```
 
 ## Workflow
+
+## Self-Improvement
+
+Read `.agents/lessons.md` at session start. After any correction from the user, add a rule preventing the same mistake. Write rules for yourself — not descriptions of what went wrong. Ruthlessly iterate until mistake rate drops.
 
 **Plan first.** Enter plan mode for any non-trivial task (3+ steps or architectural decisions). Stop and re-plan immediately if things go sideways — don't push through.
 
