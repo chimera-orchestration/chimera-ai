@@ -1,41 +1,46 @@
 # Agent Instructions
 
+## Self-Improvement
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+Read `.agents/lessons.md` at session start. After any correction from the user, add a rule preventing the same mistake. Write rules for yourself — not descriptions of what went wrong. Ruthlessly iterate until mistake rate drops.
 
-## Quick Reference
+## What Chimera Is
 
-```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --status in_progress  # Claim work
-bd close <id>         # Complete work
-bd sync               # Sync with git
+Chimera orchestrates AI agents working on goals across projects. It manages the `~/lycia/` directory tree and provides the `ch` CLI.
+
+**Core concepts** (use this terminology consistently):
+- **Goal** — a thing that needs doing (e.g. "implement feature X")
+- **Task** — a tracked unit of work, discovered while executing a goal
+- **Process** — an ordered sequence of steps to complete a task
+- **Step** — a single atomic thing that must be done
+- **Principle** — context an agent must load before beginning a process
+- **Knowledge** — named, versioned context loaded on demand (e.g. "load knowledge for testfixtures")
+
+**Layout:**
+```
+~/lycia/
+  {project}/
+    worktrees/
+  processes/      # shared process definitions
+  .beads/         # issue tracking
 ```
 
-## Landing the Plane (Session Completion)
+## Workflow
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+**Plan first.** Enter plan mode for any non-trivial task (3+ steps or architectural decisions). Stop and re-plan immediately if things go sideways — don't push through.
 
-**MANDATORY WORKFLOW:**
+**Use subagents aggressively.** Offload research, exploration, and parallel analysis to subagents to keep the main context clean. One task per subagent.
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+**Verify before done.** Never mark work complete without proving it works. Ask: "Would a staff engineer approve this?" Run tests, check logs, demonstrate correctness.
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+**Demand elegance.** For non-trivial changes, ask "is there a more elegant way?" Skip for simple obvious fixes.
 
+**Fix bugs autonomously.** When given a bug report, just fix it. Find root causes — no temporary patches, no hand-holding required.
+
+## Context File Hygiene
+
+When any context file (this file, CLAUDE.md, or any topic doc) grows past 200 lines, or where splitting by topic improves navigation: extract into a dedicated file and replace with a trigger:
+
+> If you are working on X, read `path/to/X.md` before proceeding.
+
+Keep this file terse. Triggers over bulk.
