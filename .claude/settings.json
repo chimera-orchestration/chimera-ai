@@ -1,6 +1,10 @@
 {
   "permissions": {
     "allow": [
+      "Read(**)",
+      "Bash(git *)",
+      "WebSearch(*)",
+      "WebFetch(*)",
       "Read(/Users/chris/vcs/git/beads/**)",
       "Read(/Users/chris/vcs/git/gastown/**)",
       "Read(/Users/chris/vcs/git/overstory/**)",
