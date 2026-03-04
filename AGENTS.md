@@ -27,7 +27,7 @@ When implementing chimera, the following principles must be adhered to:
 
 ## Self-Improvement
 
-Read `agent-docs/lessons.md` at session start. After any correction from the user, add a rule preventing the same mistake. Write rules for yourself — not descriptions of what went wrong. Ruthlessly iterate until mistake rate drops.
+Read `agent-docs/lessons.md` at session start (gitignored — machine-local). After any correction from the user, add a rule preventing the same mistake. Write rules for yourself — not descriptions of what went wrong. Ruthlessly iterate until mistake rate drops.
 
 **Plan first.** Enter plan mode for any non-trivial task (3+ steps or architectural decisions). Stop and re-plan immediately if things go sideways — don't push through.
 
