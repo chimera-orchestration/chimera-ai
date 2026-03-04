@@ -27,11 +27,11 @@ When implementing chimera, the following principles must be adhered to:
 
 ## Self-Improvement
 
-Read `agent-docs/lessons.md` at session start (may not exist yet). After any correction from the user, add a rule preventing the same mistake. Write rules for yourself — not descriptions of what went wrong. Ruthlessly iterate until mistake rate drops.
+Read `agent-docs/lessons.md` at session start (may not exist yet, gitignored — machine-local). After any correction from the user, add a rule preventing the same mistake. Write rules for yourself — not descriptions of what went wrong. Ruthlessly iterate until mistake rate drops.
 
 **Plan first.** Enter plan mode for any non-trivial task (3+ steps or architectural decisions). Stop and re-plan immediately if things go sideways — don't push through.
 
-**Use subagents aggressively.** Offload research, exploration, and parallel analysis to subagents to keep the main context clean. One task per subagent.
+**Use subagents aggressively.** Offload research, exploration, and parallel analysis to subagents to keep the main context clean. One task per subagent. Subagents don't inherit CLAUDE.md — pass key constraints explicitly (e.g. `uv run`, `git grep`).
 
 **Verify before done.** Never mark work complete without proving it works. Ask: "Would a staff engineer approve this?" Run tests, check logs, demonstrate correctness.
 
@@ -57,4 +57,4 @@ If you are working on a topic and learn something new, add to the topic.
 
 If the topic needs editing or rewriting, suggest to the user but get confirmation before changes.
 
-Keep this file terse. Triggers over bulk.
+Keep this file terse. Triggers over bulk. When editing, match existing style — no padding, no prose, no reminders needed.
