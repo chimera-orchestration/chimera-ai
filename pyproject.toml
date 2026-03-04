@@ -23,6 +23,10 @@ dev = [
     "testfixtures",
     "sybil",
 ]
+docs = [
+    "sphinx",
+    "furo",
+]
 
 [build-system]
 requires = ["hatchling"]
