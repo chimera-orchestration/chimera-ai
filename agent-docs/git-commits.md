@@ -1,2 +1,2 @@
-- before commiting, run @happy.sh. return code MUST be 0 and output MUST be error-free.
+- before committing, run @happy.sh. return code MUST be 0 and output MUST be error-free.
 - Good commit messages are succinct and describe why not what, the commit itself contains the "what".

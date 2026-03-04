@@ -1,4 +1,4 @@
-- always use the layest possible python features, we are targeting the bleeding edge, update @.python_version if necessary
+- always use the latest possible python features, we are targeting the bleeding edge, update @.python_version if necessary
 - ONLY and aggressively use `lazy import {package}` and `lazy from {package} import {thing}`
 - read pyproject.toml to see what libraries are installed, aggressively use them rather than writing code from scratch
 - type annotate everything

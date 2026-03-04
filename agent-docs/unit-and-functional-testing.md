@@ -1,2 +1,2 @@
-- `uv run pytest tests_/test_{}.py` to tests
+- `uv run pytest tests_/test_{}.py` to run tests (`tests_/` at project root; trailing underscore prevents pytest auto-collection)
 - collect tests for a component in `test_{component}.py`

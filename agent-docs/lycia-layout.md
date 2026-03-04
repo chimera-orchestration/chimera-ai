@@ -2,9 +2,9 @@ Lycia is the project working space for Chimera.
 
 **Layout:**
 ```
-~/lycia/  # but location and name ultimate chosen by user.
+~/lycia/  # but location and name ultimately chosen by user.
   {project}/
-    worktrees/
+    worktrees/  # git worktrees for parallel work
   processes/      # shared process definitions
   .beads/         # issue tracking
 ```
