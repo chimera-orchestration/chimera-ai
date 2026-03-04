@@ -1,0 +1,2 @@
+- agent-targeted docs go in @docs/{topic}.md and must be terse, optimised for clarity and using few tokens
+- human docs go in @docs/{topic}.rst, Sphinx-formatted.

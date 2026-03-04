@@ -1,0 +1,2 @@
+- `uv run pytest tests_/test_{}.py` to tests
+- collect tests for a component in `test_{component}.py`
