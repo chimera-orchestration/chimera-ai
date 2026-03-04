@@ -1,5 +1,5 @@
 - always use the latest possible python features, we are targeting the bleeding edge, update @.python_version if necessary
-- ONLY and aggressively use `lazy import {package}` and `lazy from {package} import {thing}`
+- ONLY and aggressively use lazy imports (Python 3.15 native): `lazy import <package>` / `lazy from <package> import <name>` — e.g. `lazy import json`
 - read pyproject.toml to see what libraries are installed, aggressively use them rather than writing code from scratch
 - type annotate everything
 - `ruff format` frequently
