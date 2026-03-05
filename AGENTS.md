@@ -40,6 +40,8 @@ Read `agent-docs/lessons.md` at session start (may not exist yet, gitignored —
 
 **Fix bugs autonomously.** When given a bug report, just fix it. Find root causes — no temporary patches, no hand-holding required.
 
+**Commit at task end.** When a task is complete, make semantic commits — one logical change per commit, staged selectively with `git add -p` where needed. Never leave uncommitted files at end of session.
+
 ## Context File Hygiene
 
 When any context file (this file, AGENTS.md/CLAUDE.md, or any topic doc) grows past 200 lines, or where splitting by topic improves navigation: extract into a dedicated file and replace with a doc reference below.
