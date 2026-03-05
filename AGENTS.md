@@ -43,6 +43,10 @@ Read `agent-docs/lessons.md` at session start (may not exist yet, gitignored —
 
 When any context file (this file, AGENTS.md/CLAUDE.md, or any topic doc) grows past 200 lines, or where splitting by topic improves navigation: extract into a dedicated file and replace with a doc reference below.
 
+## Research files
+
+`@research/` holds ad-hoc research notes as `.md` files (e.g. `research/dolt.md`). When asked to save research to a `.md` file, put it there.
+
 ## Topic documentation
 
 Topics docs live in agent-docs/{topic}.md, if you are working on/with {topic}, read `agent-docs/{topic}.md` before proceeding.
