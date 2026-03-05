@@ -1,25 +1,13 @@
 {
   "permissions": {
     "allow": [
+      "Bash(*)",
       "Read(**)",
-      "Bash(git *)",
-      "Bash(git fetch*)",
-      "Bash(git pull*)",
-      "Bash(git push*)",
-      "Bash(git rebase*)",
-      "Bash(git add*)",
-      "Bash(git commit*)",
-      "Bash(git status*)",
-      "Bash(git diff*)",
-      "Bash(git log*)",
       "WebSearch(*)",
       "WebFetch(*)",
       "Read(/Users/chris/vcs/git/beads/**)",
       "Read(/Users/chris/vcs/git/gastown/**)",
-      "Read(/Users/chris/vcs/git/overstory/**)",
-      "Bash(git -C /Users/chris/vcs/git/beads *)",
-      "Bash(git -C /Users/chris/vcs/git/gastown *)",
-      "Bash(git -C /Users/chris/vcs/git/overstory *)"
+      "Read(/Users/chris/vcs/git/overstory/**)"
     ]
   }
 }
