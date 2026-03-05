@@ -1,6 +1,14 @@
 - `uv run pytest tests/test_{}.py` to run tests (`tests/` at project root)
 - collect tests for a component in `test_{component}.py`
 
+## Fixture return types
+
+yield-based fixtures return `Iterator[T]` — not `Generator[T, None, None]` (verbose) or `Iterable[T]` (too broad):
+```python
+from collections.abc import Iterator
+def tmpdir() -> Iterator[TempDir]: ...
+```
+
 ## Testing fixtures
 
 **testfixtures.TempDir** (`from testfixtures import TempDir`)
