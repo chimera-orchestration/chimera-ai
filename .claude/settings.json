@@ -3,6 +3,11 @@
     "allow": [
       "Read(**)",
       "Bash(git *)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
       "WebSearch(*)",
       "WebFetch(*)",
       "Read(/Users/chris/vcs/git/beads/**)",

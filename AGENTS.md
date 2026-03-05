@@ -40,7 +40,7 @@ Read `agent-docs/lessons.md` at session start (may not exist yet, gitignored —
 
 **Fix bugs autonomously.** When given a bug report, just fix it. Find root causes — no temporary patches, no hand-holding required.
 
-**Commit at task end.** When a task is complete, make semantic commits — one logical change per commit, staged selectively with `git add -p` where needed. Never leave uncommitted files at end of session.
+**Commit at task end.** When a task is complete, make semantic commits — one logical change per commit, staged selectively with `git add -p` where needed. Never leave uncommitted files at end of session. Never announce or ask before running git commands — just do them.
 
 ## Context File Hygiene
 
