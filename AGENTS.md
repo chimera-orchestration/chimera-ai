@@ -1,5 +1,6 @@
 # Agent Instructions
 
+
 ## What is Chimera?
 
 Chimera orchestrates AI agents working on goals across projects. It manages a `lycia` directory tree, usually `~/lycia` and provides the `ch` CLI.
