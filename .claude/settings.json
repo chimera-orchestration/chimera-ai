@@ -3,6 +3,10 @@
     "allow": [
       "Read(**)",
       "Bash(git *)",
+      "Bash(git fetch*)",
+      "Bash(git pull*)",
+      "Bash(git push*)",
+      "Bash(git rebase*)",
       "Bash(git add*)",
       "Bash(git commit*)",
       "Bash(git status*)",
