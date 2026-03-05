@@ -1,3 +1,4 @@
 .claude/settings.local.json
 agent-docs/lessons.md
 docs/_build/
+.coverage
