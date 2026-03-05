@@ -3,9 +3,10 @@ name = "chimera-ai"
 version = "0.1.0"
 description = "Orchestrates AI agents working on goals across multiple projects"
 readme = "README.rst"
-requires-python = ">=3.15a6"
+requires-python = ">=3.14"
 dependencies = [
     "typer",
+    "giterator @ git+https://github.com/simplistix/giterator",
 ]
 
 [project.urls]
@@ -14,6 +15,7 @@ Repository = "https://github.com/chimera-orchestration/chimera-ai"
 
 [project.scripts]
 chimera = "chimera.cli:app"
+ch = "chimera.cli:app"
 
 [dependency-groups]
 dev = [
@@ -21,7 +23,7 @@ dev = [
     "ruff",
     "pytest",
     "pytest-cov",
-    "testfixtures",
+    "testfixtures @ git+https://github.com/simplistix/testfixtures",
     "sybil",
 ]
 docs = [
@@ -33,11 +35,14 @@ docs = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/chimera"]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 line-length = 100
 
 [tool.ruff.format]
