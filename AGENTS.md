@@ -15,6 +15,8 @@ Chimera orchestrates AI agents working on goals across projects. It manages a wo
 - **Principle** — context an agent must load before beginning a process, task or step
 - **Knowledge** — named, versioned context loaded on demand (e.g. "load knowledge for testfixtures")
 - **Reference** — a project used only for tracking knowledge
+- **Service** — a long-running system process managed by Chimera (e.g. dolt sql-server, tmux session); distinct from the workflow concept "Process"
+- **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera
 
 ## Principles
 
