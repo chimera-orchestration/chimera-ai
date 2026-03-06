@@ -3,15 +3,18 @@
 
 ## What is Chimera?
 
-Chimera orchestrates AI agents working on goals across projects. It manages a `lycia` directory tree, usually `~/lycia` and provides the `ch` CLI.
+Chimera orchestrates AI agents working on goals across projects. It manages a workspace directory tree, usually `~/lycia` and provides the `ch` CLI.
 
 **Core concepts** (use this terminology consistently):
+- **Workspace** - a directory tree managed by Chimera where all work is done, often called Lycia 
+- **Project** — a project managed by Chimera within a workspace
 - **Goal** — a thing that needs doing (e.g. "implement feature X")
-- **Task** — a tracked unit of work, discovered while executing a goal
+- **Task** — a tracked unit of work, discovered while planning or executing a goal
 - **Process** — an ordered sequence of steps to complete a task
-- **Step** — a single atomic thing that must be done
-- **Principle** — context an agent must load before beginning a process
+- **Step** — a single atomic thing that must be done, tracked in a bead
+- **Principle** — context an agent must load before beginning a process, task or step
 - **Knowledge** — named, versioned context loaded on demand (e.g. "load knowledge for testfixtures")
+- **Reference** — a project used only for tracking knowledge
 
 ## Principles
 
