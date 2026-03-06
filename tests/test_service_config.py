@@ -1,22 +1,14 @@
-from collections.abc import Iterator
-
 import pytest
 from pydantic import ValidationError
 from testfixtures import TempDir
 
-from chimera.service_config import (
+from chimera.services import (
     DockerServiceConfig,
     ProcessServiceConfig,
     ServicesConfig,
     TmuxServiceConfig,
     load_services_config,
 )
-
-
-@pytest.fixture
-def tmpdir() -> Iterator[TempDir]:
-    with TempDir() as d:
-        yield d
 
 
 FULL_YAML = """\
