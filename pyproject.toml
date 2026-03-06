@@ -6,6 +6,7 @@ readme = "README.rst"
 requires-python = ">=3.14"
 dependencies = [
     "typer",
+    "pydantic",
     "giterator @ git+https://github.com/simplistix/giterator",
 ]
 
