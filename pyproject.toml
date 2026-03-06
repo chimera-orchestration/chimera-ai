@@ -8,6 +8,8 @@ dependencies = [
     "typer",
     "pydantic",
     "giterator @ git+https://github.com/simplistix/giterator",
+    "pydantic",
+    "pyyaml",
 ]
 
 [project.urls]
