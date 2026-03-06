@@ -1,3 +1,9 @@
+## OpenClaw
+
+Self-hosted personal AI agent framework — connects LLMs to messaging apps and acts autonomously.
+See [openclaw.md](openclaw.md) for full research notes.
+
+
 https://github.com/simonw/llm
 
 
