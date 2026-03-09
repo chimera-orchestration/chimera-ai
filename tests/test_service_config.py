@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 from testfixtures import TempDir
 
-from chimera.services import (
+from chimera.service_config import (
     DockerServiceConfig,
     ProcessServiceConfig,
     ServicesConfig,
