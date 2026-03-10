@@ -26,7 +26,7 @@ dev = [
     "ruff",
     "pytest",
     "pytest-cov",
-    "testfixtures @ git+https://github.com/simplistix/testfixtures",
+    "testfixtures>=11",
     "sybil",
 ]
 docs = [
