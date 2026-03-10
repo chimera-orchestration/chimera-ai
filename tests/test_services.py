@@ -3,7 +3,12 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from chimera.services import DockerService, ProcessService, Service, TmuxService
+from chimera.services import (
+    DockerService,
+    ProcessService,
+    Service,
+    TmuxService,
+)
 
 STARTED = datetime(2026, 3, 6, 12, 0, 0, tzinfo=timezone.utc)
 
