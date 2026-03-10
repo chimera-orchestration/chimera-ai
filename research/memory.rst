@@ -8,10 +8,30 @@
   - SessionStart → inject context at session start
   - UserPromptSubmit → receives the prompt text, can do semantic search against it, inject relevant memories as additionalContext
 
-  UserPromptSubmit is the sweet spot for chimera: it fires on every prompt, receives the actual text, and can return relevant memories as invisible context before I ever respond. Exit 0 + JSON with additionalContext =
-  injected into my system prompt automatically.
+  UserPromptSubmit is the sweet spot for chimera: it fires on every prompt, receives the actual text, and can return relevant memories as invisible context before I ever respond. UserPromptSubmit has NO matcher support — it always fires on every prompt.
 
   There's also Stop for the write side - capture session learnings and store them.
+
+  Hook types (four available): command, http, prompt, agent. The prompt type is especially useful for Stop — run Haiku inline without a separate script.
+
+  Hook config file locations (all merge):
+  - ~/.claude/settings.json — global (all projects)
+  - .claude/settings.json — project-level (committable)
+  - .claude/settings.local.json — project-level (gitignored)
+
+  additionalContext exact JSON structure:
+
+    {
+      "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": "<text injected before Claude responds>"
+      }
+    }
+
+  Multiple hooks' additionalContext values are concatenated. Exit code semantics:
+  - Exit 0: success, parse JSON from stdout
+  - Exit 2: blocking — stderr is fed to Claude as an error message
+  - Other: non-blocking, shown only in verbose mode
 
   Can I read embeddings directly?
 
