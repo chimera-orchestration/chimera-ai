@@ -60,6 +60,14 @@ For a CLI tool like Chimera, **sqlite-vec** is the right default — no service,
 
 ---
 
+## Coding agents with built-in context retrieval
+
+| Project | URL | Notes |
+|---|---|---|
+| Sourcegraph Cody | https://github.com/sourcegraph/cody | Combines code search + retrieval to inject context into AI coding sessions |
+
+---
+
 ## RAG / orchestration frameworks
 
 | Project | URL | Notes |
