@@ -6,8 +6,8 @@ from testfixtures import TempDir
 runner = CliRunner()
 
 
-def test_init_creates_lycia(tmpdir: TempDir) -> None:
-    path = tmpdir.path / 'mylycia'
+def test_init_creates_workspace(tmpdir: TempDir) -> None:
+    path = tmpdir.path / 'myworkspace'
     result = runner.invoke(app, ['init', str(path)])
     assert result.exit_code == 0
     assert path.is_dir()

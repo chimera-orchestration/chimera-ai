@@ -3,10 +3,10 @@
 
 ## What is Chimera?
 
-Chimera orchestrates AI agents working on goals across projects. It manages a workspace directory tree, usually `~/lycia` and provides the `ch` CLI.
+Chimera orchestrates AI agents working on goals across projects. It manages a workspace directory tree (e.g. `~/lycia`) and provides the `ch` CLI.
 
 **Core concepts** (use this terminology consistently):
-- **Workspace** - a directory tree managed by Chimera where all work is done, often called Lycia 
+- **Workspace** - a directory tree managed by Chimera where all work is done (default name: `lycia`)
 - **Project** — a project managed by Chimera within a workspace
 - **Goal** — a thing that needs doing (e.g. "implement feature X")
 - **Task** — a tracked unit of work, discovered while planning or executing a goal
@@ -67,7 +67,7 @@ Topics docs live in agent-docs/{topic}.md, if you are working on/with {topic}, r
 - @agent-docs/unit-and-functional-testing.md
 - @agent-docs/documentation.md
 - @agent-docs/git-commits.md
-- @agent-docs/lycia-layout.md
+- @agent-docs/workspace-layout.md
 
 If you are working on a topic and learn something new, add to the topic.
 

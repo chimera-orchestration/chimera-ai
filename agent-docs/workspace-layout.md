@@ -1,8 +1,8 @@
-Lycia is the project working space for Chimera.
+The workspace is the project working space for Chimera.
 
 **Layout:**
 ```
-~/lycia/  # but location and name ultimately chosen by user.
+~/lycia/  # default name; location and name chosen by user.
   {project}/
     worktrees/  # git worktrees for parallel work
   processes/      # shared process definitions
