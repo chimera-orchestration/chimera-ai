@@ -1,4 +1,5 @@
 - always use the latest possible python features, we are targeting the bleeding edge, update @.python-version if necessary
+- name base classes plainly (`Service`, not `ServiceBase`); give discriminated union type aliases a qualified name (`AnyService`, `AnyServiceConfig`)
 - read pyproject.toml to see what libraries are installed, aggressively use them rather than writing code from scratch
 - type annotate everything
 - `ruff format` frequently

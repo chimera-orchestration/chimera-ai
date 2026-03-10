@@ -3,16 +3,11 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from chimera.services import (
-    DockerService,
-    ProcessService,
-    Service,
-    TmuxService,
-)
+from chimera.services import AnyService, DockerService, ProcessService, TmuxService
 
 STARTED = datetime(2026, 3, 6, 12, 0, 0, tzinfo=timezone.utc)
 
-adapter: TypeAdapter[Service] = TypeAdapter(Service)
+adapter: TypeAdapter[AnyService] = TypeAdapter(AnyService)
 
 
 def test_tmux_service_roundtrip() -> None:

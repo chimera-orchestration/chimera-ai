@@ -5,37 +5,37 @@ import yaml
 from pydantic import BaseModel, Field
 
 
-class ServiceConfigBase(BaseModel):
+class ServiceConfig(BaseModel):
     name: str
     use: str
     ports: dict[str, int] = {}
 
 
-class TmuxServiceConfig(ServiceConfigBase):
+class TmuxServiceConfig(ServiceConfig):
     type: Literal["tmux"]
     session: str
     command: str
 
 
-class DockerServiceConfig(ServiceConfigBase):
+class DockerServiceConfig(ServiceConfig):
     type: Literal["docker"]
     image: str
     command: str | None = None
 
 
-class ProcessServiceConfig(ServiceConfigBase):
+class ProcessServiceConfig(ServiceConfig):
     type: Literal["process"]
     command: str
 
 
-ServiceConfig = Annotated[
+AnyServiceConfig = Annotated[
     TmuxServiceConfig | DockerServiceConfig | ProcessServiceConfig,
     Field(discriminator="type"),
 ]
 
 
 class ServicesConfig(BaseModel):
-    services: list[ServiceConfig]
+    services: list[AnyServiceConfig]
 
 
 def load_services_config(path: Path) -> ServicesConfig:
