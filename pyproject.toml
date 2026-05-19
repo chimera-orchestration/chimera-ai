@@ -10,6 +10,7 @@ dependencies = [
     "giterator @ git+https://github.com/simplistix/giterator",
     "pydantic",
     "pyyaml",
+    "loguru>=0.7.3",
 ]
 
 [project.urls]
@@ -53,3 +54,6 @@ quote-style = "preserve"
 
 [tool.pytest.ini_options]
 addopts = "-v"
+
+[tool.coverage.run]
+source = ["chimera", "tests"]
