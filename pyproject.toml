@@ -5,10 +5,9 @@ description = "Orchestrates AI agents working on goals across multiple projects"
 readme = "README.rst"
 requires-python = ">=3.14"
 dependencies = [
-    "typer",
+    "typer>=0.26.3",
     "pydantic",
     "giterator @ git+https://github.com/simplistix/giterator",
-    "pydantic",
     "pyyaml",
     "loguru>=0.7.3",
 ]
