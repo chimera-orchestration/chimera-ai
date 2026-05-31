@@ -52,6 +52,9 @@ line-length = 100
 quote-style = "preserve"
 
 [tool.pytest.ini_options]
+# importlib mode: no __init__.py in tests, so mirrored dirs can reuse
+# basenames (commands/goal/test_start.py + commands/agent/test_start.py)
+# without prepend-mode import collisions.
 addopts = "-v --import-mode=importlib"
 
 [tool.coverage.run]
