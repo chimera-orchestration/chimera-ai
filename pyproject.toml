@@ -52,7 +52,7 @@ line-length = 100
 quote-style = "preserve"
 
 [tool.pytest.ini_options]
-addopts = "-v"
+addopts = "-v --import-mode=importlib"
 
 [tool.coverage.run]
 source = ["chimera", "tests"]
