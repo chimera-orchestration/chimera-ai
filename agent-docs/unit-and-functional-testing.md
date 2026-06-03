@@ -1,5 +1,6 @@
 - `uv run pytest tests/test_{}.py` to run tests (`tests/` at project root)
 - collect tests for a component in `test_{component}.py`
+- commands: test the pure function for logic, the CLI for wiring — see @agent-docs/commands.md
 
 ## Fixture return types
 
