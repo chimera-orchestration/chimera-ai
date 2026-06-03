@@ -1,6 +1,6 @@
 from typer.testing import CliRunner
 
-from chimera.cli import app
+from chimera.__main__ import app
 from testfixtures import TempDir
 
 runner = CliRunner()

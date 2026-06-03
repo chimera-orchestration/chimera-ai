@@ -11,3 +11,7 @@ def callback() -> None:
 
 
 app.command()(init)
+
+
+if __name__ == '__main__':  # pragma: no cover
+    app()

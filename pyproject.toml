@@ -17,8 +17,8 @@ Homepage = "https://github.com/chimera-orchestration/chimera-ai"
 Repository = "https://github.com/chimera-orchestration/chimera-ai"
 
 [project.scripts]
-chimera = "chimera.cli:app"
-ch = "chimera.cli:app"
+chimera = "chimera.__main__:app"
+ch = "chimera.__main__:app"
 
 [dependency-groups]
 dev = [
@@ -52,10 +52,7 @@ line-length = 100
 quote-style = "preserve"
 
 [tool.pytest.ini_options]
-# importlib mode: no __init__.py in tests, so mirrored dirs can reuse
-# basenames (commands/goal/test_start.py + commands/agent/test_start.py)
-# without prepend-mode import collisions.
-addopts = "-v --import-mode=importlib"
+addopts = "-v"
 
 [tool.coverage.run]
 source = ["chimera", "tests"]
