@@ -4,6 +4,7 @@ from typing import Annotated
 import typer
 
 from chimera.commands.init import init as _init
+from chimera.commands.track import track as _track
 
 app = typer.Typer()
 
@@ -16,6 +17,11 @@ def callback() -> None:
 @app.command()
 def init(path: Annotated[Path, typer.Argument()]) -> None:
     typer.echo(f'Initialized workspace at {_init(path)}')
+
+
+@app.command()
+def track(path: Annotated[Path, typer.Argument()]) -> None:
+    typer.echo(f'Tracking {path} at {_track(Path.cwd(), path)}')
 
 
 if __name__ == '__main__':  # pragma: no cover
