@@ -16,9 +16,11 @@ def test_agent_launches_claude_in_the_worktree(
 ) -> None:
     worktree = tmpdir.makedir('wt')
     calls: list[object] = []
-    monkeypatch.setattr(subprocess, 'Popen', lambda cmd, cwd=None: calls.append((cmd, cwd)))
+    monkeypatch.setattr(
+        subprocess, 'run', lambda cmd, cwd=None, check=False: calls.append((cmd, cwd, check))
+    )
     agent(worktree, 'proj-goal')
-    assert calls == [(['claude', '--bg', '--name', 'proj-goal'], worktree)]
+    assert calls == [(['claude', '--bg', '--name', 'proj-goal'], worktree, True)]
 
 
 def test_agent_missing_worktree_raises(tmpdir: TempDir) -> None:
@@ -31,9 +33,11 @@ def test_agent_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     worktree = project / 'worktrees' / 'g-agent'
     worktree.mkdir(parents=True)
     calls: list[object] = []
-    monkeypatch.setattr(subprocess, 'Popen', lambda cmd, cwd=None: calls.append((cmd, cwd)))
+    monkeypatch.setattr(
+        subprocess, 'run', lambda cmd, cwd=None, check=False: calls.append((cmd, cwd, check))
+    )
     monkeypatch.chdir(project)
     result = runner.invoke(app, ['agent', 'g'])
     assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g-agent'  # cwd resolves symlinks like the wrapper
-    assert calls == [(['claude', '--bg', '--name', 'myproject-g'], expected)]
+    assert calls == [(['claude', '--bg', '--name', 'myproject-g'], expected, True)]
