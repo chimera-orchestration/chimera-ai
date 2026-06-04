@@ -16,6 +16,12 @@ def test_init_creates_workspace(tmpdir: TempDir) -> None:
     assert (path / '.beads').is_dir()
 
 
+def test_init_gitignores_repos_and_worktrees(tmpdir: TempDir) -> None:
+    gitignore = (init(tmpdir.path / 'ws') / '.gitignore').read_text()
+    assert '*/repo/' in gitignore
+    assert '*/worktrees/' in gitignore
+
+
 def test_init_existing_path_raises(tmpdir: TempDir) -> None:
     path = tmpdir.path / 'existing'
     path.mkdir()

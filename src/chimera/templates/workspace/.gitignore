@@ -1,2 +1,4 @@
 *.lock
 services-running.jsonl
+*/repo/
+*/worktrees/
