@@ -18,10 +18,11 @@ The workspace is the project working space for Chimera (default name: `lycia`).
     principles/                 # project-specific principles (tracked)
     processes/                  # project-specific processes (tracked)
     repo/                       # gitignored — clone managed by Chimera (ch add only)
-    worktrees/                  # gitignored — one per active goal
-      {goal}/                   # git worktree (.git file → project repo)
-        .beads/
-          redirect              # → ../../.beads (routes to project beads DB)
+    worktrees/                  # gitignored — one worktree per goal × role
+      {goal}-human/             # git worktree on branch {goal}/human
+        .beads/redirect         # → ../../.beads (routes to project beads DB)
+      {goal}-agent/             # git worktree on branch {goal}/agent
+        .beads/redirect         # → ../../.beads
 ```
 
 ## Project types
@@ -30,7 +31,7 @@ Three types, all with the same layout above — difference is where the repo liv
 
 | Type | Description | repo/ |
 |---|---|---|
-| **working** | Actively developed; one worktree per goal | `{project}/repo/` (ch add) or external path (ch track) |
+| **working** | Actively developed; human + agent worktrees per goal | `{project}/repo/` (ch add) or external path (ch track) |
 | **knowledge** | Source repo checked out for knowledge extraction | same as working |
 | **reference** | No live checkout; only extracted knowledge tracked in lycia | absent |
 
@@ -46,12 +47,14 @@ Both commands:
 
 ## Worktrees and beads isolation
 
-When Chimera creates a worktree for a goal (`ch goal start <project> <goal>`):
-1. `git worktree add {project}/worktrees/{goal}` from the project repo
-2. Write `{project}/worktrees/{goal}/.beads/redirect` → `../../.beads`
+`ch goal new <goal>` (run in the project dir; repo read from `config.yaml`) creates one worktree per role. For `role` in `human`, `agent`:
+1. `git worktree add worktrees/{goal}-{role} -b {goal}/{role}` from the project repo
+2. Write `worktrees/{goal}-{role}/.beads/redirect` → `../../.beads`
 3. Append `.beads/` to the worktree's `.git/info/exclude` — keeps Chimera's beads invisible to the upstream project's git, even if the project also uses beads
 
-All agents working on the same goal share the project's beads DB via the redirect. No beads state leaks into upstream commits.
+Refuses if the repo has no commits (nothing to branch from). All agents on the same goal share the project's beads DB via the redirect; no beads state leaks into upstream commits.
+
+> Built so far: step 1 + the no-commits guard. The beads redirect/exclude (steps 2–3) is planned, not yet wired.
 
 ## Beads routing
 
