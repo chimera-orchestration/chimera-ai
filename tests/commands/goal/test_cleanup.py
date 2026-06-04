@@ -26,6 +26,25 @@ def _goal(tmpdir: TempDir) -> tuple[Repo, Path]:
     return repo, worktrees
 
 
+def test_cleanup_is_a_noop_for_a_goal_that_was_never_created(tmpdir: TempDir) -> None:
+    repo = Repo.make(tmpdir.path / 'repo')
+    repo.commit_content('seed')
+    assert cleanup(repo.path, tmpdir.path / 'worktrees', 'ghost') == []
+
+
+def test_goal_cleanup_cli_reports_nothing_to_do(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = Repo.make(tmpdir.path / 'repo')
+    repo.commit_content('seed')
+    project = tmpdir.makedir('project')
+    (project / 'config.yaml').write_text(f'repo: {repo.path}\n')
+    monkeypatch.chdir(project)
+    result = runner.invoke(app, ['goal', 'cleanup', 'ghost'])
+    assert result.exit_code == 0
+    assert 'Nothing to clean up' in result.output
+
+
 def test_cleanup_aborts_when_an_agent_is_running(
     tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
 ) -> None:

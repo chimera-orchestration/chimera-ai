@@ -68,8 +68,11 @@ def cleanup(
     force: Annotated[bool, typer.Option('--force')] = False,
 ) -> None:
     repo, worktrees = _project()
-    for worktree in _goal_cleanup(repo, worktrees, goal, force):
+    removed = _goal_cleanup(repo, worktrees, goal, force)
+    for worktree in removed:
         typer.echo(f'Removed {worktree}')
+    if not removed:
+        typer.echo(f'Nothing to clean up for {goal}')
 
 
 if __name__ == '__main__':  # pragma: no cover
