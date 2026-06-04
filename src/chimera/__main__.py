@@ -4,6 +4,7 @@ from typing import Annotated
 import typer
 import yaml
 
+from chimera.commands.agent import agent as _agent
 from chimera.commands.goal.cleanup import cleanup as _goal_cleanup
 from chimera.commands.goal.new import new as _goal_new
 from chimera.commands.init import init as _init
@@ -25,6 +26,15 @@ def init(path: Annotated[Path, typer.Argument()]) -> None:
 @app.command()
 def track(path: Annotated[Path, typer.Argument()]) -> None:
     typer.echo(f'Tracking {path} at {_track(Path.cwd(), path)}')
+
+
+@app.command()
+def agent(goal: Annotated[str, typer.Argument()]) -> None:
+    project = Path.cwd()
+    worktree = project / 'worktrees' / f'{goal}-agent'
+    name = f'{project.name}-{goal}'
+    _agent(worktree, name)
+    typer.echo(f'Launched agent {name} in {worktree}')
 
 
 goal_app = typer.Typer()
