@@ -36,6 +36,14 @@ def test_new_checks_out_the_role_branches(tmpdir: TempDir) -> None:
     assert agent == 'g/agent'
 
 
+def test_new_refuses_repo_without_commits(tmpdir: TempDir) -> None:
+    repo = Repo.make(tmpdir.path / 'repo')  # no commit → unborn HEAD
+    worktrees = tmpdir.path / 'worktrees'
+    with pytest.raises(RuntimeError, match='no commits'):
+        new(repo.path, worktrees, 'g')
+    assert not worktrees.exists()
+
+
 def test_goal_new_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _seeded_repo(tmpdir)
     project = tmpdir.makedir('project')
