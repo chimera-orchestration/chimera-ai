@@ -29,11 +29,14 @@ def track(path: Annotated[Path, typer.Argument()]) -> None:
 
 
 @app.command()
-def agent(goal: Annotated[str, typer.Argument()]) -> None:
+def agent(
+    goal: Annotated[str, typer.Argument()],
+    prompt: Annotated[str | None, typer.Argument()] = None,
+) -> None:
     project = Path.cwd()
     worktree = project / 'worktrees' / f'{goal}-agent'
     name = f'{project.name}-{goal}'
-    _agent(worktree, name)
+    _agent(worktree, name, prompt)
     typer.echo(f'Launched agent {name} in {worktree}')
 
 
