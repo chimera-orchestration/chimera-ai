@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 from giterator import Git
 from giterator.testing import Repo
@@ -14,6 +16,10 @@ def _seeded_repo(tmpdir: TempDir) -> Repo:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     return repo
+
+
+def _head(path) -> str:
+    return Git(path).rev_parse('HEAD', short=False)
 
 
 def test_new_creates_two_worktrees(tmpdir: TempDir) -> None:
@@ -38,12 +44,75 @@ def test_new_checks_out_the_role_branches(tmpdir: TempDir) -> None:
     assert agent == 'g/agent'
 
 
+def test_new_branches_from_main_not_checked_out_branch(tmpdir: TempDir) -> None:
+    repo = _seeded_repo(tmpdir)
+    main = _head(repo.path)
+    repo('checkout', '-b', 'feature')
+    repo.commit_content('feature-work')
+    assert _head(repo.path) != main  # repo is parked on a different commit
+    worktrees = tmpdir.path / 'worktrees'
+    created = new(repo.path, worktrees, 'g')
+    assert [_head(wt) for wt in created] == [main, main]
+
+
+def test_new_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
+    origin = Repo.make(tmpdir.path / 'origin')
+    origin.commit_content('seed', datetime(2020, 1, 1))
+    local = Git.clone(origin.path, tmpdir.path / 'repo')
+    origin.commit_content('remote-ahead', datetime(2022, 1, 1))
+    local('fetch', 'origin')
+    expected = local.rev_parse('origin/main', short=False)
+    assert expected != local.rev_parse('main', short=False)
+    worktrees = tmpdir.path / 'worktrees'
+    created = new(local.path, worktrees, 'g')
+    assert [_head(wt) for wt in created] == [expected, expected]
+
+
+def test_new_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
+    origin = Repo.make(tmpdir.path / 'origin')
+    origin.commit_content('seed', datetime(2020, 1, 1))
+    local = Git.clone(origin.path, tmpdir.path / 'repo')
+    Repo(local.path).commit_content('local-ahead', datetime(2022, 1, 1))
+    expected = local.rev_parse('main', short=False)
+    assert expected != local.rev_parse('origin/main', short=False)
+    worktrees = tmpdir.path / 'worktrees'
+    created = new(local.path, worktrees, 'g')
+    assert [_head(wt) for wt in created] == [expected, expected]
+
+
+def test_new_uses_explicit_branch_start_point(tmpdir: TempDir) -> None:
+    repo = _seeded_repo(tmpdir)
+    repo('checkout', '-b', 'release')
+    release = repo.commit_content('release-work', short=False)
+    repo('checkout', 'main')
+    worktrees = tmpdir.path / 'worktrees'
+    created = new(repo.path, worktrees, 'g', branch='release')
+    assert [_head(wt) for wt in created] == [release, release]
+
+
+def test_new_falls_back_to_head_without_a_main_branch(tmpdir: TempDir) -> None:
+    repo = _seeded_repo(tmpdir)
+    repo('branch', '-m', 'main', 'trunk')  # no main, no origin/main
+    head = _head(repo.path)
+    worktrees = tmpdir.path / 'worktrees'
+    created = new(repo.path, worktrees, 'g')
+    assert [_head(wt) for wt in created] == [head, head]
+
+
 def test_new_refuses_repo_without_commits(tmpdir: TempDir) -> None:
     repo = Repo.make(tmpdir.path / 'repo')  # no commit → unborn HEAD
     worktrees = tmpdir.path / 'worktrees'
     with pytest.raises(RuntimeError, match='no commits'):
         new(repo.path, worktrees, 'g')
     assert not worktrees.exists()
+
+
+def test_new_refuses_bare_repo_without_commits(tmpdir: TempDir) -> None:
+    bare = tmpdir.path / 'bare.git'
+    Git(tmpdir.path)('init', '--bare', str(bare))  # no work tree, unborn HEAD
+    worktrees = tmpdir.path / 'worktrees'
+    with pytest.raises(RuntimeError, match='no commits'):
+        new(bare, worktrees, 'g')
 
 
 def test_goal_new_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,3 +124,16 @@ def test_goal_new_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.exit_code == 0
     assert (project / 'worktrees' / 'feature-x-human').is_dir()
     assert (project / 'worktrees' / 'feature-x-agent').is_dir()
+
+
+def test_goal_new_cli_branch_option(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _seeded_repo(tmpdir)
+    repo('checkout', '-b', 'release')
+    release = repo.commit_content('release-work', short=False)
+    repo('checkout', 'main')
+    project = tmpdir.makedir('project')
+    (project / 'config.yaml').write_text(f'repo: {repo.path}\n')
+    monkeypatch.chdir(project)
+    result = runner.invoke(app, ['goal', 'new', 'feature-x', '--branch', 'release'])
+    assert result.exit_code == 0
+    assert _head(project / 'worktrees' / 'feature-x-agent') == release

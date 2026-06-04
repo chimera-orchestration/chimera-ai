@@ -56,9 +56,17 @@ def _project() -> tuple[Path, Path]:
 
 
 @goal_app.command()
-def new(goal: Annotated[str, typer.Argument()]) -> None:
+def new(
+    goal: Annotated[str, typer.Argument()],
+    branch: Annotated[
+        str | None,
+        typer.Option(
+            '--branch', help='Start point for the branches (default: newest of main/origin/main)'
+        ),
+    ] = None,
+) -> None:
     repo, worktrees = _project()
-    for worktree in _goal_new(repo, worktrees, goal):
+    for worktree in _goal_new(repo, worktrees, goal, branch):
         typer.echo(f'Created {worktree}')
 
 
