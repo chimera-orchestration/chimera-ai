@@ -13,12 +13,31 @@ from chimera.commands.goal.new import new
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _no_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr('chimera.commands.goal.cleanup.live_sessions', lambda worktree: [])
+
+
 def _goal(tmpdir: TempDir) -> tuple[Repo, Path]:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     worktrees = tmpdir.path / 'worktrees'
     new(repo.path, worktrees, 'g')
     return repo, worktrees
+
+
+def test_cleanup_aborts_when_an_agent_is_running(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, worktrees = _goal(tmpdir)
+    monkeypatch.setattr(
+        'chimera.commands.goal.cleanup.live_sessions',
+        lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
+    )
+    with pytest.raises(RuntimeError, match='agent is live'):
+        cleanup(repo.path, worktrees, 'g', force=True)  # not even force bypasses it
+    assert (worktrees / 'g-human').is_dir()  # nothing removed
+    assert 'g/human' in Git(repo.path).branches()
 
 
 def test_cleanup_removes_worktrees_and_branches(tmpdir: TempDir) -> None:
