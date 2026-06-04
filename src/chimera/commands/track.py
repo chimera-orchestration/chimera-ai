@@ -8,6 +8,8 @@ _PROJECT_DIRS = ('knowledge', 'prompts', 'principles', 'processes')
 def track(workspace: Path, repo: Path) -> Path:
     """Register an existing checkout as a project in the workspace; return the project dir."""
     repo = repo.resolve()
+    if not repo.exists():
+        raise FileNotFoundError(repo)
     if not repo.is_dir():
         raise NotADirectoryError(repo)
     project = workspace / repo.name

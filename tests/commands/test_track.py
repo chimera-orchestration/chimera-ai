@@ -32,8 +32,15 @@ def test_track_is_idempotent(tmpdir: TempDir) -> None:
 
 def test_track_missing_repo_raises(tmpdir: TempDir) -> None:
     workspace = tmpdir.makedir('lycia')
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(FileNotFoundError):
         track(workspace, tmpdir.path / 'nope')
+
+
+def test_track_repo_not_a_dir_raises(tmpdir: TempDir) -> None:
+    workspace = tmpdir.makedir('lycia')
+    repo = tmpdir.write('afile', b'')
+    with pytest.raises(NotADirectoryError):
+        track(workspace, repo)
 
 
 def test_track_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
