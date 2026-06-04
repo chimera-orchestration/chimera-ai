@@ -1,0 +1,1 @@
+ROLES = ('human', 'agent')
