@@ -39,8 +39,8 @@ def goal() -> None:
 def new(goal: Annotated[str, typer.Argument()]) -> None:
     project = Path.cwd()
     repo = Path(yaml.safe_load((project / 'config.yaml').read_text())['repo'])
-    goal_dir = _goal_new(repo, project / 'worktrees', goal)
-    typer.echo(f'Created goal {goal} at {goal_dir}')
+    for worktree in _goal_new(repo, project / 'worktrees', goal):
+        typer.echo(f'Created {worktree}')
 
 
 if __name__ == '__main__':  # pragma: no cover

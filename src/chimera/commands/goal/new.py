@@ -5,15 +5,17 @@ from giterator import Git, GitError
 _ROLES = ('human', 'agent')
 
 
-def new(repo: Path, worktrees_root: Path, goal: str) -> Path:
-    """Create the goal dir with human and agent worktrees on <goal>/human and <goal>/agent."""
+def new(repo: Path, worktrees_root: Path, goal: str) -> list[Path]:
+    """Create <goal>-human and <goal>-agent worktrees on branches <goal>/human and <goal>/agent."""
     git = Git(repo)
     _require_commit(git, repo)
-    goal_dir = worktrees_root / goal
-    goal_dir.mkdir(parents=True, exist_ok=True)
+    worktrees_root.mkdir(parents=True, exist_ok=True)
+    created: list[Path] = []
     for role in _ROLES:
-        git('worktree', 'add', '-b', f'{goal}/{role}', str(goal_dir / role))
-    return goal_dir
+        worktree = worktrees_root / f'{goal}-{role}'
+        git('worktree', 'add', '-b', f'{goal}/{role}', str(worktree))
+        created.append(worktree)
+    return created
 
 
 def _require_commit(git: Git, repo: Path) -> None:
