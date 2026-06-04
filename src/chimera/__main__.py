@@ -66,8 +66,7 @@ def new(
     ] = None,
 ) -> None:
     repo, worktrees = _project()
-    for worktree in _goal_new(repo, worktrees, goal, branch):
-        typer.echo(f'Created {worktree}')
+    typer.echo(f'Created {_goal_new(repo, worktrees, goal, branch)}')
 
 
 @goal_app.command()

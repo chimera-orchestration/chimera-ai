@@ -1,1 +1,2 @@
-ROLES = ('human', 'agent')
+AGENT = 'agent'
+ROLES = ('human', AGENT)

@@ -22,26 +22,29 @@ def _head(path) -> str:
     return Git(path).rev_parse('HEAD', short=False)
 
 
-def test_new_creates_two_worktrees(tmpdir: TempDir) -> None:
+def _branch(repo_path, name: str) -> str:
+    return Git(repo_path).rev_parse(name, short=False)
+
+
+def test_new_creates_agent_worktree_and_both_branches(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     worktrees = tmpdir.path / 'worktrees'
     created = new(repo.path, worktrees, 'my-goal')
-    assert created == [worktrees / 'my-goal-human', worktrees / 'my-goal-agent']
-    assert (worktrees / 'my-goal-human').is_dir()
+    assert created == worktrees / 'my-goal-agent'
     assert (worktrees / 'my-goal-agent').is_dir()
+    assert not (worktrees / 'my-goal-human').exists()  # human branch has no worktree
     branches = Git(repo.path).branches()
     assert 'my-goal/human' in branches
     assert 'my-goal/agent' in branches
 
 
-def test_new_checks_out_the_role_branches(tmpdir: TempDir) -> None:
+def test_new_checks_out_the_agent_branch_in_its_worktree(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     worktrees = tmpdir.path / 'worktrees'
     new(repo.path, worktrees, 'g')
-    human = Git(worktrees / 'g-human')('rev-parse', '--abbrev-ref', 'HEAD').strip()
     agent = Git(worktrees / 'g-agent')('rev-parse', '--abbrev-ref', 'HEAD').strip()
-    assert human == 'g/human'
     assert agent == 'g/agent'
+    assert 'g/human' in Git(repo.path).branches()  # exists, but checked out nowhere
 
 
 def test_new_branches_from_main_not_checked_out_branch(tmpdir: TempDir) -> None:
@@ -52,7 +55,8 @@ def test_new_branches_from_main_not_checked_out_branch(tmpdir: TempDir) -> None:
     assert _head(repo.path) != main  # repo is parked on a different commit
     worktrees = tmpdir.path / 'worktrees'
     created = new(repo.path, worktrees, 'g')
-    assert [_head(wt) for wt in created] == [main, main]
+    assert _head(created) == main
+    assert _branch(repo.path, 'g/human') == main
 
 
 def test_new_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
@@ -65,7 +69,8 @@ def test_new_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
     assert expected != local.rev_parse('main', short=False)
     worktrees = tmpdir.path / 'worktrees'
     created = new(local.path, worktrees, 'g')
-    assert [_head(wt) for wt in created] == [expected, expected]
+    assert _head(created) == expected
+    assert _branch(local.path, 'g/human') == expected
 
 
 def test_new_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
@@ -77,7 +82,8 @@ def test_new_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
     assert expected != local.rev_parse('origin/main', short=False)
     worktrees = tmpdir.path / 'worktrees'
     created = new(local.path, worktrees, 'g')
-    assert [_head(wt) for wt in created] == [expected, expected]
+    assert _head(created) == expected
+    assert _branch(local.path, 'g/human') == expected
 
 
 def test_new_uses_explicit_branch_start_point(tmpdir: TempDir) -> None:
@@ -87,7 +93,8 @@ def test_new_uses_explicit_branch_start_point(tmpdir: TempDir) -> None:
     repo('checkout', 'main')
     worktrees = tmpdir.path / 'worktrees'
     created = new(repo.path, worktrees, 'g', branch='release')
-    assert [_head(wt) for wt in created] == [release, release]
+    assert _head(created) == release
+    assert _branch(repo.path, 'g/human') == release
 
 
 def test_new_falls_back_to_head_without_a_main_branch(tmpdir: TempDir) -> None:
@@ -96,7 +103,8 @@ def test_new_falls_back_to_head_without_a_main_branch(tmpdir: TempDir) -> None:
     head = _head(repo.path)
     worktrees = tmpdir.path / 'worktrees'
     created = new(repo.path, worktrees, 'g')
-    assert [_head(wt) for wt in created] == [head, head]
+    assert _head(created) == head
+    assert _branch(repo.path, 'g/human') == head
 
 
 def test_new_refuses_repo_without_commits(tmpdir: TempDir) -> None:
@@ -122,8 +130,9 @@ def test_goal_new_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(project)
     result = runner.invoke(app, ['goal', 'new', 'feature-x'])
     assert result.exit_code == 0
-    assert (project / 'worktrees' / 'feature-x-human').is_dir()
     assert (project / 'worktrees' / 'feature-x-agent').is_dir()
+    assert not (project / 'worktrees' / 'feature-x-human').exists()
+    assert 'feature-x/human' in Git(repo.path).branches()
 
 
 def test_goal_new_cli_branch_option(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:

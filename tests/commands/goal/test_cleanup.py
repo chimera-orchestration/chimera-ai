@@ -55,15 +55,14 @@ def test_cleanup_aborts_when_an_agent_is_running(
     )
     with pytest.raises(RuntimeError, match='agent is live'):
         cleanup(repo.path, worktrees, 'g', force=True)  # not even force bypasses it
-    assert (worktrees / 'g-human').is_dir()  # nothing removed
+    assert (worktrees / 'g-agent').is_dir()  # nothing removed
     assert 'g/human' in Git(repo.path).branches()
 
 
 def test_cleanup_removes_worktrees_and_branches(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
     removed = cleanup(repo.path, worktrees, 'g')
-    assert removed == [worktrees / 'g-human', worktrees / 'g-agent']
-    assert not (worktrees / 'g-human').exists()
+    assert removed == [worktrees / 'g-agent']  # only the agent has a worktree
     assert not (worktrees / 'g-agent').exists()
     branches = Git(repo.path).branches()
     assert 'g/human' not in branches
@@ -72,28 +71,27 @@ def test_cleanup_removes_worktrees_and_branches(tmpdir: TempDir) -> None:
 
 def test_cleanup_refuses_uncommitted_changes(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
-    (worktrees / 'g-human' / 'scratch.txt').write_text('wip')
+    (worktrees / 'g-agent' / 'scratch.txt').write_text('wip')
     with pytest.raises(RuntimeError, match='changes'):
         cleanup(repo.path, worktrees, 'g')
-    assert (worktrees / 'g-human').is_dir()
-    assert 'g/human' in Git(repo.path).branches()
+    assert (worktrees / 'g-agent').is_dir()
+    assert 'g/agent' in Git(repo.path).branches()
 
 
 def test_cleanup_refuses_unmerged_branch(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
-    Repo(worktrees / 'g-human').commit_content('work')  # branch now ahead of main
+    Repo(worktrees / 'g-agent').commit_content('work')  # branch now ahead of main
     with pytest.raises(RuntimeError, match='unmerged'):
         cleanup(repo.path, worktrees, 'g')
-    assert (worktrees / 'g-human').is_dir()
-    assert 'g/human' in Git(repo.path).branches()
+    assert (worktrees / 'g-agent').is_dir()
+    assert 'g/agent' in Git(repo.path).branches()
 
 
 def test_cleanup_force_discards_unsaved_work(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
-    Repo(worktrees / 'g-human').commit_content('work')  # unmerged
+    Repo(worktrees / 'g-agent').commit_content('work')  # unmerged
     (worktrees / 'g-agent' / 'scratch.txt').write_text('wip')  # uncommitted
     cleanup(repo.path, worktrees, 'g', force=True)
-    assert not (worktrees / 'g-human').exists()
     assert not (worktrees / 'g-agent').exists()
     branches = Git(repo.path).branches()
     assert 'g/human' not in branches
@@ -109,5 +107,5 @@ def test_goal_cleanup_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> N
     runner.invoke(app, ['goal', 'new', 'g'])
     result = runner.invoke(app, ['goal', 'cleanup', 'g'])
     assert result.exit_code == 0
-    assert not (project / 'worktrees' / 'g-human').exists()
+    assert not (project / 'worktrees' / 'g-agent').exists()
     assert 'g/human' not in Git(repo.path).branches()

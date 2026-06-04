@@ -2,11 +2,15 @@ from pathlib import Path
 
 from giterator import Git, GitError
 
-from chimera.commands.goal import ROLES
+from chimera.commands.goal import AGENT, ROLES
 
 
-def new(repo: Path, worktrees_root: Path, goal: str, branch: str | None = None) -> list[Path]:
-    """Create <goal>-human and <goal>-agent worktrees on branches <goal>/human and <goal>/agent.
+def new(repo: Path, worktrees_root: Path, goal: str, branch: str | None = None) -> Path:
+    """Create a branch per role (<goal>/human, <goal>/agent) and a worktree for the agent.
+
+    Only the agent gets a worktree, checked out at <goal>-agent on <goal>/agent;
+    the other roles' branches are created bare, to be checked out on demand.
+    Returns the agent worktree path.
 
     ``branch`` is the start point for the new branches. When omitted, it
     defaults to the most recently committed of local ``main`` and
@@ -16,13 +20,13 @@ def new(repo: Path, worktrees_root: Path, goal: str, branch: str | None = None) 
     git = Git(repo)
     _require_commit(git, repo)
     base = branch or _base_ref(git) or 'HEAD'
-    worktrees_root.mkdir(parents=True, exist_ok=True)
-    created: list[Path] = []
     for role in ROLES:
-        worktree = worktrees_root / f'{goal}-{role}'
-        git('worktree', 'add', '-b', f'{goal}/{role}', str(worktree), base)
-        created.append(worktree)
-    return created
+        if role != AGENT:
+            git('branch', f'{goal}/{role}', base)
+    worktrees_root.mkdir(parents=True, exist_ok=True)
+    agent_worktree = worktrees_root / f'{goal}-{AGENT}'
+    git('worktree', 'add', '-b', f'{goal}/{AGENT}', str(agent_worktree), base)
+    return agent_worktree
 
 
 def _base_ref(git: Git) -> str | None:

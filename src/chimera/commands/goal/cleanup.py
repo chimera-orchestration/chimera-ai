@@ -3,7 +3,7 @@ from pathlib import Path
 from giterator import Git, GitError
 
 from chimera.commands.agent import live_sessions
-from chimera.commands.goal import ROLES
+from chimera.commands.goal import AGENT, ROLES
 
 
 def cleanup(repo: Path, worktrees_root: Path, goal: str, force: bool = False) -> list[Path]:
@@ -14,7 +14,7 @@ def cleanup(repo: Path, worktrees_root: Path, goal: str, force: bool = False) ->
     agent is live in the agent worktree, even with force.
     """
     git = Git(repo)
-    _refuse_if_agent_running(worktrees_root / f'{goal}-agent')
+    _refuse_if_agent_running(worktrees_root / f'{goal}-{AGENT}')
     registered = _registered_worktrees(git)
     branches = set(git.branches())
     worktrees = [worktrees_root / f'{goal}-{role}' for role in ROLES]
