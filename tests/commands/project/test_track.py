@@ -4,7 +4,7 @@ from testfixtures import TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
-from chimera.commands.track import track
+from chimera.commands.project.track import track
 
 runner = CliRunner()
 
@@ -47,6 +47,6 @@ def test_track_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = tmpdir.makedir('lycia')
     repo = tmpdir.makedir('myrepo')
     monkeypatch.chdir(workspace)
-    result = runner.invoke(app, ['track', str(repo)])
+    result = runner.invoke(app, ['project', 'track', str(repo)])
     assert result.exit_code == 0
     assert (workspace / 'myrepo' / 'config.yaml').is_file()

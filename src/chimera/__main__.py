@@ -8,7 +8,7 @@ from chimera.commands.agent import agent as _agent
 from chimera.commands.goal.cleanup import cleanup as _goal_cleanup
 from chimera.commands.goal.new import new as _goal_new
 from chimera.commands.init import init as _init
-from chimera.commands.track import track as _track
+from chimera.commands.project.track import track as _track
 
 app = typer.Typer()
 
@@ -21,11 +21,6 @@ def callback() -> None:
 @app.command()
 def init(path: Annotated[Path, typer.Argument()]) -> None:
     typer.echo(f'Initialized workspace at {_init(path)}')
-
-
-@app.command()
-def track(path: Annotated[Path, typer.Argument()]) -> None:
-    typer.echo(f'Tracking {path} at {_track(Path.cwd(), path)}')
 
 
 @app.command()
@@ -80,6 +75,20 @@ def cleanup(
         typer.echo(f'Removed {worktree}')
     if not removed:
         typer.echo(f'Nothing to clean up for {goal}')
+
+
+project_app = typer.Typer()
+app.add_typer(project_app, name='project')
+
+
+@project_app.callback()
+def project() -> None:
+    """Manage projects."""
+
+
+@project_app.command()
+def track(path: Annotated[Path, typer.Argument()]) -> None:
+    typer.echo(f'Tracking {path} at {_track(Path.cwd(), path)}')
 
 
 if __name__ == '__main__':  # pragma: no cover

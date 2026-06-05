@@ -30,14 +30,14 @@ Three types, all with the same layout above — difference is where the repo liv
 
 | Type | Description | repo/ |
 |---|---|---|
-| **working** | Actively developed; agent worktree per goal (+ a bare {goal}/human branch) | `{project}/repo/` (ch add) or external path (ch track) |
+| **working** | Actively developed; agent worktree per goal (+ a bare {goal}/human branch) | `{project}/repo/` (ch add) or external path (ch project track) |
 | **knowledge** | Source repo checked out for knowledge extraction | same as working |
 | **reference** | No live checkout; only extracted knowledge tracked in lycia | absent |
 
 ## Adding projects
 
 - `ch add <git-url>` — clones into `{project}/repo/`, registers in `routes.jsonl`
-- `ch track <path>` — registers an existing checkout by path; repo stays in place
+- `ch project track <path>` — registers an existing checkout by path; repo stays in place
 
 Both commands:
 1. Create the project directory structure in lycia
