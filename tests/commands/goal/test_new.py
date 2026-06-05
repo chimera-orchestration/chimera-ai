@@ -86,6 +86,19 @@ def test_new_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
     assert _branch(local.path, 'g/human') == expected
 
 
+def test_new_branches_have_no_upstream_tracking(tmpdir: TempDir) -> None:
+    origin = Repo.make(tmpdir.path / 'origin')
+    origin.commit_content('seed', datetime(2020, 1, 1))
+    local = Git.clone(origin.path, tmpdir.path / 'repo')
+    origin.commit_content('remote-ahead', datetime(2022, 1, 1))
+    local('fetch', 'origin')  # base resolves to origin/main, a remote-tracking branch
+    worktrees = tmpdir.path / 'worktrees'
+    new(local.path, worktrees, 'g')
+    for branch in ('g/human', 'g/agent'):
+        upstream = local('for-each-ref', '--format=%(upstream)', f'refs/heads/{branch}').strip()
+        assert upstream == '', f'{branch} should have no upstream, got {upstream!r}'
+
+
 def test_new_uses_explicit_branch_start_point(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     repo('checkout', '-b', 'release')

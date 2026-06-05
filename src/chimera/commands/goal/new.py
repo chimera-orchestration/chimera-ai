@@ -22,10 +22,10 @@ def new(repo: Path, worktrees_root: Path, goal: str, branch: str | None = None) 
     base = branch or _base_ref(git) or 'HEAD'
     for role in ROLES:
         if role != AGENT:
-            git('branch', f'{goal}/{role}', base)
+            git('branch', '--no-track', f'{goal}/{role}', base)
     worktrees_root.mkdir(parents=True, exist_ok=True)
     agent_worktree = worktrees_root / f'{goal}-{AGENT}'
-    git('worktree', 'add', '-b', f'{goal}/{AGENT}', str(agent_worktree), base)
+    git('worktree', 'add', '--no-track', '-b', f'{goal}/{AGENT}', str(agent_worktree), base)
     return agent_worktree
 
 
