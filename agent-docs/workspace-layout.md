@@ -34,7 +34,7 @@ Three types, all with the same layout above — difference is where the repo liv
 | **knowledge** | Source repo checked out for knowledge extraction | same as working |
 | **reference** | No live checkout; only extracted knowledge tracked in lycia | absent |
 
-## Adding projects
+## Adding and removing projects
 
 - `ch add <git-url>` — clones into `{project}/repo/`, registers in `routes.jsonl`
 - `ch project track <path>` — registers an existing checkout by path; repo stays in place
@@ -43,6 +43,12 @@ Both commands:
 1. Create the project directory structure in lycia
 2. Assign a beads prefix and append to `routes.jsonl`
 3. Initialise `{project}/.beads/` as a new Dolt database
+
+`ch project forget <name>` (run in the workspace dir) removes a project directory.
+It refuses while the project still has goals — run `ch goal cleanup` on each first,
+or pass `--force` to clean up every goal (discarding unmerged/uncommitted work) and
+remove the project in one shot. A live agent in any worktree always aborts, even with
+`--force`. A tracked repo living outside the workspace is left untouched.
 
 ## Worktrees and beads isolation
 

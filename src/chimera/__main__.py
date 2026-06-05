@@ -8,6 +8,7 @@ from chimera.commands.agent import agent as _agent
 from chimera.commands.goal.cleanup import cleanup as _goal_cleanup
 from chimera.commands.goal.new import new as _goal_new
 from chimera.commands.init import init as _init
+from chimera.commands.project.forget import forget as _forget
 from chimera.commands.project.track import track as _track
 
 app = typer.Typer()
@@ -89,6 +90,15 @@ def project() -> None:
 @project_app.command()
 def track(path: Annotated[Path, typer.Argument()]) -> None:
     typer.echo(f'Tracking {path} at {_track(Path.cwd(), path)}')
+
+
+@project_app.command()
+def forget(
+    name: Annotated[str, typer.Argument()],
+    force: Annotated[bool, typer.Option('--force')] = False,
+) -> None:
+    removed = _forget(Path.cwd(), name, force)
+    typer.echo(f'Forgot {removed}' if removed else f'No project named {name} to forget')
 
 
 if __name__ == '__main__':  # pragma: no cover
