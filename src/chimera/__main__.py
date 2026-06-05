@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-import yaml
 
 from chimera.commands.agent import agent as _agent
 from chimera.commands.goal.cleanup import cleanup as _goal_cleanup
@@ -10,6 +9,7 @@ from chimera.commands.goal.new import new as _goal_new
 from chimera.commands.init import init as _init
 from chimera.commands.project.forget import forget as _forget
 from chimera.commands.project.track import track as _track
+from chimera.config import find_project, find_workspace
 
 app = typer.Typer()
 
@@ -29,7 +29,7 @@ def agent(
     goal: Annotated[str, typer.Argument()],
     prompt: Annotated[str | None, typer.Argument()] = None,
 ) -> None:
-    project = Path.cwd()
+    project, _config = find_project(Path.cwd())
     worktree = project / 'worktrees' / f'{goal}-agent'
     name = f'{project.name}-{goal}'
     _agent(worktree, name, prompt)
@@ -46,9 +46,8 @@ def goal() -> None:
 
 
 def _project() -> tuple[Path, Path]:
-    project = Path.cwd()
-    repo = Path(yaml.safe_load((project / 'config.yaml').read_text())['repo'])
-    return repo, project / 'worktrees'
+    project, config = find_project(Path.cwd())
+    return config.repo, project / 'worktrees'
 
 
 @goal_app.command()
@@ -89,7 +88,8 @@ def project() -> None:
 
 @project_app.command()
 def track(path: Annotated[Path, typer.Argument()]) -> None:
-    typer.echo(f'Tracking {path} at {_track(Path.cwd(), path)}')
+    workspace = find_workspace(Path.cwd())
+    typer.echo(f'Tracking {path} at {_track(workspace, path)}')
 
 
 @project_app.command()

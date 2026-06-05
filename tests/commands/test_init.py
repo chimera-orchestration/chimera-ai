@@ -14,6 +14,7 @@ def test_init_creates_workspace(tmpdir: TempDir) -> None:
     assert (path / '.git').is_dir()
     assert (path / 'processes').is_dir()
     assert (path / '.beads').is_dir()
+    assert (path / 'config.yaml').read_text() == 'kind: workspace\n'
 
 
 def test_init_gitignores_repos_and_worktrees(tmpdir: TempDir) -> None:

@@ -73,6 +73,7 @@ def test_live_sessions_queries_claude_by_cwd(
 
 def test_agent_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     project = tmpdir.makedir('myproject')
+    (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
     worktree = project / 'worktrees' / 'g-agent'
     worktree.mkdir(parents=True)
     calls = _stub(monkeypatch)
@@ -85,6 +86,7 @@ def test_agent_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_agent_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     project = tmpdir.makedir('myproject')
+    (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
     worktree = project / 'worktrees' / 'g-agent'
     worktree.mkdir(parents=True)
     calls = _stub(monkeypatch)

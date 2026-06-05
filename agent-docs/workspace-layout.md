@@ -5,13 +5,14 @@ The workspace is the project working space for Chimera (default name: `lycia`).
 ```
 ~/lycia/                        # git repo — tracks everything except gitignored dirs
   .gitignore                    # ignores: */repo/ */worktrees/
+  config.yaml                   # `kind: workspace` — marks the workspace root
   routes.jsonl                  # beads prefix routing table (workspace-level)
   .beads/                       # workspace-level beads DB (goals, cross-project tasks; prefix: ws-)
   processes/                    # workspace-wide process definitions
   principles/                   # workspace-wide principles
   knowledge/                    # workspace-wide extracted knowledge (plain markdown)
   {project}/
-    config.yaml                 # project metadata: type, repo path/url, beads prefix, etc.
+    config.yaml                 # `kind: project` + metadata: repo path/url, beads prefix, etc.
     .beads/                     # project beads DB (project tasks, agent beads; prefix: {project}-)
     knowledge/                  # project-specific extracted knowledge (tracked)
     prompts/                    # pre-computed agent context for this project (tracked)
@@ -33,6 +34,15 @@ Three types, all with the same layout above — difference is where the repo liv
 | **working** | Actively developed; agent worktree per goal (+ a bare {goal}/human branch) | `{project}/repo/` (ch add) or external path (ch project track) |
 | **knowledge** | Source repo checked out for knowledge extraction | same as working |
 | **reference** | No live checkout; only extracted knowledge tracked in lycia | absent |
+
+## Locating the workspace and project
+
+Commands resolve where they are by walking up from cwd, reading each `config.yaml`'s
+`kind` (see `chimera.config`):
+- workspace commands (`ch project track`) find the nearest `kind: workspace` — they refuse outside one
+- project commands (`ch goal`, `ch agent`) find the nearest `kind: project`
+
+`config.yaml` is the only marker; depth/naming is never assumed.
 
 ## Adding and removing projects
 

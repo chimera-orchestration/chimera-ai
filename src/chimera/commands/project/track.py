@@ -2,6 +2,8 @@ from pathlib import Path
 
 import yaml
 
+from chimera.config import ProjectConfig
+
 _PROJECT_DIRS = ('knowledge', 'prompts', 'principles', 'processes')
 
 
@@ -15,5 +17,6 @@ def track(workspace: Path, repo: Path) -> Path:
     project = workspace / repo.name
     for sub in _PROJECT_DIRS:
         (project / sub).mkdir(parents=True, exist_ok=True)
-    (project / 'config.yaml').write_text(yaml.safe_dump({'repo': str(repo)}))
+    config = ProjectConfig(kind='project', repo=repo)
+    (project / 'config.yaml').write_text(yaml.safe_dump(config.model_dump(mode='json')))
     return project

@@ -19,7 +19,7 @@ def test_track_creates_project_layout(tmpdir: TempDir) -> None:
     for sub in _DIRS:
         assert (project / sub).is_dir()
     config = yaml.safe_load((project / 'config.yaml').read_text())
-    assert config == {'repo': str(repo.resolve())}
+    assert config == {'kind': 'project', 'repo': str(repo.resolve())}
 
 
 def test_track_is_idempotent(tmpdir: TempDir) -> None:
@@ -27,7 +27,10 @@ def test_track_is_idempotent(tmpdir: TempDir) -> None:
     repo = tmpdir.makedir('myrepo')
     track(workspace, repo)
     project = track(workspace, repo)
-    assert yaml.safe_load((project / 'config.yaml').read_text()) == {'repo': str(repo.resolve())}
+    assert yaml.safe_load((project / 'config.yaml').read_text()) == {
+        'kind': 'project',
+        'repo': str(repo.resolve()),
+    }
 
 
 def test_track_missing_repo_raises(tmpdir: TempDir) -> None:
@@ -45,8 +48,17 @@ def test_track_repo_not_a_dir_raises(tmpdir: TempDir) -> None:
 
 def test_track_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = tmpdir.makedir('lycia')
+    (workspace / 'config.yaml').write_text('kind: workspace\n')
     repo = tmpdir.makedir('myrepo')
     monkeypatch.chdir(workspace)
     result = runner.invoke(app, ['project', 'track', str(repo)])
     assert result.exit_code == 0
     assert (workspace / 'myrepo' / 'config.yaml').is_file()
+
+
+def test_track_cli_outside_a_workspace(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmpdir.makedir('myrepo')
+    monkeypatch.chdir(tmpdir.path)  # no workspace config.yaml anywhere above
+    result = runner.invoke(app, ['track', str(repo)])
+    assert result.exit_code != 0
+    assert not (tmpdir.path / 'myrepo' / 'config.yaml').is_file()  # nothing written

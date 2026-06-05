@@ -38,7 +38,7 @@ def test_goal_cleanup_cli_reports_nothing_to_do(
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     project = tmpdir.makedir('project')
-    (project / 'config.yaml').write_text(f'repo: {repo.path}\n')
+    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
     monkeypatch.chdir(project)
     result = runner.invoke(app, ['goal', 'cleanup', 'ghost'])
     assert result.exit_code == 0
@@ -102,7 +102,7 @@ def test_goal_cleanup_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> N
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     project = tmpdir.makedir('project')
-    (project / 'config.yaml').write_text(f'repo: {repo.path}\n')
+    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
     monkeypatch.chdir(project)
     runner.invoke(app, ['goal', 'new', 'g'])
     result = runner.invoke(app, ['goal', 'cleanup', 'g'])

@@ -126,7 +126,7 @@ def test_new_refuses_bare_repo_without_commits(tmpdir: TempDir) -> None:
 def test_goal_new_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _seeded_repo(tmpdir)
     project = tmpdir.makedir('project')
-    (project / 'config.yaml').write_text(f'repo: {repo.path}\n')
+    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
     monkeypatch.chdir(project)
     result = runner.invoke(app, ['goal', 'new', 'feature-x'])
     assert result.exit_code == 0
@@ -141,7 +141,7 @@ def test_goal_new_cli_branch_option(tmpdir: TempDir, monkeypatch: pytest.MonkeyP
     release = repo.commit_content('release-work', short=False)
     repo('checkout', 'main')
     project = tmpdir.makedir('project')
-    (project / 'config.yaml').write_text(f'repo: {repo.path}\n')
+    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
     monkeypatch.chdir(project)
     result = runner.invoke(app, ['goal', 'new', 'feature-x', '--branch', 'release'])
     assert result.exit_code == 0
