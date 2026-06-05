@@ -4,6 +4,8 @@ from typing import Annotated
 import typer
 
 from chimera.commands.agent import agent as _agent
+from chimera.commands.doctor import Finding
+from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.cleanup import cleanup as _goal_cleanup
 from chimera.commands.goal.new import new as _goal_new
 from chimera.commands.init import init as _init
@@ -22,6 +24,29 @@ def callback() -> None:
 @app.command()
 def init(path: Annotated[Path, typer.Argument()]) -> None:
     typer.echo(f'Initialized workspace at {_init(path)}')
+
+
+@app.command()
+def doctor(
+    path: Annotated[Path | None, typer.Argument()] = None,
+    fix: Annotated[
+        bool, typer.Option('--fix', help='Apply the fixes instead of only reporting')
+    ] = False,
+) -> None:
+    findings = _doctor(path or Path.cwd(), fix)
+    if not findings:
+        typer.echo('All checks passed!')
+        return
+    for finding in findings:
+        typer.echo(f'[{finding.check}] {finding.message} ({_tag(finding)})')
+    if any(not finding.resolved for finding in findings):
+        raise typer.Exit(1)
+
+
+def _tag(finding: Finding) -> str:
+    if finding.resolved:
+        return 'fixed'
+    return 'would fix — run with --fix' if finding.fixable else 'needs attention'
 
 
 @app.command()

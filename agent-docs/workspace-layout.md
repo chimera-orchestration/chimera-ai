@@ -44,6 +44,21 @@ Commands resolve where they are by walking up from cwd, reading each `config.yam
 
 `config.yaml` is the only marker; depth/naming is never assumed.
 
+## Keeping a workspace healthy
+
+`ch doctor [path]` (default cwd, treated as the workspace root — no walking up, since the root
+marker may be the thing that's missing) reports drift from the current schema/layout; `--fix`
+applies the repairs. It's a registry of independent checks (`chimera.commands.doctor`, add/retire
+via the `CHECKS` tuple). Current checks:
+- **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates
+  pre-marker workspaces and legacy `repo:`-only project configs)
+- **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-role layout when
+  clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
+- **orphaned-worktrees** — prune stale git worktree registrations; flag untracked dirs under
+  `worktrees/`
+
+Reports findings and exits non-zero while any remain unresolved.
+
 ## Adding and removing projects
 
 - `ch add <git-url>` — clones into `{project}/repo/`, registers in `routes.jsonl`
