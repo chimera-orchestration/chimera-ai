@@ -2,6 +2,32 @@ from pathlib import Path
 
 from giterator import Git, GitError
 
+AGENT = 'agent'
+HUMAN = 'human'
+ACTORS = (HUMAN, AGENT)
+"""The default actor set: ``human`` works on a bare branch, ``agent`` in a worktree."""
+
+
+def branch(goal: str, actor: str) -> str:
+    """The branch name for an actor on a goal: ``<goal>/<actor>``."""
+    return f'{goal}/{actor}'
+
+
+def worktree_path(root: Path, goal: str, actor: str) -> Path:
+    """The worktree directory for an actor on a goal: ``<root>/<goal>-<actor>``."""
+    return root / f'{goal}-{actor}'
+
+
+def worktree_dirs(root: Path) -> list[Path]:
+    """Worktree directories present under root, sorted."""
+    return sorted(child for child in root.iterdir() if child.is_dir()) if root.is_dir() else []
+
+
+def goals(root: Path) -> set[str]:
+    """Goal names present under root, derived from each goal's ``<goal>-agent`` worktree."""
+    suffix = f'-{AGENT}'
+    return {d.name.removesuffix(suffix) for d in worktree_dirs(root) if d.name.endswith(suffix)}
+
 
 def registered_worktrees(git: Git) -> set[Path]:
     """The worktree paths git knows about for repo, resolved."""

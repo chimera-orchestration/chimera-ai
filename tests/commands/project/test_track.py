@@ -51,7 +51,7 @@ def test_track_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     (workspace / 'config.yaml').write_text('kind: workspace\n')
     repo = tmpdir.makedir('myrepo')
     monkeypatch.chdir(workspace)
-    result = runner.invoke(app, ['project', 'track', str(repo)])
+    result = runner.invoke(app, ['project', 'add', str(repo)])
     assert result.exit_code == 0
     assert (workspace / 'myrepo' / 'config.yaml').is_file()
 
@@ -59,6 +59,6 @@ def test_track_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_track_cli_outside_a_workspace(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = tmpdir.makedir('myrepo')
     monkeypatch.chdir(tmpdir.path)  # no workspace config.yaml anywhere above
-    result = runner.invoke(app, ['project', 'track', str(repo)])
+    result = runner.invoke(app, ['project', 'add', str(repo)])
     assert result.exit_code != 0
     assert not (tmpdir.path / 'myrepo' / 'config.yaml').is_file()  # nothing written

@@ -14,7 +14,12 @@ def track(workspace: Path, repo: Path) -> Path:
         raise FileNotFoundError(repo)
     if not repo.is_dir():
         raise NotADirectoryError(repo)
-    project = workspace / repo.name
+    return register(workspace, repo.name, repo)
+
+
+def register(workspace: Path, name: str, repo: Path) -> Path:
+    """Scaffold project dir <name> and write its config pointing at repo; return the dir."""
+    project = workspace / name
     for sub in _PROJECT_DIRS:
         (project / sub).mkdir(parents=True, exist_ok=True)
     config = ProjectConfig(kind='project', repo=repo)
