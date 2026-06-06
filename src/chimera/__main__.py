@@ -14,8 +14,7 @@ from chimera.commands.project.ls import projects as _projects
 from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.rm import remove as _worktree_remove
-from chimera.config import find_workspace
-from chimera.context import resolve_project
+from chimera.context import resolve_goal, resolve_project, resolve_workspace
 from chimera.worktrees import ACTORS, AGENT, goals, worktree_dirs, worktree_path
 
 app = typer.Typer()
@@ -24,6 +23,10 @@ app = typer.Typer()
 ProjectOpt = Annotated[
     str | None, typer.Option('--project', '-p', help='Project name (default: inferred from cwd)')
 ]
+GoalOpt = Annotated[
+    str | None, typer.Option('--goal', '-g', help='Goal (default: inferred from cwd/branch)')
+]
+ActorOpt = Annotated[str, typer.Option('--actor', '-a', help='Actor (default: agent)')]
 FromOpt = Annotated[
     str | None, typer.Option('--from', help='Start ref (default: newest of main/origin/main)')
 ]
@@ -78,18 +81,18 @@ app.add_typer(project_app, name='project')
 def project_add(
     source: Annotated[str, typer.Argument(help='Git URL to clone, or local path to track')],
 ) -> None:
-    typer.echo(f'Added {_project_add(find_workspace(Path.cwd()), source)}')
+    typer.echo(f'Added {_project_add(resolve_workspace(Path.cwd()), source)}')
 
 
 @project_app.command('rm')
 def project_rm(name: Annotated[str, typer.Argument()], force: ForceOpt = False) -> None:
-    removed = _project_remove(find_workspace(Path.cwd()), name, force)
+    removed = _project_remove(resolve_workspace(Path.cwd()), name, force)
     typer.echo(f'Removed {removed}' if removed else f'No project named {name} to remove')
 
 
 @project_app.command('ls')
 def project_ls() -> None:
-    for name in _projects(find_workspace(Path.cwd())):
+    for name in _projects(resolve_workspace(Path.cwd())):
         typer.echo(name)
 
 
@@ -161,14 +164,15 @@ app.add_typer(agent_app, name='agent')
 
 @agent_app.command('start')
 def agent_start(
-    goal: Annotated[str, typer.Argument()],
-    actor: Annotated[str, typer.Argument()] = AGENT,
+    goal: GoalOpt = None,
+    actor: ActorOpt = AGENT,
     prompt: PromptOpt = None,
     project: ProjectOpt = None,
 ) -> None:
     p = resolve_project(Path.cwd(), project)
-    worktree = worktree_path(p.worktrees, goal, actor)
-    _agent(worktree, f'{p.name}-{goal}-{actor}', prompt)
+    g = resolve_goal(Path.cwd(), p, goal)
+    worktree = worktree_path(p.worktrees, g, actor)
+    _agent(worktree, f'{p.name}-{g}-{actor}', prompt)
     typer.echo(f'Launched agent in {worktree}')
 
 

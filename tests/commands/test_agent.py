@@ -100,7 +100,7 @@ def _project_with_worktree(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> 
 def test_agent_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     _project_with_worktree(tmpdir, monkeypatch)
     calls = _stub(monkeypatch)
-    result = runner.invoke(app, ['agent', 'start', 'g'])
+    result = runner.invoke(app, ['agent', 'start', '-g', 'g'])
     assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g-agent'  # cwd resolves symlinks like the wrapper
     assert calls == [(['claude', '--name', 'myproject-g-agent'], expected, True)]
@@ -109,10 +109,20 @@ def test_agent_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> No
 def test_agent_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     _project_with_worktree(tmpdir, monkeypatch)
     calls = _stub(monkeypatch)
-    result = runner.invoke(app, ['agent', 'start', 'g', '--prompt', 'do it'])
+    result = runner.invoke(app, ['agent', 'start', '-g', 'g', '--prompt', 'do it'])
     assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g-agent'
     assert calls == [(['claude', '--bg', '--name', 'myproject-g-agent', 'do it'], expected, True)]
+
+
+def test_agent_start_cli_with_actor(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project_with_worktree(tmpdir, monkeypatch)
+    (project / 'worktrees' / 'g-reviewer').mkdir()
+    calls = _stub(monkeypatch)
+    result = runner.invoke(app, ['agent', 'start', '-g', 'g', '-a', 'reviewer'])
+    assert result.exit_code == 0
+    expected = Path.cwd() / 'worktrees' / 'g-reviewer'
+    assert calls == [(['claude', '--name', 'myproject-g-reviewer'], expected, True)]
 
 
 def test_agent_ls_cli_lists_live_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
