@@ -33,16 +33,24 @@ Three types, all with the same layout above — difference is where the repo liv
 |---|---|---|
 | **working** | Actively developed; agent worktree per goal (+ a bare {goal}/human branch) | `{project}/repo/` (ch project add <url>) or external path (ch project add <path>) |
 | **knowledge** | Source repo checked out for knowledge extraction | same as working |
-| **reference** | No live checkout; only extracted knowledge tracked in lycia | absent |
+| **reference** | No live checkout; only extracted knowledge tracked in the workspace | absent |
 
-## Locating the workspace and project
+## Locating the workspace, project, goal and actor
 
-Commands resolve where they are by walking up from cwd, reading each `config.yaml`'s
-`kind` (see `chimera.config`):
-- workspace commands (`ch project …`) find the nearest `kind: workspace` — they refuse outside one
-- project commands (`ch goal`, `ch worktree`, `ch agent`) find the nearest `kind: project`, unless `-p/--project <name>` names one under the workspace
+Commands resolve four axes (see `chimera.context`), each with an explicit override:
 
-`config.yaml` is the only marker; depth/naming is never assumed.
+- **workspace** — `$CHIMERA_WORKSPACE` if set (the norm; it's in the user's shell profile),
+  else walk up from cwd to the nearest `kind: workspace`.
+- **project** — `-p/--project <name>` (under the workspace), else walk up to the nearest
+  `kind: project`, else (from a checkout outside the workspace) match the git repo's identity
+  against each project's `repo:`.
+- **goal** — `-g/--goal`, else inferred from a managed worktree dir (`<goal>-<actor>`) or, in a
+  checkout, from the branch *only* when it is exactly `<goal>/<actor>` for an existing goal; else required.
+- **actor** — `-a/--actor`, else inferred from the same dir/branch token; defaults to `agent`.
+
+`config.yaml` `kind` is the only on-disk marker; depth/naming is never assumed. The branch is
+trusted for goal/actor only when it matches the `<goal>/<actor>` shape — never for a review or
+feature branch.
 
 ## Keeping a workspace healthy
 
@@ -66,7 +74,7 @@ Reports findings and exits non-zero while any remain unresolved.
 - a local path — registers an existing checkout by path; repo stays in place
 
 Both paths:
-1. Create the project directory structure in lycia
+1. Create the project directory structure in the workspace
 2. Assign a beads prefix and append to `routes.jsonl`
 3. Initialise `{project}/.beads/` as a new Dolt database
 
@@ -109,10 +117,10 @@ Refuses if the repo has no commits (nothing to branch from) — including bare r
 - Per-project issues: `{project}-` prefix, isolated Dolt DB
 - Cross-project references resolved via `routes.jsonl`
 
-## What lycia's git tracks vs ignores
+## What the workspace's git tracks vs ignores
 
 **Tracked:** `config.yaml`, `knowledge/`, `prompts/`, `principles/`, `processes/`, `.beads/` metadata, `routes.jsonl`
 
 **Gitignored:** `*/repo/` (live clones), `*/worktrees/` (git worktrees with nested `.git` files)
 
-Worktrees and clones stay inside the workspace directory for locality, but are excluded from lycia's git to avoid submodule detection.
+Worktrees and clones stay inside the workspace directory for locality, but are excluded from the workspace's git to avoid submodule detection.
