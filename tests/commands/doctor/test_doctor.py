@@ -6,7 +6,7 @@ from testfixtures import TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
-from chimera.commands.doctor import doctor
+from chimera.commands.doctor import doctor, find_workspace_root
 from chimera.commands.doctor.core import Finding
 from chimera.config import NotInWorkspaceError
 
@@ -31,15 +31,41 @@ def _ws(tmpdir: TempDir):
     return ws
 
 
-def test_doctor_raises_outside_a_workspace(tmpdir: TempDir) -> None:
-    with pytest.raises(NotInWorkspaceError):
-        doctor(tmpdir.path)  # no .beads / processes / config.yaml
+def _project(ws, *, name='proj', config='repo: /some/repo\n'):
+    project = ws / name
+    project.mkdir()
+    (project / 'config.yaml').write_text(config)
+    return project
 
 
-def test_doctor_runs_when_only_a_config_marks_the_root(tmpdir: TempDir) -> None:
+def test_find_workspace_root_at_a_marked_root(tmpdir: TempDir) -> None:
     root = tmpdir.makedir('ws')
     (root / 'config.yaml').write_text('kind: workspace\n')
-    assert doctor(root, checks=()) == []  # evidence via config.yaml alone
+    assert find_workspace_root(root) == root
+
+
+def test_find_workspace_root_by_legacy_evidence(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)  # .beads/, no config yet
+    assert find_workspace_root(ws) == ws
+
+
+def test_find_workspace_root_navigates_up_from_a_project(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    (ws / 'config.yaml').write_text('kind: workspace\n')
+    project = _project(ws)
+    assert find_workspace_root(project) == ws
+
+
+def test_find_workspace_root_skips_a_project_even_when_mislabeled(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    (ws / 'config.yaml').write_text('kind: workspace\n')
+    project = _project(ws, config='kind: workspace\nrepo: /some/repo\n')  # corrupted
+    assert find_workspace_root(project) == ws  # repo: marks it a project, walk past it
+
+
+def test_find_workspace_root_raises_when_none(tmpdir: TempDir) -> None:
+    with pytest.raises(NotInWorkspaceError):
+        find_workspace_root(tmpdir.path)  # no .beads / processes / config.yaml
 
 
 def test_doctor_aggregates_findings_and_passes_fix_through(tmpdir: TempDir) -> None:
@@ -84,3 +110,17 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir) -> None:
     result = runner.invoke(app, ['doctor', str(ws), '--fix'])
     assert result.exit_code == 1
     assert 'needs attention' in result.output
+
+
+def test_doctor_cli_navigates_from_a_project(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _ws(tmpdir)
+    (ws / 'config.yaml').write_text('kind: workspace\n')
+    project = _project(ws, name='chimera')  # legacy repo:-only config
+    monkeypatch.chdir(project)  # the mistake: doctor run inside the project
+    result = runner.invoke(app, ['doctor', '--fix'])
+    assert result.exit_code == 0
+    assert f'resolved workspace root: {ws.resolve()}' in result.output
+    config = yaml.safe_load((project / 'config.yaml').read_text())
+    assert config == {'kind': 'project', 'repo': '/some/repo'}  # fixed, not corrupted

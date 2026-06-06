@@ -4,7 +4,7 @@ from typing import Annotated
 import typer
 
 from chimera.commands.agent import agent as _agent
-from chimera.commands.doctor import Finding
+from chimera.commands.doctor import Finding, find_workspace_root
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.cleanup import cleanup as _goal_cleanup
 from chimera.commands.goal.new import new as _goal_new
@@ -33,7 +33,11 @@ def doctor(
         bool, typer.Option('--fix', help='Apply the fixes instead of only reporting')
     ] = False,
 ) -> None:
-    findings = _doctor(path or Path.cwd(), fix)
+    target = (path or Path.cwd()).resolve()
+    root = find_workspace_root(target)
+    if root != target:
+        typer.echo(f'note: resolved workspace root: {root}')
+    findings = _doctor(root, fix)
     if not findings:
         typer.echo('All checks passed!')
         return
