@@ -94,6 +94,15 @@ def test_workspace_config_wrong_kind_not_fixable(tmpdir: TempDir) -> None:
     assert _config(ws) == {'kind': 'project'}  # left untouched
 
 
+def test_workspace_config_with_repo_is_not_stamped(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    (ws / 'config.yaml').write_text('repo: /some/repo\n')  # a project config, not a root
+    [finding] = _run(WorkspaceConfigCheck(), ws, fix=True)
+    assert not finding.fixable and not finding.resolved
+    assert 'looks like a project' in finding.message
+    assert _config(ws) == {'repo': '/some/repo'}  # never gets kind: workspace
+
+
 # --- ProjectConfigCheck ---
 
 
@@ -113,12 +122,24 @@ def test_project_config_already_current_is_silent(tmpdir: TempDir) -> None:
     assert _run(ProjectConfigCheck(), ws) == []
 
 
-def test_project_config_unexpected_kind_not_fixable(tmpdir: TempDir) -> None:
+def test_project_config_wrong_kind_with_repo_fixed(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    _project(ws, repo.path, kind='workspace')
-    [finding] = _run(ProjectConfigCheck(), ws)
-    assert not finding.fixable
+    project = _project(ws, repo.path, kind='workspace')  # repo: proves it's a project
+    [finding] = _run(ProjectConfigCheck(), ws, fix=True)
+    assert finding.resolved
+    assert 'repo: marks it a project' in finding.message
+    assert _config(project) == {'kind': 'project', 'repo': str(repo.path)}
+
+
+def test_project_config_unexpected_kind_without_repo_not_fixable(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    project = ws / 'weird'
+    project.mkdir()
+    (project / 'config.yaml').write_text('kind: bogus\n')  # no repo to disambiguate
+    [finding] = _run(ProjectConfigCheck(), ws, fix=True)
+    assert not finding.fixable and not finding.resolved
+    assert 'unexpected kind: bogus' in finding.message
 
 
 def test_project_config_no_kind_no_repo_not_fixable(tmpdir: TempDir) -> None:

@@ -21,6 +21,15 @@ class WorkspaceConfigCheck:
 
     def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
         raw = read_raw(workspace)
+        if raw and 'repo' in raw:
+            # repo: belongs to a project — never stamp kind: workspace onto it.
+            yield Finding(
+                self.name,
+                f'{workspace}/config.yaml looks like a project (has repo:), not a workspace root',
+                False,
+                False,
+            )
+            return
         kind = raw.get('kind') if raw else None
         if kind == 'workspace':
             return
@@ -49,14 +58,24 @@ class ProjectConfigCheck:
             kind = raw.get('kind')
             if kind == 'project':
                 continue
-            if kind is not None:
+            if 'repo' in raw:
+                # repo: is the authoritative project signal — set the right kind,
+                # dropping any wrong one (e.g. a stray kind: workspace).
+                if fix:
+                    write_config(
+                        project,
+                        {'kind': 'project', **{k: v for k, v in raw.items() if k != 'kind'}},
+                    )
+                problem = (
+                    'missing kind: project'
+                    if kind is None
+                    else f'has kind: {kind} but repo: marks it a project'
+                )
+                yield Finding(self.name, f'{project}/config.yaml {problem}', fix, True)
+            elif kind is not None:
                 yield Finding(
                     self.name, f'{project}/config.yaml has unexpected kind: {kind}', False, False
                 )
-            elif 'repo' in raw:
-                if fix:
-                    write_config(project, {'kind': 'project', **raw})
-                yield Finding(self.name, f'{project}/config.yaml missing kind: project', fix, True)
             else:
                 yield Finding(
                     self.name, f'{project}/config.yaml has no kind and no repo', False, False
