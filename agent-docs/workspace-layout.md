@@ -52,7 +52,7 @@ spots by the `repo:` key in their `config.yaml` — then reports drift from the 
 add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates
   pre-marker workspaces and legacy `repo:`-only project configs)
-- **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-role layout when
+- **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **orphaned-worktrees** — prune stale git worktree registrations; flag untracked dirs under
   `worktrees/`
@@ -77,7 +77,9 @@ remove the project in one shot. A live agent in any worktree always aborts, even
 
 ## Worktrees and beads isolation
 
-`ch goal new <goal>` (run in the project dir; repo read from `config.yaml`) creates a branch `{goal}/{role}` for each `role` in `human`, `agent`, but only a worktree for the agent:
+Naming pattern (see core concepts): each actor gets branch `{goal}/{actor}`; agents additionally get worktree `{goal}-{actor}`.
+
+`ch goal new <goal>` (run in the project dir; repo read from `config.yaml`) creates a branch `{goal}/{actor}` for each `actor` in `human`, `agent`, but only a worktree for the agent:
 1. `git branch {goal}/human <base>` — a bare branch, no worktree (the human checks it out where they like)
 2. `git worktree add worktrees/{goal}-agent -b {goal}/agent <base>` from the project repo
 3. Write `worktrees/{goal}-agent/.beads/redirect` → `../../.beads`

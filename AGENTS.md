@@ -10,13 +10,16 @@ Chimera orchestrates AI agents working on goals across projects. It manages a wo
 - **Project** — a project managed by Chimera within a workspace
 - **Goal** — a thing that needs doing (e.g. "implement feature X")
 - **Task** — a tracked unit of work, discovered while planning or executing a goal
+- **Actor** — a participant in a goal: a **human** or an **agent**. Each works on its own **branch**; an agent additionally always works in a **worktree** (a human checks their branch out wherever they like).
+- **Branch** — a git branch named `<goal>/<actor>`
+- **Worktree** — a git worktree named `<goal>-<actor>` (agents only)
 - **Process** — an ordered sequence of steps to complete a task
 - **Step** — a single atomic thing that must be done, tracked in a bead
 - **Principle** — context an agent must load before beginning a process, task or step
 - **Knowledge** — named, versioned context loaded on demand (e.g. "load knowledge for testfixtures")
 - **Reference** — a project used only for tracking knowledge
 - **Service** — a long-running system process managed by Chimera (e.g. dolt sql-server, tmux session); distinct from the workflow concept "Process"
-- **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera
+- **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera; always works in a **worktree**
 
 ## Principles
 
