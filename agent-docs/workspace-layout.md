@@ -18,7 +18,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
     prompts/                    # pre-computed agent context for this project (tracked)
     principles/                 # project-specific principles (tracked)
     processes/                  # project-specific processes (tracked)
-    repo/                       # gitignored — clone managed by Chimera (ch add only)
+    repo/                       # gitignored — clone managed by Chimera (ch project add only)
     worktrees/                  # gitignored — one worktree per goal (agent only)
       {goal}-agent/             # git worktree on branch {goal}/agent
         .beads/redirect         # → ../../.beads (routes to project beads DB)
@@ -31,7 +31,7 @@ Three types, all with the same layout above — difference is where the repo liv
 
 | Type | Description | repo/ |
 |---|---|---|
-| **working** | Actively developed; agent worktree per goal (+ a bare {goal}/human branch) | `{project}/repo/` (ch add) or external path (ch project track) |
+| **working** | Actively developed; agent worktree per goal (+ a bare {goal}/human branch) | `{project}/repo/` (ch project add <url>) or external path (ch project add <path>) |
 | **knowledge** | Source repo checked out for knowledge extraction | same as working |
 | **reference** | No live checkout; only extracted knowledge tracked in lycia | absent |
 
@@ -39,8 +39,8 @@ Three types, all with the same layout above — difference is where the repo liv
 
 Commands resolve where they are by walking up from cwd, reading each `config.yaml`'s
 `kind` (see `chimera.config`):
-- workspace commands (`ch project track`) find the nearest `kind: workspace` — they refuse outside one
-- project commands (`ch goal`, `ch agent`) find the nearest `kind: project`
+- workspace commands (`ch project …`) find the nearest `kind: workspace` — they refuse outside one
+- project commands (`ch goal`, `ch worktree`, `ch agent`) find the nearest `kind: project`, unless `-p/--project <name>` names one under the workspace
 
 `config.yaml` is the only marker; depth/naming is never assumed.
 
@@ -61,31 +61,35 @@ Reports findings and exits non-zero while any remain unresolved.
 
 ## Adding and removing projects
 
-- `ch add <git-url>` — clones into `{project}/repo/`, registers in `routes.jsonl`
-- `ch project track <path>` — registers an existing checkout by path; repo stays in place
+`ch project add <url|path>` (run anywhere in the workspace) dispatches on its argument:
+- a git URL — clones into `{project}/repo/`, registers in `routes.jsonl`
+- a local path — registers an existing checkout by path; repo stays in place
 
-Both commands:
+Both paths:
 1. Create the project directory structure in lycia
 2. Assign a beads prefix and append to `routes.jsonl`
 3. Initialise `{project}/.beads/` as a new Dolt database
 
-`ch project forget <name>` (run in the workspace dir) removes a project directory.
-It refuses while the project still has goals — run `ch goal cleanup` on each first,
-or pass `--force` to clean up every goal (discarding unmerged/uncommitted work) and
-remove the project in one shot. A live agent in any worktree always aborts, even with
-`--force`. A tracked repo living outside the workspace is left untouched.
+`ch project rm <name>` removes a project directory. It refuses while the project
+still has goals — run `ch goal finish` on each first, or pass `--force` to finish
+every goal (discarding unmerged/uncommitted work) and remove the project in one
+shot. A live agent in any worktree always aborts, even with `--force`. A tracked
+repo living outside the workspace is left untouched. `ch project ls` lists tracked
+projects.
 
 ## Worktrees and beads isolation
 
 Naming pattern (see core concepts): each actor gets branch `{goal}/{actor}`; agents additionally get worktree `{goal}-{actor}`.
 
-`ch goal new <goal>` (run in the project dir; repo read from `config.yaml`) creates a branch `{goal}/{actor}` for each `actor` in `human`, `agent`, but only a worktree for the agent:
-1. `git branch {goal}/human <base>` — a bare branch, no worktree (the human checks it out where they like)
-2. `git worktree add worktrees/{goal}-agent -b {goal}/agent <base>` from the project repo
+`ch worktree add <goal> [actor…]` (the primitive; repo read from `config.yaml`) creates a branch `{goal}/{actor}` for each actor (default `human`, `agent`), but only a worktree for non-human actors:
+1. `git branch --no-track {goal}/human <base>` — a bare branch, no worktree (the human checks it out where they like)
+2. `git worktree add --no-track worktrees/{goal}-agent -b {goal}/agent <base>` from the project repo
 3. Write `worktrees/{goal}-agent/.beads/redirect` → `../../.beads`
 4. Append `.beads/` to the worktree's `.git/info/exclude` — keeps Chimera's beads invisible to the upstream project's git, even if the project also uses beads
 
-`<base>` is the start point for both branches: `--branch <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out), falling back to `HEAD` if neither exists.
+`<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out), falling back to `HEAD` if neither exists. Branches are created with no upstream tracking.
+
+`ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background with `--prompt`). `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches.
 
 Refuses if the repo has no commits (nothing to branch from) — including bare repos. All agents on the same goal share the project's beads DB via the redirect; no beads state leaks into upstream commits.
 
