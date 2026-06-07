@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 
 from chimera.commands.agent import agent as _agent
-from chimera.commands.agent import all_sessions
+from chimera.commands.agent import agents
 from chimera.commands.doctor import CHECKS, Finding, resolve_root
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.start import start as _goal_start
@@ -242,11 +242,14 @@ def agent_start(
 
 @agent_app.command('ls')
 def agent_ls() -> None:
-    sessions = all_sessions()
-    for session in sessions:
-        typer.echo(f'{session["sessionId"]} {session["status"]}')
-    if not sessions:
+    listing = agents()
+    if not listing:
         typer.echo('No agents running')
+        return
+    name_w = max(len(a.name) for a in listing)
+    status_w = max(len(a.status) for a in listing)
+    for a in listing:
+        typer.echo(f'{a.name:<{name_w}}  {a.status:<{status_w}}  {a.summary or ""}'.rstrip())
 
 
 def _report_removed(removed: list[Path], goal: str) -> None:
