@@ -249,7 +249,7 @@ def agent_ls() -> None:
     name_w = max(len(a.name) for a in listing)
     status_w = max(len(a.status) for a in listing)
     for a in listing:
-        typer.echo(f'{a.name:<{name_w}}  {a.status:<{status_w}}  {a.summary or ""}'.rstrip())
+        typer.echo(f'{a.name:<{name_w}}  {a.status:<{status_w}}  {a.detail}'.rstrip())
 
 
 def _report_removed(removed: list[Path], goal: str) -> None:

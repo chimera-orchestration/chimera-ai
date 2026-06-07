@@ -1,3 +1,4 @@
+import os
 import subprocess
 from collections.abc import Iterable
 from pathlib import Path
@@ -125,64 +126,80 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, monkeypatch: pytest.MonkeyP
     assert calls == [(['claude', '--name', 'myproject@g@reviewer'], expected, True)]
 
 
-def test_last_prompt_reads_most_recent_prompt(tmpdir: TempDir) -> None:
+def _transcript(folder: Path, name: str, body: str, mtime: float) -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    f = folder / name
+    f.write_text(body)
+    os.utime(f, (mtime, mtime))
+    return f
+
+
+def test_last_prompt_reads_newest_transcript_for_cwd(tmpdir: TempDir) -> None:
     projects = tmpdir.makedir('projects')
-    transcript = projects / 'a-project' / 'sess.jsonl'
-    transcript.parent.mkdir()
-    transcript.write_text(
+    folder = projects / '-work-proj'  # munged from the cwd below
+    _transcript(folder, 'old.jsonl', '{"type": "last-prompt", "lastPrompt": "stale"}\n', 1000)
+    _transcript(
+        folder,
+        'live.jsonl',
         '{"type": "user", "message": "hi"}\n'
         '{"type": "last-prompt", "lastPrompt": "fix\\nthe   bug"}\n'
         '\n'  # blank lines are skipped (this one is reached first, in reverse)
-        '{"type": "assistant", "message": "ok"}\n'
+        '{"type": "assistant", "message": "ok"}\n',
+        2000,
     )
-    assert last_prompt('sess', projects) == 'fix the bug'
+    assert last_prompt('/work/proj', projects) == 'fix the bug'
 
 
-def test_last_prompt_when_no_transcript(tmpdir: TempDir) -> None:
-    assert last_prompt('missing', tmpdir.path) is None
+def test_last_prompt_when_no_folder(tmpdir: TempDir) -> None:
+    assert last_prompt('/work/proj', tmpdir.path) is None
 
 
 def test_last_prompt_when_transcript_has_no_prompt(tmpdir: TempDir) -> None:
     projects = tmpdir.makedir('projects')
-    transcript = projects / 'p' / 'sess.jsonl'
-    transcript.parent.mkdir()
-    transcript.write_text('{"type": "user", "message": "hi"}\n')
-    assert last_prompt('sess', projects) is None
+    _transcript(projects / '-work-proj', 'sess.jsonl', '{"type": "user", "message": "hi"}\n', 1000)
+    assert last_prompt('/work/proj', projects) is None
 
 
-def test_agents_enriches_sessions_with_name_and_summary(
+def test_agents_enriches_sessions_with_name_cwd_and_summary(
     tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     projects = tmpdir.makedir('projects')
-    transcript = projects / 'p' / 'named.jsonl'
-    transcript.parent.mkdir()
-    transcript.write_text('{"type": "last-prompt", "lastPrompt": "do the thing"}\n')
+    _transcript(
+        projects / '-work-proj', 'a.jsonl', '{"type": "last-prompt", "lastPrompt": "do it"}\n', 1000
+    )
     monkeypatch.setattr(
         'chimera.commands.agent.all_sessions',
         lambda: [
-            {'sessionId': 'named', 'status': 'busy', 'name': 'proj@goal@agent'},
-            {'sessionId': 'bare', 'status': 'idle'},  # no name → falls back to sessionId
+            {'sessionId': 'x', 'status': 'busy', 'name': 'proj@goal@agent', 'cwd': '/work/proj'},
+            {'sessionId': 'bare', 'status': 'idle', 'cwd': '/elsewhere'},  # no name, no transcript
         ],
     )
     assert agents(projects) == [
-        Agent(name='proj@goal@agent', status='busy', summary='do the thing'),
-        Agent(name='bare', status='idle', summary=None),
+        Agent(name='proj@goal@agent', status='busy', cwd=Path('/work/proj'), summary='do it'),
+        Agent(name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
     ]
+
+
+def test_agent_detail_falls_back_to_tilde_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, 'home', classmethod(lambda cls: Path('/home/me')))
+    assert Agent('n', 'idle', Path('/home/me/work'), 'a prompt').detail == 'a prompt'
+    assert Agent('n', 'idle', Path('/home/me/work'), None).detail == '~/work'
+    assert Agent('n', 'idle', Path('/other'), None).detail == '/other'
 
 
 def test_agent_ls_cli_lists_agents(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         'chimera.__main__.agents',
         lambda: [
-            Agent(name='proj@goal@agent', status='busy', summary='fix the bug'),
-            Agent(name='other', status='idle', summary=None),
+            Agent(name='proj@goal@agent', status='busy', cwd=Path('/x'), summary='fix the bug'),
+            Agent(name='other', status='idle', cwd=Path('/srv/thing'), summary=None),
         ],
     )
     result = runner.invoke(app, ['agent', 'ls'])
     assert result.exit_code == 0
     assert result.output.splitlines() == [
         'proj@goal@agent  busy  fix the bug',
-        'other            idle',
+        'other            idle  /srv/thing',
     ]
 
 

@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,11 +7,21 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class Agent:
-    """A live agent: its name, status and most recent prompt (a one-line summary)."""
+    """A live agent: its name, status, working directory and most recent prompt."""
 
     name: str
     status: str
+    cwd: Path
     summary: str | None
+
+    @property
+    def detail(self) -> str:
+        """One-line description: the last prompt, falling back to the cwd."""
+        if self.summary:
+            return self.summary
+        home = str(Path.home())
+        cwd = str(self.cwd)
+        return '~' + cwd[len(home) :] if cwd.startswith(home) else cwd
 
 
 def agents(projects: Path | None = None) -> list[Agent]:
@@ -23,22 +34,31 @@ def agents(projects: Path | None = None) -> list[Agent]:
         Agent(
             name=str(session.get('name') or session['sessionId']),
             status=str(session['status']),
-            summary=last_prompt(str(session['sessionId']), projects),
+            cwd=Path(str(session['cwd'])),
+            summary=last_prompt(str(session['cwd']), projects),
         )
         for session in all_sessions()
     ]
 
 
-def last_prompt(session_id: str, projects: Path | None = None) -> str | None:
-    """The session's most recent prompt, collapsed to a single line, or ``None``."""
+def last_prompt(cwd: str, projects: Path | None = None) -> str | None:
+    """The most recent prompt of the live session in ``cwd``, collapsed to one line.
+
+    Claude stores each session's transcript under a per-cwd folder of ``projects``
+    (``~/.claude/projects`` by default). The live session's reported id rarely names
+    its transcript (background agents resume under fresh ids), so we read the newest
+    transcript in that folder — the one currently being appended to — and return its
+    ``last-prompt`` record. ``None`` when the folder or record is absent.
+    """
     projects = projects if projects is not None else Path.home() / '.claude' / 'projects'
-    for transcript in projects.glob(f'*/{session_id}.jsonl'):
-        for line in reversed(transcript.read_text().splitlines()):
-            if not line.strip():
-                continue
-            record = json.loads(line)
-            if record.get('type') == 'last-prompt':
-                return ' '.join(str(record['lastPrompt']).split())
+    folder = projects / re.sub(r'[^a-zA-Z0-9]', '-', cwd)
+    transcripts = sorted(folder.glob('*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+    for line in reversed(transcripts[0].read_text().splitlines()) if transcripts else ():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        if record.get('type') == 'last-prompt':
+            return ' '.join(str(record['lastPrompt']).split())
     return None
 
 
