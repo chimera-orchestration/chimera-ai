@@ -7,6 +7,7 @@ from giterator.testing import Repo
 from testfixtures import TempDir
 
 from chimera.commands.doctor.checks import (
+    LegacyWorktreeSeparatorCheck,
     OrphanedWorktreeCheck,
     ProjectConfigCheck,
     StaleHumanWorktreeCheck,
@@ -247,6 +248,101 @@ def test_human_worktree_ignores_unregistered_dir(tmpdir: TempDir) -> None:
     project = _project(ws, repo.path)
     (project / 'worktrees' / 'leftover-human').mkdir()  # looks human, not a worktree
     assert _run(StaleHumanWorktreeCheck(), ws, fix=True) == []
+
+
+# --- LegacyWorktreeSeparatorCheck ---
+
+
+def _legacy_worktree(repo, project, goal, actor='agent', *, dirty=False):
+    worktree = project / 'worktrees' / f'{goal}-{actor}'  # old dash-joined dir name
+    Git(repo.path)('worktree', 'add', '-b', f'{goal}/{actor}', str(worktree), 'main')
+    if dirty:
+        (worktree / 'scratch.txt').write_text('wip')
+    return worktree
+
+
+def test_legacy_separator_migrated(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    repo = _repo(tmpdir)
+    project = _project(ws, repo.path)
+    _legacy_worktree(repo, project, 'my-goal')
+    [finding] = _run(LegacyWorktreeSeparatorCheck(), ws, fix=True)
+    assert finding.resolved
+    canonical = (project / 'worktrees' / 'my-goal@agent').resolve()
+    assert canonical.is_dir()
+    assert not (project / 'worktrees' / 'my-goal-agent').exists()
+    assert canonical in registered_worktrees(Git(repo.path))
+
+
+def test_legacy_separator_report_only_leaves_it(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    repo = _repo(tmpdir)
+    project = _project(ws, repo.path)
+    _legacy_worktree(repo, project, 'my-goal')
+    [finding] = _run(LegacyWorktreeSeparatorCheck(), ws)
+    assert finding.fixable and not finding.resolved
+    assert (project / 'worktrees' / 'my-goal-agent').is_dir()
+
+
+def test_legacy_separator_preserves_uncommitted_work(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    repo = _repo(tmpdir)
+    project = _project(ws, repo.path)
+    _legacy_worktree(repo, project, 'my-goal', dirty=True)
+    _run(LegacyWorktreeSeparatorCheck(), ws, fix=True)
+    assert (project / 'worktrees' / 'my-goal@agent' / 'scratch.txt').read_text() == 'wip'
+
+
+def test_legacy_separator_migrates_non_human_actors(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    repo = _repo(tmpdir)
+    project = _project(ws, repo.path)
+    _legacy_worktree(repo, project, 'g', actor='reviewer')
+    [finding] = _run(LegacyWorktreeSeparatorCheck(), ws, fix=True)
+    assert finding.resolved
+    assert (project / 'worktrees' / 'g@reviewer').is_dir()
+
+
+def test_legacy_separator_ignores_human_worktrees(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    repo = _repo(tmpdir)
+    project = _project(ws, repo.path)
+    _human_worktree(repo, project, 'g')  # the human-worktrees check owns these
+    assert _run(LegacyWorktreeSeparatorCheck(), ws) == []
+
+
+def test_legacy_separator_skips_already_canonical(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    repo = _repo(tmpdir)
+    project = _project(ws, repo.path)
+    worktree = project / 'worktrees' / 'g@agent'
+    Git(repo.path)('worktree', 'add', '-b', 'g/agent', str(worktree), 'main')
+    assert _run(LegacyWorktreeSeparatorCheck(), ws, fix=True) == []
+
+
+def test_legacy_separator_skips_project_without_a_live_repo(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    project = _project(ws, ws / 'proj' / 'repo')  # repo path doesn't exist
+    (project / 'worktrees' / 'g-agent').mkdir()
+    assert _run(LegacyWorktreeSeparatorCheck(), ws) == []
+
+
+def test_legacy_separator_ignores_non_goal_actor_branch(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    repo = _repo(tmpdir)
+    project = _project(ws, repo.path)
+    worktree = project / 'worktrees' / 'sidequest'
+    Git(repo.path)('worktree', 'add', '-b', 'sidequest', str(worktree), 'main')  # no <goal>/<actor>
+    assert _run(LegacyWorktreeSeparatorCheck(), ws, fix=True) == []
+
+
+def test_legacy_separator_skips_stale_registration(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    repo = _repo(tmpdir)
+    project = _project(ws, repo.path)
+    worktree = _legacy_worktree(repo, project, 'g')
+    shutil.rmtree(worktree)  # registered but the dir is gone — can't read its branch
+    assert _run(LegacyWorktreeSeparatorCheck(), ws) == []
 
 
 # --- OrphanedWorktreeCheck ---

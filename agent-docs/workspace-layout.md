@@ -69,6 +69,9 @@ add/retire via the `CHECKS` tuple). Current checks:
   pre-marker workspaces and legacy `repo:`-only project configs)
 - **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
+- **worktree-separator** — rename legacy dash-joined `{goal}-{actor}` worktree dirs to `{goal}@{actor}`
+  via `git worktree move` (keyed off each worktree's `{goal}/{actor}` branch, so the boundary is never
+  guessed; preserves uncommitted work; humans are left to the human-worktrees check)
 - **orphaned-worktrees** — prune stale git worktree registrations; flag untracked dirs under
   `worktrees/`
 - **workspace-env** — `$CHIMERA_WORKSPACE` is set and points at this workspace; not auto-fixable

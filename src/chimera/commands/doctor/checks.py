@@ -12,7 +12,7 @@ from chimera.commands.doctor.core import (
     read_raw,
     write_config,
 )
-from chimera.worktrees import is_dirty, is_merged, registered_worktrees
+from chimera.worktrees import HUMAN, is_dirty, is_merged, registered_worktrees, worktree_path
 
 
 class WorkspaceConfigCheck:
@@ -114,6 +114,48 @@ class StaleHumanWorktreeCheck:
                 yield Finding(self.name, f'stale human worktree {worktree}', fix, True)
 
 
+class LegacyWorktreeSeparatorCheck:
+    """Agent worktree dirs use <goal>@<actor>, migrating the legacy <goal>-<actor>."""
+
+    name = 'worktree-separator'
+
+    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+        for project in iter_project_dirs(workspace):
+            repo = project_repo(project)
+            worktrees_dir = project / 'worktrees'
+            if repo is None or not repo.is_dir() or not worktrees_dir.is_dir():
+                continue
+            git = Git(repo)
+            root = worktrees_dir.resolve()
+            for worktree in sorted(p for p in registered_worktrees(git) if p.parent == root):
+                canonical = _canonical_worktree(worktree)
+                if canonical is None or canonical == worktree:
+                    continue
+                if fix:
+                    git('worktree', 'move', str(worktree), str(canonical))
+                yield Finding(
+                    self.name, f'legacy worktree {worktree.name} → {canonical.name}', fix, True
+                )
+
+
+def _canonical_worktree(worktree: Path) -> Path | None:
+    """Where worktree should live given its <goal>/<actor> branch; None if it has none.
+
+    A missing dir (a stale registration) is the orphaned-worktrees check's concern.
+    Human worktrees return None too — the human-worktrees check removes rather than
+    renames them.
+    """
+    if not worktree.is_dir():
+        return None
+    branch = Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip()
+    if '/' not in branch:  # detached HEAD or a plain branch — not a managed worktree
+        return None
+    goal, actor = branch.rsplit('/', 1)
+    if actor == HUMAN:
+        return None
+    return worktree_path(worktree.parent, goal, actor)
+
+
 class OrphanedWorktreeCheck:
     """Git's worktree registrations and the worktrees/ dir agree with each other."""
 
@@ -167,6 +209,7 @@ CHECKS: tuple[Check, ...] = (
     WorkspaceConfigCheck(),
     ProjectConfigCheck(),
     StaleHumanWorktreeCheck(),
+    LegacyWorktreeSeparatorCheck(),
     OrphanedWorktreeCheck(),
     WorkspaceEnvCheck(),
 )
