@@ -21,6 +21,20 @@ the function callable from Python:
 - `goal: Annotated[str, typer.Argument()]`  ✓  default stays a real value
 - `goal: str = typer.Argument()`             ✗  default becomes a Typer sentinel
 
+## Synonyms
+
+A group may accept synonyms for a command (e.g. `goal new` → `goal start`,
+`goal cleanup` → `goal finish`). Two rules, no exceptions:
+- **`--help` shows only the canonical name** — synonyms never appear.
+- **only the canonical name is logged** — a synonym must dispatch to the canonical
+  command, never run as a command of its own.
+
+`alias_group({...})` (in `__main__.py`) gives both: pass it as the group's `cls=`.
+It resolves the synonym in `get_command`, so the real (canonical) command runs and
+the synonym stays out of the command list. Add one by extending the dict. A synonym
+must not collide with a real command name (a test enforces this; the canonical
+command would win anyway).
+
 ## Testing
 
 - Put logic depth in pure-function tests — assert on return values / raised exceptions.

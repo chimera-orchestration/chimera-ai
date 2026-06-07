@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from typer._click.core import Command, Context
+from typer.core import TyperGroup
 
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import agents
@@ -66,6 +68,24 @@ def _context(
 
 def _overrides(ctx: typer.Context) -> Overrides:
     return ctx.ensure_object(Overrides)
+
+
+def alias_group(aliases: dict[str, str]) -> type[TyperGroup]:
+    """Build a group class whose synonyms resolve to canonical commands.
+
+    A synonym dispatches to the real command but never shows in --help, and the
+    command that runs is always the canonical one — so only the canonical name is
+    logged. Add synonyms by extending the dict: alias_group({'new': 'start'}).
+    See agent-docs/commands.md.
+    """
+
+    class AliasGroup(TyperGroup):
+        synonyms = aliases
+
+        def get_command(self, ctx: Context, cmd_name: str) -> Command | None:
+            return super().get_command(ctx, aliases.get(cmd_name, cmd_name))
+
+    return AliasGroup
 
 
 def _project(ctx: typer.Context, explicit: str | None) -> Project:
@@ -180,7 +200,11 @@ def worktree_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
         typer.echo(worktree)
 
 
-goal_app = typer.Typer(callback=_context, help='Work on goals.')
+goal_app = typer.Typer(
+    callback=_context,
+    cls=alias_group({'new': 'start', 'cleanup': 'finish'}),
+    help='Work on goals.',
+)
 app.add_typer(goal_app, name='goal')
 
 
