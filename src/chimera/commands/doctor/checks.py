@@ -1,3 +1,4 @@
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -140,9 +141,32 @@ class OrphanedWorktreeCheck:
                         )
 
 
+class WorkspaceEnvCheck:
+    """$CHIMERA_WORKSPACE is exported and points at this workspace."""
+
+    name = 'workspace-env'
+
+    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+        export = f'export CHIMERA_WORKSPACE="{workspace}"'
+        hint = 'add to your shell profile (~/.zshrc, ~/.bashrc, ~/.profile):'
+        env = os.environ.get('CHIMERA_WORKSPACE')
+        if env is None:
+            yield Finding(
+                self.name, f'$CHIMERA_WORKSPACE is not set — {hint}\n    {export}', False, False
+            )
+        elif Path(env).expanduser().resolve() != workspace.resolve():
+            yield Finding(
+                self.name,
+                f'$CHIMERA_WORKSPACE is {env}, not this workspace — {hint}\n    {export}',
+                False,
+                False,
+            )
+
+
 CHECKS: tuple[Check, ...] = (
     WorkspaceConfigCheck(),
     ProjectConfigCheck(),
     StaleHumanWorktreeCheck(),
     OrphanedWorktreeCheck(),
+    WorkspaceEnvCheck(),
 )

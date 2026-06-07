@@ -5,7 +5,7 @@ import typer
 
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import all_sessions
-from chimera.commands.doctor import Finding, find_workspace_root
+from chimera.commands.doctor import CHECKS, Finding, find_workspace_root
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.init import init as _init
@@ -52,17 +52,27 @@ def doctor(
     fix: Annotated[
         bool, typer.Option('--fix', help='Apply the fixes instead of only reporting')
     ] = False,
+    verbose: Annotated[
+        bool, typer.Option('--verbose', '-v', help='Show every check, including the ones that pass')
+    ] = False,
 ) -> None:
     target = (path or Path.cwd()).resolve()
     root = find_workspace_root(target)
     if root != target:
         typer.echo(f'note: resolved workspace root: {root}')
     findings = _doctor(root, fix)
+    by_check: dict[str, list[Finding]] = {}
+    for finding in findings:
+        by_check.setdefault(finding.check, []).append(finding)
+    for check in CHECKS:
+        reported = by_check.get(check.name)
+        if reported:
+            for finding in reported:
+                typer.echo(f'[{finding.check}] ({_tag(finding)}) {finding.message}')
+        elif verbose:
+            typer.echo(f'[{check.name}] (ok)')
     if not findings:
         typer.echo('All checks passed!')
-        return
-    for finding in findings:
-        typer.echo(f'[{finding.check}] {finding.message} ({_tag(finding)})')
     if any(not finding.resolved for finding in findings):
         raise typer.Exit(1)
 

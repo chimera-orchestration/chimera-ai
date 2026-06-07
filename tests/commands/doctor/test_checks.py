@@ -1,5 +1,6 @@
 import shutil
 
+import pytest
 import yaml
 from giterator import Git
 from giterator.testing import Repo
@@ -10,6 +11,7 @@ from chimera.commands.doctor.checks import (
     ProjectConfigCheck,
     StaleHumanWorktreeCheck,
     WorkspaceConfigCheck,
+    WorkspaceEnvCheck,
 )
 from chimera.commands.doctor.core import Check, Finding
 from chimera.worktrees import registered_worktrees
@@ -101,6 +103,39 @@ def test_workspace_config_with_repo_is_not_stamped(tmpdir: TempDir) -> None:
     assert not finding.fixable and not finding.resolved
     assert 'looks like a project' in finding.message
     assert _config(ws) == {'repo': '/some/repo'}  # never gets kind: workspace
+
+
+# --- WorkspaceEnvCheck ---
+
+
+def test_workspace_env_unset_reports_export_line(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _ws(tmpdir)
+    monkeypatch.delenv('CHIMERA_WORKSPACE', raising=False)
+    [finding] = _run(WorkspaceEnvCheck(), ws)
+    assert not finding.fixable and not finding.resolved
+    assert 'not set' in finding.message
+    assert f'export CHIMERA_WORKSPACE="{ws}"' in finding.message
+
+
+def test_workspace_env_set_to_this_workspace_is_silent(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _ws(tmpdir)
+    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    assert _run(WorkspaceEnvCheck(), ws) == []
+
+
+def test_workspace_env_pointing_elsewhere_reported(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _ws(tmpdir)
+    monkeypatch.setenv('CHIMERA_WORKSPACE', str(tmpdir.makedir('other')))
+    [finding] = _run(WorkspaceEnvCheck(), ws)
+    assert not finding.fixable and not finding.resolved
+    assert 'not this workspace' in finding.message
+    assert f'export CHIMERA_WORKSPACE="{ws}"' in finding.message
 
 
 # --- ProjectConfigCheck ---

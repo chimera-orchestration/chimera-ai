@@ -56,7 +56,8 @@ feature branch.
 
 `ch doctor [path]` (default cwd) walks up to the workspace root — skipping project dirs, which it
 spots by the `repo:` key in their `config.yaml` — then reports drift from the current schema/layout;
-`--fix` applies the repairs. It's a registry of independent checks (`chimera.commands.doctor`,
+`--fix` applies the repairs; `--verbose`/`-v` also prints the checks that pass (`[name] (ok)`).
+It's a registry of independent checks (`chimera.commands.doctor`,
 add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates
   pre-marker workspaces and legacy `repo:`-only project configs)
@@ -64,6 +65,9 @@ add/retire via the `CHECKS` tuple). Current checks:
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **orphaned-worktrees** — prune stale git worktree registrations; flag untracked dirs under
   `worktrees/`
+- **workspace-env** — `$CHIMERA_WORKSPACE` is set and points at this workspace; not auto-fixable
+  (never touches your shell profile) — the finding prints the `export …` line to add to
+  `~/.zshrc`/`~/.bashrc`/`~/.profile`
 
 Reports findings and exits non-zero while any remain unresolved.
 
