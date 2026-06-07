@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -6,7 +7,7 @@ import typer
 
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import all_sessions
-from chimera.commands.doctor import CHECKS, Finding, find_workspace_root
+from chimera.commands.doctor import CHECKS, Finding, resolve_root
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.init import init as _init
@@ -91,9 +92,9 @@ def doctor(
         bool, typer.Option('--verbose', '-v', help='Show every check, including the ones that pass')
     ] = False,
 ) -> None:
-    target = (path or Path.cwd()).resolve()
-    root = find_workspace_root(target)
-    if root != target:
+    anchor = (path or Path.cwd()).resolve()
+    root = resolve_root(path, Path.cwd(), os.environ.get('CHIMERA_WORKSPACE'))
+    if root != anchor:
         typer.echo(f'note: resolved workspace root: {root}')
     findings = _doctor(root, fix)
     by_check: dict[str, list[Finding]] = {}

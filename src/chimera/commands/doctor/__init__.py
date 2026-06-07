@@ -5,7 +5,7 @@ from chimera.commands.doctor.checks import CHECKS
 from chimera.commands.doctor.core import Check, Finding, read_raw
 from chimera.config import NotInWorkspaceError
 
-__all__ = ['CHECKS', 'Check', 'Finding', 'doctor', 'find_workspace_root']
+__all__ = ['CHECKS', 'Check', 'Finding', 'doctor', 'find_workspace_root', 'resolve_root']
 
 
 def doctor(workspace: Path, fix: bool = False, checks: Sequence[Check] = CHECKS) -> list[Finding]:
@@ -17,6 +17,21 @@ def doctor(workspace: Path, fix: bool = False, checks: Sequence[Check] = CHECKS)
     for check in checks:
         findings.extend(check.run(workspace, fix))
     return findings
+
+
+def resolve_root(path: Path | None, cwd: Path, env: str | None) -> Path:
+    """The workspace root doctor should check, by precedence.
+
+    An explicit ``path`` wins; else ``$CHIMERA_WORKSPACE`` (trusted as given — doctor's
+    job is to repair a misconfigured root, so it doesn't re-validate it); else walk up
+    from ``cwd``. This mirrors ``chimera.context.resolve_workspace`` so doctor agrees
+    with every other command about which workspace it's looking at.
+    """
+    if path is not None:
+        return find_workspace_root(path.resolve())
+    if env:
+        return Path(env).expanduser().resolve()
+    return find_workspace_root(cwd.resolve())
 
 
 def find_workspace_root(start: Path) -> Path:

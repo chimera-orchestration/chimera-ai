@@ -6,7 +6,7 @@ from testfixtures import TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
-from chimera.commands.doctor import doctor, find_workspace_root
+from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
 from chimera.commands.doctor.core import Finding
 from chimera.config import NotInWorkspaceError
 
@@ -66,6 +66,25 @@ def test_find_workspace_root_skips_a_project_even_when_mislabeled(tmpdir: TempDi
 def test_find_workspace_root_raises_when_none(tmpdir: TempDir) -> None:
     with pytest.raises(NotInWorkspaceError):
         find_workspace_root(tmpdir.path)  # no .beads / processes / config.yaml
+
+
+def test_resolve_root_prefers_explicit_path(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    (ws / 'config.yaml').write_text('kind: workspace\n')
+    elsewhere = tmpdir.makedir('elsewhere')
+    assert resolve_root(ws, cwd=elsewhere, env=str(elsewhere)) == ws.resolve()
+
+
+def test_resolve_root_trusts_env_over_walking_up(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    outside = tmpdir.makedir('outside')  # not under any workspace
+    assert resolve_root(None, cwd=outside, env=str(ws)) == ws.resolve()
+
+
+def test_resolve_root_walks_up_without_env(tmpdir: TempDir) -> None:
+    ws = _ws(tmpdir)
+    (ws / 'config.yaml').write_text('kind: workspace\n')
+    assert resolve_root(None, cwd=ws, env=None) == ws.resolve()
 
 
 def test_doctor_aggregates_findings_and_passes_fix_through(tmpdir: TempDir) -> None:
