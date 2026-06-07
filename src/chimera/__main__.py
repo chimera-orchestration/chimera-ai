@@ -187,7 +187,10 @@ app.add_typer(goal_app, name='goal')
 def goal_start(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
-    prompt: PromptOpt = None,
+    prompt: Annotated[
+        str | None,
+        typer.Argument(help='Prompt; its presence runs the agent in background'),
+    ] = None,
     frm: FromOpt = None,
     project: ProjectOpt = None,
 ) -> None:

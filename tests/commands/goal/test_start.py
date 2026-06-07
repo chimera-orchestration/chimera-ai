@@ -71,6 +71,20 @@ def test_goal_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls == [(expected, 'project-feature-x-agent', None)]
 
 
+def test_goal_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _seeded_repo(tmpdir)
+    _project(tmpdir, repo, monkeypatch)
+    calls: list[object] = []
+    monkeypatch.setattr(
+        'chimera.commands.goal.start.agent',
+        lambda worktree, name, prompt=None: calls.append((worktree, name, prompt)),
+    )
+    result = runner.invoke(app, ['goal', 'start', 'feature-x', 'go build it'])
+    assert result.exit_code == 0
+    expected = Path.cwd() / 'worktrees' / 'feature-x-agent'
+    assert calls == [(expected, 'project-feature-x-agent', 'go build it')]
+
+
 def test_goal_ls_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _seeded_repo(tmpdir)
     _project(tmpdir, repo, monkeypatch)
