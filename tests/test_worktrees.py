@@ -10,6 +10,7 @@ from chimera.worktrees import (
     is_dirty,
     is_merged,
     registered_worktrees,
+    session_name,
     worktree_dirs,
     worktree_path,
 )
@@ -25,15 +26,19 @@ def test_branch_names_the_actor_under_the_goal() -> None:
     assert branch('my-goal', 'agent') == 'my-goal/agent'
 
 
-def test_worktree_path_joins_goal_and_actor_with_a_dash() -> None:
-    assert worktree_path(Path('/wt'), 'my-goal', 'agent') == Path('/wt/my-goal-agent')
+def test_worktree_path_joins_goal_and_actor_with_an_at_sign() -> None:
+    assert worktree_path(Path('/wt'), 'my-goal', 'agent') == Path('/wt/my-goal@agent')
+
+
+def test_session_name_joins_project_goal_and_actor() -> None:
+    assert session_name('proj', 'my-goal', 'agent') == 'proj@my-goal@agent'
 
 
 def test_worktree_dirs_lists_only_dirs_sorted(tmpdir: TempDir) -> None:
-    tmpdir.makedir('b-agent')
-    tmpdir.makedir('a-agent')
+    tmpdir.makedir('b@agent')
+    tmpdir.makedir('a@agent')
     tmpdir.write('a-file', b'')  # files are ignored
-    assert worktree_dirs(tmpdir.path) == [tmpdir.path / 'a-agent', tmpdir.path / 'b-agent']
+    assert worktree_dirs(tmpdir.path) == [tmpdir.path / 'a@agent', tmpdir.path / 'b@agent']
 
 
 def test_worktree_dirs_is_empty_when_root_is_absent(tmpdir: TempDir) -> None:
@@ -41,7 +46,7 @@ def test_worktree_dirs_is_empty_when_root_is_absent(tmpdir: TempDir) -> None:
 
 
 def test_goals_are_derived_from_agent_worktrees(tmpdir: TempDir) -> None:
-    for name in ('g1-agent', 'g2-agent', 'g1-reviewer'):  # reviewer rides g1's agent
+    for name in ('g1@agent', 'g2@agent', 'g1@reviewer'):  # reviewer rides g1's agent
         tmpdir.makedir(name)
     assert goals(tmpdir.path) == {'g1', 'g2'}
 

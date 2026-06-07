@@ -31,9 +31,9 @@ def test_add_creates_agent_worktree_and_both_branches(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     worktrees = tmpdir.path / 'worktrees'
     created = add(repo.path, worktrees, 'my-goal')
-    assert created == [worktrees / 'my-goal-agent']  # only the agent gets a worktree
-    assert (worktrees / 'my-goal-agent').is_dir()
-    assert not (worktrees / 'my-goal-human').exists()  # human branch has no worktree
+    assert created == [worktrees / 'my-goal@agent']  # only the agent gets a worktree
+    assert (worktrees / 'my-goal@agent').is_dir()
+    assert not (worktrees / 'my-goal@human').exists()  # human branch has no worktree
     branches = Git(repo.path).branches()
     assert 'my-goal/human' in branches
     assert 'my-goal/agent' in branches
@@ -43,8 +43,8 @@ def test_add_creates_extra_named_actors(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     worktrees = tmpdir.path / 'worktrees'
     created = add(repo.path, worktrees, 'g', actors=('human', 'agent', 'reviewer'))
-    assert created == [worktrees / 'g-agent', worktrees / 'g-reviewer']
-    assert (worktrees / 'g-reviewer').is_dir()
+    assert created == [worktrees / 'g@agent', worktrees / 'g@reviewer']
+    assert (worktrees / 'g@reviewer').is_dir()
     assert 'g/reviewer' in Git(repo.path).branches()
 
 
@@ -52,7 +52,7 @@ def test_add_checks_out_the_agent_branch_in_its_worktree(tmpdir: TempDir) -> Non
     repo = _seeded_repo(tmpdir)
     worktrees = tmpdir.path / 'worktrees'
     add(repo.path, worktrees, 'g')
-    agent = Git(worktrees / 'g-agent')('rev-parse', '--abbrev-ref', 'HEAD').strip()
+    agent = Git(worktrees / 'g@agent')('rev-parse', '--abbrev-ref', 'HEAD').strip()
     assert agent == 'g/agent'
     assert 'g/human' in Git(repo.path).branches()  # exists, but checked out nowhere
 
@@ -153,8 +153,8 @@ def test_worktree_add_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.chdir(project)
     result = runner.invoke(app, ['worktree', 'add', 'feature-x'])
     assert result.exit_code == 0
-    assert (project / 'worktrees' / 'feature-x-agent').is_dir()
-    assert not (project / 'worktrees' / 'feature-x-human').exists()
+    assert (project / 'worktrees' / 'feature-x@agent').is_dir()
+    assert not (project / 'worktrees' / 'feature-x@human').exists()
     assert 'feature-x/human' in Git(repo.path).branches()
 
 
@@ -168,7 +168,7 @@ def test_worktree_add_cli_from_option(tmpdir: TempDir, monkeypatch: pytest.Monke
     monkeypatch.chdir(project)
     result = runner.invoke(app, ['worktree', 'add', 'feature-x', '--from', 'release'])
     assert result.exit_code == 0
-    assert _head(project / 'worktrees' / 'feature-x-agent') == release
+    assert _head(project / 'worktrees' / 'feature-x@agent') == release
 
 
 def test_worktree_ls_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -179,4 +179,4 @@ def test_worktree_ls_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> No
     runner.invoke(app, ['worktree', 'add', 'g'])
     result = runner.invoke(app, ['worktree', 'ls'])
     assert result.exit_code == 0
-    assert str(project / 'worktrees' / 'g-agent') in result.output
+    assert str(project / 'worktrees' / 'g@agent') in result.output

@@ -148,7 +148,7 @@ def _project_with_goal(tmpdir: TempDir) -> tuple[Project, Repo]:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     project_dir = _project(tmpdir.path, 'proj', repo=str(repo.path))
-    add(repo.path, project_dir / 'worktrees', 'g')  # g-agent worktree + g/human branch
+    add(repo.path, project_dir / 'worktrees', 'g')  # g@agent worktree + g/human branch
     return resolve_project(project_dir), repo
 
 

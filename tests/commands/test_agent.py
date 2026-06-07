@@ -27,8 +27,8 @@ def test_agent_runs_claude_in_the_foreground_by_default(
 ) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(monkeypatch)
-    agent(worktree, 'proj-goal-agent')
-    assert calls == [(['claude', '--name', 'proj-goal-agent'], worktree, True)]
+    agent(worktree, 'proj@goal@agent')
+    assert calls == [(['claude', '--name', 'proj@goal@agent'], worktree, True)]
 
 
 def test_agent_runs_in_the_background_when_given_a_prompt(
@@ -36,9 +36,9 @@ def test_agent_runs_in_the_background_when_given_a_prompt(
 ) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(monkeypatch)
-    agent(worktree, 'proj-goal-agent', 'fix the bug')
+    agent(worktree, 'proj@goal@agent', 'fix the bug')
     assert calls == [
-        (['claude', '--bg', '--name', 'proj-goal-agent', 'fix the bug'], worktree, True)
+        (['claude', '--bg', '--name', 'proj@goal@agent', 'fix the bug'], worktree, True)
     ]
 
 
@@ -48,7 +48,7 @@ def test_agent_refuses_when_a_session_is_live(
     worktree = tmpdir.makedir('wt')
     calls = _stub(monkeypatch, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
     with pytest.raises(RuntimeError, match='already live'):
-        agent(worktree, 'proj-goal-agent')
+        agent(worktree, 'proj@goal@agent')
     assert calls == []  # never launched
 
 
@@ -92,7 +92,7 @@ def test_all_sessions_queries_claude_unscoped(monkeypatch: pytest.MonkeyPatch) -
 def _project_with_worktree(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Path:
     project = tmpdir.makedir('myproject')
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
-    (project / 'worktrees' / 'g-agent').mkdir(parents=True)
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
     monkeypatch.chdir(project)
     return project
 
@@ -102,8 +102,8 @@ def test_agent_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> No
     calls = _stub(monkeypatch)
     result = runner.invoke(app, ['agent', 'start', '-g', 'g'])
     assert result.exit_code == 0
-    expected = Path.cwd() / 'worktrees' / 'g-agent'  # cwd resolves symlinks like the wrapper
-    assert calls == [(['claude', '--name', 'myproject-g-agent'], expected, True)]
+    expected = Path.cwd() / 'worktrees' / 'g@agent'  # cwd resolves symlinks like the wrapper
+    assert calls == [(['claude', '--name', 'myproject@g@agent'], expected, True)]
 
 
 def test_agent_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,18 +111,18 @@ def test_agent_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.Monkey
     calls = _stub(monkeypatch)
     result = runner.invoke(app, ['agent', 'start', '-g', 'g', '--prompt', 'do it'])
     assert result.exit_code == 0
-    expected = Path.cwd() / 'worktrees' / 'g-agent'
-    assert calls == [(['claude', '--bg', '--name', 'myproject-g-agent', 'do it'], expected, True)]
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    assert calls == [(['claude', '--bg', '--name', 'myproject@g@agent', 'do it'], expected, True)]
 
 
 def test_agent_start_cli_with_actor(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     project = _project_with_worktree(tmpdir, monkeypatch)
-    (project / 'worktrees' / 'g-reviewer').mkdir()
+    (project / 'worktrees' / 'g@reviewer').mkdir()
     calls = _stub(monkeypatch)
     result = runner.invoke(app, ['agent', 'start', '-g', 'g', '-a', 'reviewer'])
     assert result.exit_code == 0
-    expected = Path.cwd() / 'worktrees' / 'g-reviewer'
-    assert calls == [(['claude', '--name', 'myproject-g-reviewer'], expected, True)]
+    expected = Path.cwd() / 'worktrees' / 'g@reviewer'
+    assert calls == [(['claude', '--name', 'myproject@g@reviewer'], expected, True)]
 
 
 def test_agent_ls_cli_lists_live_sessions(monkeypatch: pytest.MonkeyPatch) -> None:

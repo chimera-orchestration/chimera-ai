@@ -56,14 +56,14 @@ def test_remove_refuses_while_goals_exist(tmpdir: TempDir) -> None:
     workspace, repo, project = _project(tmpdir, with_goal=True)
     with pytest.raises(RuntimeError, match='still has goals'):
         remove(workspace, 'myproj')
-    assert (project / 'worktrees' / 'g-agent').is_dir()
+    assert (project / 'worktrees' / 'g@agent').is_dir()
     assert 'g/agent' in Git(repo.path).branches()
 
 
 def test_remove_force_finishes_goals_then_removes_the_project(tmpdir: TempDir) -> None:
     workspace, repo, project = _project(tmpdir, with_goal=True)
-    Repo(project / 'worktrees' / 'g-agent').commit_content('work')  # unmerged
-    (project / 'worktrees' / 'g-agent' / 'scratch.txt').write_text('wip')  # uncommitted
+    Repo(project / 'worktrees' / 'g@agent').commit_content('work')  # unmerged
+    (project / 'worktrees' / 'g@agent' / 'scratch.txt').write_text('wip')  # uncommitted
     assert remove(workspace, 'myproj', force=True) == project
     assert not project.exists()
     branches = Git(repo.path).branches()
@@ -81,7 +81,7 @@ def test_remove_force_aborts_when_an_agent_is_running(
     )
     with pytest.raises(RuntimeError, match='agent is live'):
         remove(workspace, 'myproj', force=True)  # not even force nukes a live agent
-    assert (project / 'worktrees' / 'g-agent').is_dir()
+    assert (project / 'worktrees' / 'g@agent').is_dir()
 
 
 def test_project_rm_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:

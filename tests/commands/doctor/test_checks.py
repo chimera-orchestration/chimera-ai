@@ -256,7 +256,7 @@ def test_orphaned_registration_pruned(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
     project = _project(ws, repo.path)
-    worktree = project / 'worktrees' / 'gone-agent'
+    worktree = project / 'worktrees' / 'gone@agent'
     Git(repo.path)('worktree', 'add', '-b', 'gone/agent', str(worktree), 'main')
     shutil.rmtree(worktree)  # registration is now stale
     findings = _run(OrphanedWorktreeCheck(), ws, fix=True)
@@ -268,7 +268,7 @@ def test_orphaned_registration_report_only_keeps_it(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
     project = _project(ws, repo.path)
-    worktree = project / 'worktrees' / 'gone-agent'
+    worktree = project / 'worktrees' / 'gone@agent'
     Git(repo.path)('worktree', 'add', '-b', 'gone/agent', str(worktree), 'main')
     shutil.rmtree(worktree)
     [finding] = _run(OrphanedWorktreeCheck(), ws)

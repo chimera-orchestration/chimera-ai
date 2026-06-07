@@ -14,7 +14,7 @@ def _workspace(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Path:
     ws = tmpdir.makedir('lycia')
     (ws / 'config.yaml').write_text('kind: workspace\n')
     project = ws / 'myproject'
-    (project / 'worktrees' / 'g-agent').mkdir(parents=True)
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
     monkeypatch.chdir(ws)  # at the workspace root: no project inferred from cwd
     return ws
@@ -49,7 +49,7 @@ def test_goal_and_actor_before_the_command(
     tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = _workspace(tmpdir, monkeypatch)
-    (ws / 'myproject' / 'worktrees' / 'g-reviewer').mkdir()
+    (ws / 'myproject' / 'worktrees' / 'g@reviewer').mkdir()
     calls: list[object] = []
     monkeypatch.setattr('chimera.commands.agent.live_sessions', lambda worktree: [])
     monkeypatch.setattr(
@@ -57,5 +57,5 @@ def test_goal_and_actor_before_the_command(
     )
     result = runner.invoke(app, ['agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start'])
     assert result.exit_code == 0
-    worktree = (ws / 'myproject' / 'worktrees' / 'g-reviewer').resolve()
-    assert calls == [(['claude', '--name', 'myproject-g-reviewer'], worktree)]
+    worktree = (ws / 'myproject' / 'worktrees' / 'g@reviewer').resolve()
+    assert calls == [(['claude', '--name', 'myproject@g@reviewer'], worktree)]

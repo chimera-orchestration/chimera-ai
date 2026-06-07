@@ -16,7 +16,7 @@ from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.rm import remove as _worktree_remove
 from chimera.context import Project, resolve_goal, resolve_project, resolve_workspace
-from chimera.worktrees import ACTORS, AGENT, goals, worktree_dirs, worktree_path
+from chimera.worktrees import ACTORS, AGENT, goals, session_name, worktree_dirs, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -195,7 +195,9 @@ def goal_start(
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
-    worktree = _goal_start(p.repo, p.worktrees, goal, f'{p.name}-{goal}-{AGENT}', prompt, frm)
+    worktree = _goal_start(
+        p.repo, p.worktrees, goal, session_name(p.name, goal, AGENT), prompt, frm
+    )
     typer.echo(f'Started {goal} in {worktree}')
 
 
@@ -233,7 +235,7 @@ def agent_start(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
-    _agent(worktree, f'{p.name}-{g}-{actor}', prompt)
+    _agent(worktree, session_name(p.name, g, actor), prompt)
     typer.echo(f'Launched agent in {worktree}')
 
 

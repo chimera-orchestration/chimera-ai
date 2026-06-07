@@ -15,7 +15,7 @@ def add(
     """Create branch ``<goal>/<actor>`` per actor and a worktree for each non-human actor.
 
     The human actor gets a bare branch, checked out on demand; every other actor
-    gets a worktree at ``<goal>-<actor>`` on its branch. Branches and worktrees are
+    gets a worktree at ``<goal>@<actor>`` on its branch. Branches and worktrees are
     created with no upstream tracking. Returns the created worktree paths.
 
     ``frm`` is the start point for the new branches. When omitted, it defaults to

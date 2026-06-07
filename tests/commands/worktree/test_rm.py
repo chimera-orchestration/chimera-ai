@@ -49,15 +49,15 @@ def test_remove_aborts_when_an_agent_is_running(
     )
     with pytest.raises(RuntimeError, match='agent is live'):
         remove(repo.path, worktrees, 'g', force=True)  # not even force bypasses it
-    assert (worktrees / 'g-agent').is_dir()  # nothing removed
+    assert (worktrees / 'g@agent').is_dir()  # nothing removed
     assert 'g/human' in Git(repo.path).branches()
 
 
 def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
     removed = remove(repo.path, worktrees, 'g')
-    assert removed == [worktrees / 'g-agent']  # only the agent has a worktree
-    assert not (worktrees / 'g-agent').exists()
+    assert removed == [worktrees / 'g@agent']  # only the agent has a worktree
+    assert not (worktrees / 'g@agent').exists()
     branches = Git(repo.path).branches()
     assert 'g/human' not in branches
     assert 'g/agent' not in branches
@@ -65,28 +65,28 @@ def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir) -> None:
 
 def test_remove_refuses_uncommitted_changes(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
-    (worktrees / 'g-agent' / 'scratch.txt').write_text('wip')
+    (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')
     with pytest.raises(RuntimeError, match='changes'):
         remove(repo.path, worktrees, 'g')
-    assert (worktrees / 'g-agent').is_dir()
+    assert (worktrees / 'g@agent').is_dir()
     assert 'g/agent' in Git(repo.path).branches()
 
 
 def test_remove_refuses_unmerged_branch(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
-    Repo(worktrees / 'g-agent').commit_content('work')  # branch now ahead of main
+    Repo(worktrees / 'g@agent').commit_content('work')  # branch now ahead of main
     with pytest.raises(RuntimeError, match='unmerged'):
         remove(repo.path, worktrees, 'g')
-    assert (worktrees / 'g-agent').is_dir()
+    assert (worktrees / 'g@agent').is_dir()
     assert 'g/agent' in Git(repo.path).branches()
 
 
 def test_remove_force_discards_unsaved_work(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
-    Repo(worktrees / 'g-agent').commit_content('work')  # unmerged
-    (worktrees / 'g-agent' / 'scratch.txt').write_text('wip')  # uncommitted
+    Repo(worktrees / 'g@agent').commit_content('work')  # unmerged
+    (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')  # uncommitted
     remove(repo.path, worktrees, 'g', force=True)
-    assert not (worktrees / 'g-agent').exists()
+    assert not (worktrees / 'g@agent').exists()
     branches = Git(repo.path).branches()
     assert 'g/human' not in branches
     assert 'g/agent' not in branches
@@ -99,7 +99,7 @@ def test_worktree_rm_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> No
     runner.invoke(app, ['worktree', 'add', 'g'])
     result = runner.invoke(app, ['worktree', 'rm', 'g'])
     assert result.exit_code == 0
-    assert not (project / 'worktrees' / 'g-agent').exists()
+    assert not (project / 'worktrees' / 'g@agent').exists()
     assert 'g/human' not in Git(repo.path).branches()
 
 
@@ -121,5 +121,5 @@ def test_goal_finish_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> No
     runner.invoke(app, ['worktree', 'add', 'g'])
     result = runner.invoke(app, ['goal', 'finish', 'g'])  # finish is the lifecycle name for rm
     assert result.exit_code == 0
-    assert not (project / 'worktrees' / 'g-agent').exists()
+    assert not (project / 'worktrees' / 'g@agent').exists()
     assert 'g/agent' not in Git(repo.path).branches()

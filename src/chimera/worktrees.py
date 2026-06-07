@@ -7,6 +7,15 @@ HUMAN = 'human'
 ACTORS = (HUMAN, AGENT)
 """The default actor set: ``human`` works on a bare branch, ``agent`` in a worktree."""
 
+SEP = '@'
+"""Joins goal and actor in a flat worktree dir / session name.
+
+The branch uses ``/`` (``<goal>/<actor>``), but a dir can't nest there and goals
+are kebab-case, so a dash would blur the boundary (``my-goal-agent``). ``@`` is the
+only safe seam across every filesystem, shell, tmux and git GUI — it can't appear in
+a goal or actor slug, so ``rsplit(SEP, 1)`` always recovers the pair.
+"""
+
 
 def branch(goal: str, actor: str) -> str:
     """The branch name for an actor on a goal: ``<goal>/<actor>``."""
@@ -14,8 +23,13 @@ def branch(goal: str, actor: str) -> str:
 
 
 def worktree_path(root: Path, goal: str, actor: str) -> Path:
-    """The worktree directory for an actor on a goal: ``<root>/<goal>-<actor>``."""
-    return root / f'{goal}-{actor}'
+    """The worktree directory for an actor on a goal: ``<root>/<goal>@<actor>``."""
+    return root / f'{goal}{SEP}{actor}'
+
+
+def session_name(project: str, goal: str, actor: str) -> str:
+    """The agent session label: ``<project>@<goal>@<actor>``."""
+    return SEP.join((project, goal, actor))
 
 
 def worktree_dirs(root: Path) -> list[Path]:
@@ -24,8 +38,8 @@ def worktree_dirs(root: Path) -> list[Path]:
 
 
 def goals(root: Path) -> set[str]:
-    """Goal names present under root, derived from each goal's ``<goal>-agent`` worktree."""
-    suffix = f'-{AGENT}'
+    """Goal names present under root, derived from each goal's ``<goal>@agent`` worktree."""
+    suffix = f'{SEP}{AGENT}'
     return {d.name.removesuffix(suffix) for d in worktree_dirs(root) if d.name.endswith(suffix)}
 
 

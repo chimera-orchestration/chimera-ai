@@ -35,11 +35,11 @@ def test_start_creates_worktrees_then_launches_the_agent(
         'chimera.commands.goal.start.agent',
         lambda worktree, name, prompt=None: calls.append((worktree, name, prompt)),
     )
-    created = start(repo.path, worktrees, 'g', 'proj-g-agent')
-    assert created == worktrees / 'g-agent'
-    assert (worktrees / 'g-agent').is_dir()
+    created = start(repo.path, worktrees, 'g', 'proj@g@agent')
+    assert created == worktrees / 'g@agent'
+    assert (worktrees / 'g@agent').is_dir()
     assert 'g/human' in Git(repo.path).branches()
-    assert calls == [(worktrees / 'g-agent', 'proj-g-agent', None)]  # foreground (no prompt)
+    assert calls == [(worktrees / 'g@agent', 'proj@g@agent', None)]  # foreground (no prompt)
 
 
 def test_start_passes_the_prompt_to_the_agent(
@@ -52,8 +52,8 @@ def test_start_passes_the_prompt_to_the_agent(
         'chimera.commands.goal.start.agent',
         lambda worktree, name, prompt=None: calls.append((worktree, name, prompt)),
     )
-    start(repo.path, worktrees, 'g', 'proj-g-agent', prompt='do it')
-    assert calls == [(worktrees / 'g-agent', 'proj-g-agent', 'do it')]
+    start(repo.path, worktrees, 'g', 'proj@g@agent', prompt='do it')
+    assert calls == [(worktrees / 'g@agent', 'proj@g@agent', 'do it')]
 
 
 def test_goal_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,9 +66,9 @@ def test_goal_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Non
     )
     result = runner.invoke(app, ['goal', 'start', 'feature-x'])
     assert result.exit_code == 0
-    assert (project / 'worktrees' / 'feature-x-agent').is_dir()
-    expected = Path.cwd() / 'worktrees' / 'feature-x-agent'
-    assert calls == [(expected, 'project-feature-x-agent', None)]
+    assert (project / 'worktrees' / 'feature-x@agent').is_dir()
+    expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
+    assert calls == [(expected, 'project@feature-x@agent', None)]
 
 
 def test_goal_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:

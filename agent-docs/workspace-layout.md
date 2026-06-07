@@ -20,7 +20,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
     processes/                  # project-specific processes (tracked)
     repo/                       # gitignored — clone managed by Chimera (ch project add only)
     worktrees/                  # gitignored — one worktree per goal (agent only)
-      {goal}-agent/             # git worktree on branch {goal}/agent
+      {goal}@agent/             # git worktree on branch {goal}/agent
         .beads/redirect         # → ../../.beads (routes to project beads DB)
                                 # branch {goal}/human exists but has no worktree
 ```
@@ -44,7 +44,7 @@ Commands resolve four axes (see `chimera.context`), each with an explicit overri
 - **project** — `-p/--project <name>` (under the workspace), else walk up to the nearest
   `kind: project`, else (from a checkout outside the workspace) match the git repo's identity
   against each project's `repo:`.
-- **goal** — `-g/--goal`, else inferred from a managed worktree dir (`<goal>-<actor>`) or, in a
+- **goal** — `-g/--goal`, else inferred from a managed worktree dir (`<goal>@<actor>`) or, in a
   checkout, from the branch *only* when it is exactly `<goal>/<actor>` for an existing goal; else required.
 - **actor** — `-a/--actor`, else inferred from the same dir/branch token; defaults to `agent`.
 
@@ -97,12 +97,12 @@ projects.
 
 ## Worktrees and beads isolation
 
-Naming pattern (see core concepts): each actor gets branch `{goal}/{actor}`; agents additionally get worktree `{goal}-{actor}`.
+Naming pattern (see core concepts): each actor gets branch `{goal}/{actor}`; agents additionally get worktree `{goal}@{actor}`. The dir uses `@` (not the branch's `/`, which would nest, nor a dash, which blurs the boundary against kebab-case goals); `@` can't appear in a goal or actor, so the pair always splits cleanly.
 
 `ch worktree add <goal> [actor…]` (the primitive; repo read from `config.yaml`) creates a branch `{goal}/{actor}` for each actor (default `human`, `agent`), but only a worktree for non-human actors:
 1. `git branch --no-track {goal}/human <base>` — a bare branch, no worktree (the human checks it out where they like)
-2. `git worktree add --no-track worktrees/{goal}-agent -b {goal}/agent <base>` from the project repo
-3. Write `worktrees/{goal}-agent/.beads/redirect` → `../../.beads`
+2. `git worktree add --no-track worktrees/{goal}@agent -b {goal}/agent <base>` from the project repo
+3. Write `worktrees/{goal}@agent/.beads/redirect` → `../../.beads`
 4. Append `.beads/` to the worktree's `.git/info/exclude` — keeps Chimera's beads invisible to the upstream project's git, even if the project also uses beads
 
 `<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out), falling back to `HEAD` if neither exists. Branches are created with no upstream tracking.
