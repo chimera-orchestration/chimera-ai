@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -14,10 +15,8 @@ from chimera.commands.project.ls import projects as _projects
 from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.rm import remove as _worktree_remove
-from chimera.context import resolve_goal, resolve_project, resolve_workspace
+from chimera.context import Project, resolve_goal, resolve_project, resolve_workspace
 from chimera.worktrees import ACTORS, AGENT, goals, worktree_dirs, worktree_path
-
-app = typer.Typer()
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -26,7 +25,7 @@ ProjectOpt = Annotated[
 GoalOpt = Annotated[
     str | None, typer.Option('--goal', '-g', help='Goal (default: inferred from cwd/branch)')
 ]
-ActorOpt = Annotated[str, typer.Option('--actor', '-a', help='Actor (default: agent)')]
+ActorOpt = Annotated[str | None, typer.Option('--actor', '-a', help='Actor (default: agent)')]
 FromOpt = Annotated[
     str | None, typer.Option('--from', help='Start ref (default: newest of main/origin/main)')
 ]
@@ -36,9 +35,45 @@ PromptOpt = Annotated[
 ForceOpt = Annotated[bool, typer.Option('--force')]
 
 
-@app.callback()
-def callback() -> None:
-    """Chimera — AI agent orchestration."""
+@dataclass
+class Overrides:
+    """Context flags (-p/-g/-a) collected from any level of the command line."""
+
+    project: str | None = None
+    goal: str | None = None
+    actor: str | None = None
+
+
+def _context(
+    ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None, actor: ActorOpt = None
+) -> None:
+    """Merge any -p/-g/-a given at this level into the shared overrides on ctx.obj.
+
+    Registered as the callback on the root app and every project-scoped group, so the
+    flags are accepted before the group, before the command, or after it. Click shares
+    one ctx.obj down the chain; each level overwrites only what it was given, so the more
+    specific (later) position wins — and a leaf's own flag wins over all of them.
+    """
+    overrides = ctx.ensure_object(Overrides)
+    if project is not None:
+        overrides.project = project
+    if goal is not None:
+        overrides.goal = goal
+    if actor is not None:
+        overrides.actor = actor
+
+
+def _overrides(ctx: typer.Context) -> Overrides:
+    return ctx.ensure_object(Overrides)
+
+
+def _project(ctx: typer.Context, explicit: str | None) -> Project:
+    return resolve_project(
+        Path.cwd(), explicit if explicit is not None else _overrides(ctx).project
+    )
+
+
+app = typer.Typer(callback=_context, help='Chimera — AI agent orchestration.')
 
 
 @app.command()
@@ -106,12 +141,13 @@ def project_ls() -> None:
         typer.echo(name)
 
 
-worktree_app = typer.Typer(help="Manage a goal's worktrees and branches.")
+worktree_app = typer.Typer(callback=_context, help="Manage a goal's worktrees and branches.")
 app.add_typer(worktree_app, name='worktree')
 
 
 @worktree_app.command('add')
 def worktree_add(
+    ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
     actors: Annotated[
         list[str] | None, typer.Argument(help='Actors (default: human, agent)')
@@ -119,7 +155,7 @@ def worktree_add(
     frm: FromOpt = None,
     project: ProjectOpt = None,
 ) -> None:
-    p = resolve_project(Path.cwd(), project)
+    p = _project(ctx, project)
     for created in _worktree_add(
         p.repo, p.worktrees, goal, tuple(actors) if actors else ACTORS, frm
     ):
@@ -128,59 +164,71 @@ def worktree_add(
 
 @worktree_app.command('rm')
 def worktree_rm(
-    goal: Annotated[str, typer.Argument()], force: ForceOpt = False, project: ProjectOpt = None
+    ctx: typer.Context,
+    goal: Annotated[str, typer.Argument()],
+    force: ForceOpt = False,
+    project: ProjectOpt = None,
 ) -> None:
-    _report_removed(_worktree_remove(*_project_args(project), goal, force), goal)
+    p = _project(ctx, project)
+    _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force), goal)
 
 
 @worktree_app.command('ls')
-def worktree_ls(project: ProjectOpt = None) -> None:
-    for worktree in worktree_dirs(resolve_project(Path.cwd(), project).worktrees):
+def worktree_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
+    for worktree in worktree_dirs(_project(ctx, project).worktrees):
         typer.echo(worktree)
 
 
-goal_app = typer.Typer(help='Work on goals.')
+goal_app = typer.Typer(callback=_context, help='Work on goals.')
 app.add_typer(goal_app, name='goal')
 
 
 @goal_app.command('start')
 def goal_start(
+    ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
     prompt: PromptOpt = None,
     frm: FromOpt = None,
     project: ProjectOpt = None,
 ) -> None:
-    p = resolve_project(Path.cwd(), project)
+    p = _project(ctx, project)
     worktree = _goal_start(p.repo, p.worktrees, goal, f'{p.name}-{goal}-{AGENT}', prompt, frm)
     typer.echo(f'Started {goal} in {worktree}')
 
 
 @goal_app.command('finish')
 def goal_finish(
-    goal: Annotated[str, typer.Argument()], force: ForceOpt = False, project: ProjectOpt = None
+    ctx: typer.Context,
+    goal: Annotated[str, typer.Argument()],
+    force: ForceOpt = False,
+    project: ProjectOpt = None,
 ) -> None:
-    _report_removed(_worktree_remove(*_project_args(project), goal, force), goal)
+    p = _project(ctx, project)
+    _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force), goal)
 
 
 @goal_app.command('ls')
-def goal_ls(project: ProjectOpt = None) -> None:
-    for goal in sorted(goals(resolve_project(Path.cwd(), project).worktrees)):
+def goal_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
+    for goal in sorted(goals(_project(ctx, project).worktrees)):
         typer.echo(goal)
 
 
-agent_app = typer.Typer(help='Launch and list agents.')
+agent_app = typer.Typer(callback=_context, help='Launch and list agents.')
 app.add_typer(agent_app, name='agent')
 
 
 @agent_app.command('start')
 def agent_start(
+    ctx: typer.Context,
     goal: GoalOpt = None,
-    actor: ActorOpt = AGENT,
+    actor: ActorOpt = None,
     prompt: PromptOpt = None,
     project: ProjectOpt = None,
 ) -> None:
-    p = resolve_project(Path.cwd(), project)
-    g = resolve_goal(Path.cwd(), p, goal)
+    overrides = _overrides(ctx)
+    p = _project(ctx, project)
+    g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
+    actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
     _agent(worktree, f'{p.name}-{g}-{actor}', prompt)
     typer.echo(f'Launched agent in {worktree}')
@@ -193,11 +241,6 @@ def agent_ls() -> None:
         typer.echo(f'{session["sessionId"]} {session["status"]}')
     if not sessions:
         typer.echo('No agents running')
-
-
-def _project_args(project: str | None) -> tuple[Path, Path]:
-    p = resolve_project(Path.cwd(), project)
-    return p.repo, p.worktrees
 
 
 def _report_removed(removed: list[Path], goal: str) -> None:

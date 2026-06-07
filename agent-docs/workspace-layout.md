@@ -52,6 +52,12 @@ Commands resolve four axes (see `chimera.context`), each with an explicit overri
 trusted for goal/actor only when it matches the `<goal>/<actor>` shape — never for a review or
 feature branch.
 
+The `-p/-g/-a` flags may appear at any level of a project-scoped command — before the group,
+between group and subcommand, or after it — so `ch -p chimera goal ls`, `ch goal -p chimera ls`
+and `ch goal ls -p chimera` are equivalent. A shared `_context` callback (in `chimera.__main__`)
+collects them into `Overrides` on Click's `ctx.obj`; the more specific (later) position wins, and
+a leaf's own flag beats any earlier one.
+
 ## Keeping a workspace healthy
 
 `ch doctor [path]` (default cwd) walks up to the workspace root — skipping project dirs, which it
