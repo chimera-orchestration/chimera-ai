@@ -9,7 +9,14 @@ from testfixtures import TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
-from chimera.commands.agent import Agent, agent, agents, all_sessions, last_prompt, live_sessions
+from chimera.commands.agent import (
+    Agent,
+    agent,
+    agents,
+    all_sessions,
+    live_sessions,
+    session_summary,
+)
 
 runner = CliRunner()
 
@@ -134,7 +141,7 @@ def _transcript(folder: Path, name: str, body: str, mtime: float) -> Path:
     return f
 
 
-def test_last_prompt_reads_newest_transcript_for_cwd(tmpdir: TempDir) -> None:
+def test_session_summary_reads_newest_transcript_for_cwd(tmpdir: TempDir) -> None:
     projects = tmpdir.makedir('projects')
     folder = projects / '-work-proj'  # munged from the cwd below
     _transcript(folder, 'old.jsonl', '{"type": "last-prompt", "lastPrompt": "stale"}\n', 1000)
@@ -147,17 +154,67 @@ def test_last_prompt_reads_newest_transcript_for_cwd(tmpdir: TempDir) -> None:
         '{"type": "assistant", "message": "ok"}\n',
         2000,
     )
-    assert last_prompt('/work/proj', projects) == 'fix the bug'
+    assert session_summary('/work/proj', 'agent', projects) == 'fix the bug'
 
 
-def test_last_prompt_when_no_folder(tmpdir: TempDir) -> None:
-    assert last_prompt('/work/proj', tmpdir.path) is None
+def test_session_summary_prefers_title_over_prompt(tmpdir: TempDir) -> None:
+    projects = tmpdir.makedir('projects')
+    _transcript(
+        projects / '-work-proj',
+        's.jsonl',
+        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n'
+        '{"type": "ai-title", "aiTitle": "ai topic"}\n'
+        '{"type": "custom-title", "customTitle": "my title"}\n',
+        1000,
+    )
+    assert session_summary('/work/proj', 'agent', projects) == 'my title'
 
 
-def test_last_prompt_when_transcript_has_no_prompt(tmpdir: TempDir) -> None:
+def test_session_summary_uses_ai_title_when_no_custom_title(tmpdir: TempDir) -> None:
+    projects = tmpdir.makedir('projects')
+    _transcript(
+        projects / '-work-proj',
+        's.jsonl',
+        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n'
+        '{"type": "ai-title", "aiTitle": "ai topic"}\n',
+        1000,
+    )
+    assert session_summary('/work/proj', 'agent', projects) == 'ai topic'
+
+
+def test_session_summary_skips_title_equal_to_name(tmpdir: TempDir) -> None:
+    projects = tmpdir.makedir('projects')
+    _transcript(
+        projects / '-work-proj',
+        's.jsonl',
+        # Claude persists --name as a custom-title; it must not just echo the name.
+        '{"type": "custom-title", "customTitle": "proj@goal@agent"}\n'
+        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n',
+        1000,
+    )
+    assert session_summary('/work/proj', 'proj@goal@agent', projects) == 'fix the bug'
+
+
+def test_session_summary_takes_latest_of_each_record(tmpdir: TempDir) -> None:
+    projects = tmpdir.makedir('projects')
+    _transcript(
+        projects / '-work-proj',
+        's.jsonl',
+        '{"type": "custom-title", "customTitle": "old name"}\n'
+        '{"type": "custom-title", "customTitle": "new name"}\n',
+        1000,
+    )
+    assert session_summary('/work/proj', 'agent', projects) == 'new name'
+
+
+def test_session_summary_when_no_folder(tmpdir: TempDir) -> None:
+    assert session_summary('/work/proj', 'agent', tmpdir.path) is None
+
+
+def test_session_summary_when_transcript_has_no_title_or_prompt(tmpdir: TempDir) -> None:
     projects = tmpdir.makedir('projects')
     _transcript(projects / '-work-proj', 'sess.jsonl', '{"type": "user", "message": "hi"}\n', 1000)
-    assert last_prompt('/work/proj', projects) is None
+    assert session_summary('/work/proj', 'agent', projects) is None
 
 
 def test_agents_enriches_sessions_with_name_cwd_and_summary(

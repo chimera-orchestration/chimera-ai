@@ -16,7 +16,7 @@ class Agent:
 
     @property
     def detail(self) -> str:
-        """One-line description: the last prompt, falling back to the cwd."""
+        """One-line description: the session title or last prompt, else the cwd."""
         if self.summary:
             return self.summary
         home = str(Path.home())
@@ -27,39 +27,53 @@ class Agent:
 def agents(projects: Path | None = None) -> list[Agent]:
     """Every live agent across all projects, each enriched with a one-line summary.
 
-    The summary is the agent's last prompt, read from its session transcript under
-    ``projects`` (default ``~/.claude/projects``); ``None`` when none can be found.
+    The summary is the agent's session title or last prompt (see ``session_summary``),
+    read from its transcript under ``projects`` (default ``~/.claude/projects``).
     """
-    return [
-        Agent(
-            name=str(session.get('name') or session['sessionId']),
-            status=str(session['status']),
-            cwd=Path(str(session['cwd'])),
-            summary=last_prompt(str(session['cwd']), projects),
-        )
-        for session in all_sessions()
-    ]
+    return [_describe(session, projects) for session in all_sessions()]
 
 
-def last_prompt(cwd: str, projects: Path | None = None) -> str | None:
-    """The most recent prompt of the live session in ``cwd``, collapsed to one line.
+def _describe(session: dict[str, object], projects: Path | None) -> Agent:
+    name = str(session.get('name') or session['sessionId'])
+    return Agent(
+        name=name,
+        status=str(session['status']),
+        cwd=Path(str(session['cwd'])),
+        summary=session_summary(str(session['cwd']), name, projects),
+    )
+
+
+# Transcript metadata records Claude resolves a session label from, mapping each
+# record `type` to the field carrying its value — highest precedence first.
+TITLES = {'custom-title': 'customTitle', 'ai-title': 'aiTitle', 'last-prompt': 'lastPrompt'}
+
+
+def session_summary(cwd: str, name: str, projects: Path | None = None) -> str | None:
+    """A one-line summary of the live session in ``cwd``: its title or last prompt.
 
     Claude stores each session's transcript under a per-cwd folder of ``projects``
     (``~/.claude/projects`` by default). The live session's reported id rarely names
     its transcript (background agents resume under fresh ids), so we read the newest
-    transcript in that folder — the one currently being appended to — and return its
-    ``last-prompt`` record. ``None`` when the folder or record is absent.
+    transcript in that folder — the one currently being appended to — and mirror
+    Claude's own precedence: a user-set title, then an AI-generated topic, then the
+    last prompt. Anything equal to ``name`` is skipped — Claude persists ``--name``
+    as a title, so it would merely echo what we already show. ``None`` when nothing
+    distinct remains.
     """
     projects = projects if projects is not None else Path.home() / '.claude' / 'projects'
     folder = projects / re.sub(r'[^a-zA-Z0-9]', '-', cwd)
     transcripts = sorted(folder.glob('*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
+    latest: dict[str, str] = {}
     for line in reversed(transcripts[0].read_text().splitlines()) if transcripts else ():
         if not line.strip():
             continue
         record = json.loads(line)
-        if record.get('type') == 'last-prompt':
-            return ' '.join(str(record['lastPrompt']).split())
-    return None
+        field = TITLES.get(str(record.get('type')))
+        if field and field not in latest:  # reversed, so first seen is the file's latest
+            latest[field] = ' '.join(str(record[field]).split())
+            if len(latest) == len(TITLES):
+                break
+    return next((latest[f] for f in TITLES.values() if f in latest and latest[f] != name), None)
 
 
 def agent(
