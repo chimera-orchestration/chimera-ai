@@ -14,11 +14,24 @@ from chimera.commands.agent import (
     agent,
     agents,
     all_sessions,
+    in_goal,
     live_sessions,
+    scoped,
     session_summary,
+    under,
 )
+from chimera.config import ProjectConfig
+from chimera.context import Project, Scope
 
 runner = CliRunner()
+
+
+def _project_obj(directory: Path) -> Project:
+    return Project(directory, ProjectConfig(kind='project', repo=Path('/r')))
+
+
+def _agent_at(cwd: Path, name: str = 'a') -> Agent:
+    return Agent(name, 'idle', cwd, None)
 
 
 def _stub(monkeypatch: pytest.MonkeyPatch, sessions: Iterable[object] = ()) -> list[object]:
@@ -266,23 +279,77 @@ def test_agent_detail_falls_back_to_tilde_cwd(monkeypatch: pytest.MonkeyPatch) -
     assert Agent('n', 'idle', Path('/other'), None).detail == '/other'
 
 
-def test_agent_ls_cli_lists_agents(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scoped_workspace_keeps_only_agents_under_the_workspace(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
+    outside = _agent_at(tmpdir.path / 'elsewhere', 'outside')
+    assert scoped([inside, outside], Scope(ws, None, None)) == [inside]
+
+
+def test_scoped_project_keeps_only_agents_under_the_project(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    project = _project_obj(ws / 'proj')
+    inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
+    other = _agent_at(ws / 'q' / 'worktrees' / 'g@agent', 'other')
+    assert scoped([inside, other], Scope(ws, project, None)) == [inside]
+
+
+def test_scoped_goal_matches_every_actor_worktree_only(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    project = _project_obj(ws / 'proj')
+    worktrees = ws / 'proj' / 'worktrees'
+    agent_wt = _agent_at(worktrees / 'g@agent', 'agent')
+    reviewer_sub = _agent_at(worktrees / 'g@reviewer' / 'src', 'reviewer')  # a subdir still counts
+    other_goal = _agent_at(worktrees / 'gg@agent', 'other-goal')  # 'gg' must not match 'g'
+    in_repo = _agent_at(ws / 'proj' / 'repo', 'repo')  # in the project, not a goal worktree
+    listing = [agent_wt, reviewer_sub, other_goal, in_repo]
+    assert scoped(listing, Scope(ws, project, 'g')) == [agent_wt, reviewer_sub]
+
+
+def test_under_and_in_goal(tmpdir: TempDir) -> None:
+    root = tmpdir.makedir('r')
+    assert under(root, root) and under(root / 'a' / 'b', root)
+    assert not under(tmpdir.path / 'other', root)
+    worktrees = tmpdir.makedir('wt')
+    assert in_goal(worktrees / 'g@agent', worktrees, 'g')
+    assert not in_goal(worktrees / 'goal@agent', worktrees, 'g')  # boundary: 'g' ≠ 'goal'
+    assert not in_goal(worktrees, worktrees, 'g')  # the worktrees dir itself is not in a goal
+
+
+def _scoped_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Path:
+    ws = tmpdir.makedir('lycia')
+    (ws / 'config.yaml').write_text('kind: workspace\n')
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
+    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    monkeypatch.chdir(ws)
+    return project
+
+
+def test_agent_ls_cli_lists_scoped_agents(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _scoped_cli(tmpdir, monkeypatch)
+    worktree = project / 'worktrees' / 'g@agent'
     monkeypatch.setattr(
         'chimera.__main__.agents',
         lambda: [
-            Agent(name='proj@goal@agent', status='busy', cwd=Path('/x'), summary='fix the bug'),
-            Agent(name='other', status='idle', cwd=Path('/srv/thing'), summary=None),
+            Agent(name='proj@g@agent', status='busy', cwd=worktree, summary='fix the bug'),
+            Agent(name='other', status='idle', cwd=worktree, summary='do a thing'),
+            Agent(name='stray', status='idle', cwd=tmpdir.path / 'outside', summary='x'),
         ],
     )
     result = runner.invoke(app, ['agent', 'ls'])
     assert result.exit_code == 0
-    assert result.output.splitlines() == [
-        'proj@goal@agent  busy  fix the bug',
-        'other            idle  /srv/thing',
+    assert result.output.splitlines() == [  # the out-of-workspace stray is filtered out
+        'proj@g@agent  busy  fix the bug',
+        'other         idle  do a thing',
     ]
 
 
-def test_agent_ls_cli_when_nothing_running(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_ls_cli_when_nothing_running(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _scoped_cli(tmpdir, monkeypatch)
     monkeypatch.setattr('chimera.__main__.agents', list)
     result = runner.invoke(app, ['agent', 'ls'])
     assert result.exit_code == 0

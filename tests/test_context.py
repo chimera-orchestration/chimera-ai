@@ -13,6 +13,7 @@ from chimera.context import (
     iter_projects,
     resolve_goal,
     resolve_project,
+    resolve_scope,
     resolve_workspace,
 )
 from chimera.commands.worktree.add import add
@@ -182,3 +183,63 @@ def test_resolve_goal_requires_one_outside_a_repo(tmpdir: TempDir) -> None:
     project, _repo = _project_with_goal(tmpdir)
     with pytest.raises(GoalRequiredError):
         resolve_goal(tmpdir.makedir('bare'), project)
+
+
+# ---- scope -----------------------------------------------------------------
+
+
+def _scoped_project_with_goal(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Project, Repo, Path]:
+    ws = _workspace(tmpdir)
+    repo = Repo.make(tmpdir.path / 'repo')
+    repo.commit_content('seed')
+    project_dir = _project(ws, 'proj', repo=str(repo.path))
+    add(repo.path, project_dir / 'worktrees', 'g')
+    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    return resolve_project(project_dir), repo, ws
+
+
+def test_resolve_scope_widens_to_all_projects_at_the_workspace_root(tmpdir: TempDir) -> None:
+    ws = _workspace(tmpdir)
+    _project(ws, 'a')
+    scope = resolve_scope(ws)
+    assert scope.workspace == ws
+    assert scope.project is None  # couldn't pin one → list them all
+    assert scope.goal is None
+
+
+def test_resolve_scope_pins_the_project_from_within_it(tmpdir: TempDir) -> None:
+    project = _project(_workspace(tmpdir))
+    scope = resolve_scope(project)
+    assert scope.project is not None and scope.project.dir == project
+    assert scope.goal is None  # not on a goal branch
+
+
+def test_resolve_scope_pins_the_goal_from_a_goal_branch(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, repo, _ws = _scoped_project_with_goal(tmpdir, monkeypatch)
+    checkout = tmpdir.path / 'human'
+    Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
+    scope = resolve_scope(checkout)
+    assert scope.project is not None and scope.project.dir == project.dir
+    assert scope.goal == 'g'
+
+
+def test_resolve_scope_external_checkout_pins_project_not_goal(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, repo, _ws = _scoped_project_with_goal(tmpdir, monkeypatch)
+    scope = resolve_scope(repo.path)  # the repo is on plain 'main'
+    assert scope.project is not None and scope.project.dir == project.dir
+    assert scope.goal is None
+
+
+def test_resolve_scope_bad_explicit_project_still_raises(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _workspace(tmpdir)
+    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    with pytest.raises(NotInProjectError):
+        resolve_scope(ws, project='ghost')

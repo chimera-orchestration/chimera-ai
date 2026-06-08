@@ -45,6 +45,19 @@ class Project:
         return self.dir / 'worktrees'
 
 
+@dataclass(frozen=True)
+class Scope:
+    """The resolved axes a lister enumerates over.
+
+    ``project``/``goal`` are ``None`` when they couldn't be pinned — listing then
+    widens to all projects / all goals, rather than raising as the actions do.
+    """
+
+    workspace: Path
+    project: Project | None
+    goal: str | None
+
+
 def resolve_workspace(cwd: Path) -> Path:
     """The workspace: ``$CHIMERA_WORKSPACE`` if set (the norm), else walk up from cwd."""
     if env := os.environ.get('CHIMERA_WORKSPACE'):
@@ -94,6 +107,28 @@ def resolve_goal(cwd: Path, project: Project, explicit: str | None = None) -> st
     if token is not None and token[0] in goals(project.worktrees):
         return token[0]
     raise GoalRequiredError(cwd)
+
+
+def resolve_scope(cwd: Path, *, project: str | None = None, goal: str | None = None) -> Scope:
+    """The scope to list within: the narrowest axis pinned from cwd/flags, widening on failure.
+
+    Reuses the action resolvers but turns *inference* failure into a widened scope —
+    ``CannotIdentifyProjectError`` → all projects, ``GoalRequiredError`` → all goals.
+    A bad explicit ``--project`` still raises ``NotInProjectError`` (naming a ghost is an
+    error, not a reason to widen), as does genuinely not being in a workspace.
+    """
+    workspace = resolve_workspace(cwd)
+    try:
+        resolved: Project | None = resolve_project(cwd, project)
+    except CannotIdentifyProjectError:
+        resolved = None
+    pinned_goal: str | None = None
+    if resolved is not None:
+        try:
+            pinned_goal = resolve_goal(cwd, resolved, goal)
+        except GoalRequiredError:
+            pinned_goal = None
+    return Scope(workspace, resolved, pinned_goal)
 
 
 def _project_at(directory: Path) -> Project:

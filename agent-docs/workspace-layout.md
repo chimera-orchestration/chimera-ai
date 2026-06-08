@@ -58,6 +58,28 @@ and `ch goal ls -p chimera` are equivalent. A shared `_context` callback (in `ch
 collects them into `Overrides` on Click's `ctx.obj`; the more specific (later) position wins, and
 a leaf's own flag beats any earlier one.
 
+## Listing: scope model
+
+The `ls` family (`chimera.context.resolve_scope` → `Scope(workspace, project|None, goal|None)`)
+separates **inference** from **enumeration**: cwd/flags *infer* the axis values (reusing the
+action resolvers), but enumeration always reads the workspace's managed dirs and is bounded by
+the workspace. Two rules:
+
+- **Listing widens; actions stay exact.** A read-only lister that can't pin a single project
+  broadens to all of them (`CannotIdentifyProjectError` → `project=None`), and likewise for goals
+  (`GoalRequiredError` → `goal=None`). A bad explicit `--project` still raises (naming a ghost is
+  an error). Requires a resolvable workspace — `$CHIMERA_WORKSPACE` from an external checkout.
+- **Each command enumerates one axis, scoped by the one above** (agents are scoped by session
+  `cwd`, the only reliable axis — names aren't always the `<project>@<goal>@<actor>` triple):
+  - `ch project ls` — always the workspace.
+  - `ch goal ls` — the pinned project's goals (bare names), else every project's (qualified).
+  - `ch agent ls` — agents under the pinned goal's worktrees, else the project, else the workspace
+    (machine-wide sessions outside the workspace are excluded).
+  - `ch ls` — the scope-aware dashboard (project → goal → agent tree), narrowing by cwd; `-p/-g`
+    refocus it. Standing in a goal worktree narrows all the way to that goal — the inferred goal
+    isn't cleared by a same-project `-p` (a cross-project `-p` widens, since the goal won't exist
+    there). Agents not under any goal/project surface as `loose` so a running agent is never hidden.
+
 ## Keeping a workspace healthy
 
 `ch doctor [path]` (default cwd) walks up to the workspace root — skipping project dirs, which it

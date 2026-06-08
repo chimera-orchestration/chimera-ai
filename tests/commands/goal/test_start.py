@@ -83,13 +83,3 @@ def test_goal_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyP
     assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     assert calls == [(expected, 'project@feature-x@agent', 'go build it')]
-
-
-def test_goal_ls_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
-    repo = _seeded_repo(tmpdir)
-    _project(tmpdir, repo, monkeypatch)
-    runner.invoke(app, ['worktree', 'add', 'alpha'])
-    runner.invoke(app, ['worktree', 'add', 'beta'])
-    result = runner.invoke(app, ['goal', 'ls'])
-    assert result.exit_code == 0
-    assert result.output.split() == ['alpha', 'beta']

@@ -8,18 +8,27 @@ from typer._click.core import Command, Context
 from typer.core import TyperGroup
 
 from chimera.commands.agent import agent as _agent
-from chimera.commands.agent import agents
+from chimera.commands.agent import agents, scoped
 from chimera.commands.doctor import CHECKS, Finding, resolve_root
 from chimera.commands.doctor import doctor as _doctor
+from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.init import init as _init
+from chimera.commands.ls import Board, board
 from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.ls import projects as _projects
 from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.rm import remove as _worktree_remove
-from chimera.context import Project, resolve_goal, resolve_project, resolve_workspace
-from chimera.worktrees import ACTORS, AGENT, goals, session_name, worktree_dirs, worktree_path
+from chimera.context import (
+    Project,
+    Scope,
+    resolve_goal,
+    resolve_project,
+    resolve_scope,
+    resolve_workspace,
+)
+from chimera.worktrees import ACTORS, AGENT, session_name, worktree_dirs, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -95,6 +104,15 @@ def _project(ctx: typer.Context, explicit: str | None) -> Project:
     )
 
 
+def _scope(ctx: typer.Context, project: str | None, goal: str | None) -> Scope:
+    overrides = _overrides(ctx)
+    return resolve_scope(
+        Path.cwd(),
+        project=project if project is not None else overrides.project,
+        goal=goal if goal is not None else overrides.goal,
+    )
+
+
 app = typer.Typer(callback=_context, help='Chimera — AI agent orchestration.')
 
 
@@ -138,6 +156,30 @@ def _tag(finding: Finding) -> str:
     if finding.resolved:
         return 'fixed'
     return 'would fix — run with --fix' if finding.fixable else 'needs attention'
+
+
+@app.command('ls')
+def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
+    _render_board(board(_scope(ctx, project, goal), agents()))
+
+
+def _render_board(b: Board) -> None:
+    typer.echo(b.workspace)
+    for p in b.projects:
+        typer.echo(f'  {p.name}')
+        for g in p.goals:
+            if g.agents:
+                typer.echo(f'    {g.name}')
+                for a in g.agents:
+                    typer.echo(f'      {a.name}  {a.status}  {a.detail}'.rstrip())
+            else:
+                typer.echo(f'    {g.name}  (no agent)')
+        for a in p.loose:
+            typer.echo(f'    · {a.name}  {a.status}  {a.detail}'.rstrip())
+        if not p.goals and not p.loose:
+            typer.echo('    (no goals)')
+    for a in b.loose:
+        typer.echo(f'  · {a.name}  {a.status}  {a.detail}'.rstrip())
 
 
 project_app = typer.Typer(help='Manage projects.')
@@ -237,8 +279,9 @@ def goal_finish(
 
 @goal_app.command('ls')
 def goal_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
-    for goal in sorted(goals(_project(ctx, project).worktrees)):
-        typer.echo(goal)
+    scope = _scope(ctx, project, None)
+    for proj, goal in goals_in_scope(scope):
+        typer.echo(goal if scope.project is not None else f'{proj}  {goal}')
 
 
 agent_app = typer.Typer(callback=_context, help='Launch and list agents.')
@@ -263,8 +306,8 @@ def agent_start(
 
 
 @agent_app.command('ls')
-def agent_ls() -> None:
-    listing = agents()
+def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
+    listing = scoped(agents(), _scope(ctx, project, goal))
     if not listing:
         typer.echo('No agents running')
         return

@@ -4,6 +4,9 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from chimera.context import Scope
+from chimera.worktrees import SEP
+
 
 @dataclass(frozen=True)
 class Agent:
@@ -42,6 +45,29 @@ def _describe(session: dict[str, object], projects: Path | None) -> Agent:
         cwd=Path(cwd),
         summary=session_summary(cwd, name, projects) if cwd else None,
     )
+
+
+def scoped(listing: list[Agent], scope: Scope) -> list[Agent]:
+    """The agents in scope: under the goal's worktrees, the project, else the workspace."""
+    if scope.project is not None and scope.goal is not None:
+        return [a for a in listing if in_goal(a.cwd, scope.project.worktrees, scope.goal)]
+    root = scope.project.dir if scope.project is not None else scope.workspace
+    return [a for a in listing if under(a.cwd, root)]
+
+
+def under(path: Path, root: Path) -> bool:
+    """Whether path is root or a descendant of it (both resolved)."""
+    path, root = path.resolve(), root.resolve()
+    return path == root or root in path.parents
+
+
+def in_goal(cwd: Path, worktrees: Path, goal: str) -> bool:
+    """Whether cwd sits in one of goal's actor worktrees (``<goal>@<actor>``) under worktrees."""
+    worktrees = worktrees.resolve()
+    if not under(cwd, worktrees):
+        return False
+    relative = cwd.resolve().relative_to(worktrees)
+    return bool(relative.parts) and relative.parts[0].startswith(f'{goal}{SEP}')
 
 
 # Transcript metadata records Claude resolves a session label from, mapping each
