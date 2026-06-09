@@ -32,8 +32,9 @@ ActorOpt = Annotated[str | None, typer.Option('--actor', '-a', help='Actor (defa
 FromOpt = Annotated[
     str | None, typer.Option('--from', help='Start ref (default: newest of main/origin/main)')
 ]
-PromptOpt = Annotated[
-    str | None, typer.Option('--prompt', help='Prompt; its presence runs the agent in background')
+PromptArg = Annotated[
+    str | None,
+    typer.Argument(help='Prompt; its presence runs the agent in background'),
 ]
 ForceOpt = Annotated[bool, typer.Option('--force')]
 
@@ -212,10 +213,7 @@ app.add_typer(goal_app, name='goal')
 def goal_start(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
-    prompt: Annotated[
-        str | None,
-        typer.Argument(help='Prompt; its presence runs the agent in background'),
-    ] = None,
+    prompt: PromptArg = None,
     frm: FromOpt = None,
     project: ProjectOpt = None,
 ) -> None:
@@ -250,9 +248,9 @@ app.add_typer(agent_app, name='agent')
 @agent_app.command('start')
 def agent_start(
     ctx: typer.Context,
+    prompt: PromptArg = None,
     goal: GoalOpt = None,
     actor: ActorOpt = None,
-    prompt: PromptOpt = None,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)

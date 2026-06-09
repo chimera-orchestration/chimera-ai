@@ -117,7 +117,7 @@ def test_agent_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> No
 def test_agent_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
     _project_with_worktree(tmpdir, monkeypatch)
     calls = _stub(monkeypatch)
-    result = runner.invoke(app, ['agent', 'start', '-g', 'g', '--prompt', 'do it'])
+    result = runner.invoke(app, ['agent', 'start', 'do it', '-g', 'g'])
     assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     assert calls == [(['claude', '--bg', '--name', 'myproject@g@agent', 'do it'], expected, True)]
