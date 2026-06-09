@@ -27,8 +27,10 @@ def _project(ws: Path, name: str, *goals: str) -> Path:
     return project
 
 
-def _agent(cwd: Path, name: str, status: str = 'idle', summary: str | None = None) -> Agent:
-    return Agent(name, status, cwd, summary)
+def _agent(
+    cwd: Path, name: str, status: str = 'idle', summary: str | None = None, id: str = 'id'
+) -> Agent:
+    return Agent(id, name, status, cwd, summary)
 
 
 def test_board_partitions_agents_into_goals_project_loose_and_workspace_loose(
@@ -71,7 +73,7 @@ def test_ls_cli_renders_the_tree(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatc
     worktree = ws / 'alpha' / 'worktrees' / 'g@agent'
     monkeypatch.setattr(
         'chimera.__main__.agents',
-        lambda: [Agent('alpha@g@agent', 'busy', worktree, 'fix the bug')],
+        lambda: [Agent('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug')],
     )
     result = runner.invoke(app, ['ls'])
     assert result.exit_code == 0
@@ -79,7 +81,7 @@ def test_ls_cli_renders_the_tree(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatc
         'lycia',
         '  alpha',
         '    g',
-        '      alpha@g@agent  busy  fix the bug',
+        '      012a9550  alpha@g@agent  busy  fix the bug',
     ]
 
 
@@ -90,8 +92,8 @@ def test_ls_cli_renders_loose_agents(tmpdir: TempDir, monkeypatch: pytest.Monkey
     monkeypatch.setattr(
         'chimera.__main__.agents',
         lambda: [
-            Agent('repo-sess', 'busy', ws / 'alpha' / 'repo', 'building'),
-            Agent('stray', 'idle', stray, None),
+            Agent('012a9550', 'repo-sess', 'busy', ws / 'alpha' / 'repo', 'building'),
+            Agent('39d68dfa', 'stray', 'idle', stray, None),
         ],
     )
     result = runner.invoke(app, ['ls'])
@@ -99,8 +101,8 @@ def test_ls_cli_renders_loose_agents(tmpdir: TempDir, monkeypatch: pytest.Monkey
     assert result.output.splitlines() == [
         'lycia',
         '  alpha',
-        '    · repo-sess  busy  building',
-        f'  · stray  idle  {stray}',
+        '    · 012a9550  repo-sess  busy  building',
+        f'  · 39d68dfa  stray  idle  {stray}',
     ]
 
 

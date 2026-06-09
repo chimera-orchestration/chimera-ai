@@ -7,6 +7,7 @@ import typer
 from typer._click.core import Command, Context
 from typer.core import TyperGroup
 
+from chimera.commands.agent import Agent
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import agents, scoped
 from chimera.commands.doctor import CHECKS, Finding, resolve_root
@@ -163,6 +164,25 @@ def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> 
     _render_board(board(_scope(ctx, project, goal), agents()))
 
 
+# Detail (session title / last prompt) past this many chars is trimmed for listings.
+DETAIL_MAX = 80
+
+
+def _name(a: Agent) -> str:
+    """The agent's name, blanked when it merely echoes the id column."""
+    return '' if a.name == a.id else a.name
+
+
+def _detail(a: Agent) -> str:
+    """The agent's one-line detail, trimmed to ``DETAIL_MAX`` with an ellipsis."""
+    return a.detail if len(a.detail) <= DETAIL_MAX else a.detail[: DETAIL_MAX - 1] + '…'
+
+
+def _summary(a: Agent) -> str:
+    """``id  name  status  detail`` for a board row, dropping the name when blank."""
+    return '  '.join(part for part in (a.id, _name(a), a.status, _detail(a)) if part)
+
+
 def _render_board(b: Board) -> None:
     typer.echo(b.workspace)
     for p in b.projects:
@@ -171,15 +191,15 @@ def _render_board(b: Board) -> None:
             if g.agents:
                 typer.echo(f'    {g.name}')
                 for a in g.agents:
-                    typer.echo(f'      {a.name}  {a.status}  {a.detail}'.rstrip())
+                    typer.echo(f'      {_summary(a)}')
             else:
                 typer.echo(f'    {g.name}  (no agent)')
         for a in p.loose:
-            typer.echo(f'    · {a.name}  {a.status}  {a.detail}'.rstrip())
+            typer.echo(f'    · {_summary(a)}')
         if not p.goals and not p.loose:
             typer.echo('    (no goals)')
     for a in b.loose:
-        typer.echo(f'  · {a.name}  {a.status}  {a.detail}'.rstrip())
+        typer.echo(f'  · {_summary(a)}')
 
 
 project_app = typer.Typer(help='Manage projects.')
@@ -311,10 +331,12 @@ def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = Non
     if not listing:
         typer.echo('No agents running')
         return
-    name_w = max(len(a.name) for a in listing)
+    id_w = max(len(a.id) for a in listing)
+    name_w = max(len(_name(a)) for a in listing)
     status_w = max(len(a.status) for a in listing)
     for a in listing:
-        typer.echo(f'{a.name:<{name_w}}  {a.status:<{status_w}}  {a.detail}'.rstrip())
+        row = f'{a.id:<{id_w}}  {_name(a):<{name_w}}  {a.status:<{status_w}}  {_detail(a)}'
+        typer.echo(row.rstrip())
 
 
 def _report_removed(removed: list[Path], goal: str) -> None:

@@ -31,7 +31,7 @@ def _project_obj(directory: Path) -> Project:
 
 
 def _agent_at(cwd: Path, name: str = 'a') -> Agent:
-    return Agent(name, 'idle', cwd, None)
+    return Agent(name, name, 'idle', cwd, None)
 
 
 def _stub(monkeypatch: pytest.MonkeyPatch, sessions: Iterable[object] = ()) -> list[object]:
@@ -252,13 +252,15 @@ def test_agents_enriches_sessions_with_name_cwd_and_summary(
     monkeypatch.setattr(
         'chimera.commands.agent.all_sessions',
         lambda: [
-            {'sessionId': 'x', 'status': 'busy', 'name': 'proj@goal@agent', 'cwd': '/work/proj'},
+            {'id': 'x', 'status': 'busy', 'name': 'proj@goal@agent', 'cwd': '/work/proj'},
             {'sessionId': 'bare', 'status': 'idle', 'cwd': '/elsewhere'},  # no name, no transcript
         ],
     )
     assert agents(projects) == [
-        Agent(name='proj@goal@agent', status='busy', cwd=Path('/work/proj'), summary='do it'),
-        Agent(name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
+        Agent(
+            id='x', name='proj@goal@agent', status='busy', cwd=Path('/work/proj'), summary='do it'
+        ),
+        Agent(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
     ]
 
 
@@ -269,14 +271,16 @@ def test_agents_tolerates_sessions_missing_fields(monkeypatch: pytest.MonkeyPatc
         # status falls back to state, then '?', and a missing cwd yields no summary
         lambda: [{'sessionId': 'lonely', 'state': 'working'}],
     )
-    assert agents() == [Agent(name='lonely', status='working', cwd=Path('.'), summary=None)]
+    assert agents() == [
+        Agent(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
+    ]
 
 
 def test_agent_detail_falls_back_to_tilde_cwd(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, 'home', classmethod(lambda cls: Path('/home/me')))
-    assert Agent('n', 'idle', Path('/home/me/work'), 'a prompt').detail == 'a prompt'
-    assert Agent('n', 'idle', Path('/home/me/work'), None).detail == '~/work'
-    assert Agent('n', 'idle', Path('/other'), None).detail == '/other'
+    assert Agent('i', 'n', 'idle', Path('/home/me/work'), 'a prompt').detail == 'a prompt'
+    assert Agent('i', 'n', 'idle', Path('/home/me/work'), None).detail == '~/work'
+    assert Agent('i', 'n', 'idle', Path('/other'), None).detail == '/other'
 
 
 def test_scoped_workspace_keeps_only_agents_under_the_workspace(tmpdir: TempDir) -> None:
@@ -333,17 +337,34 @@ def test_agent_ls_cli_lists_scoped_agents(tmpdir: TempDir, monkeypatch: pytest.M
     monkeypatch.setattr(
         'chimera.__main__.agents',
         lambda: [
-            Agent(name='proj@g@agent', status='busy', cwd=worktree, summary='fix the bug'),
-            Agent(name='other', status='idle', cwd=worktree, summary='do a thing'),
-            Agent(name='stray', status='idle', cwd=tmpdir.path / 'outside', summary='x'),
+            Agent(
+                id='aaa11111', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'
+            ),
+            Agent(id='bbb22222', name='other', status='idle', cwd=worktree, summary='do a thing'),
+            Agent(id='ccc', name='ccc', status='idle', cwd=worktree, summary='unnamed'),
+            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir.path / 'outside', summary='x'),
         ],
     )
     result = runner.invoke(app, ['agent', 'ls'])
     assert result.exit_code == 0
     assert result.output.splitlines() == [  # the out-of-workspace stray is filtered out
-        'proj@g@agent  busy  fix the bug',
-        'other         idle  do a thing',
+        'aaa11111  proj@g@agent  busy  fix it',
+        'bbb22222  other         idle  do a thing',
+        'ccc                     idle  unnamed',  # name blanked: it merely echoes the id
     ]
+
+
+def test_agent_ls_cli_trims_long_detail(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _scoped_cli(tmpdir, monkeypatch)
+    worktree = project / 'worktrees' / 'g@agent'
+    detail = 'x' * 200
+    monkeypatch.setattr(
+        'chimera.__main__.agents',
+        lambda: [Agent(id='aaa', name='named', status='busy', cwd=worktree, summary=detail)],
+    )
+    result = runner.invoke(app, ['agent', 'ls'])
+    assert result.exit_code == 0
+    assert result.output.splitlines() == ['aaa  named  busy  ' + 'x' * 79 + '…']
 
 
 def test_agent_ls_cli_when_nothing_running(

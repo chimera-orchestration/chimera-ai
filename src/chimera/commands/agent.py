@@ -10,8 +10,9 @@ from chimera.worktrees import SEP
 
 @dataclass(frozen=True)
 class Agent:
-    """A live agent: its name, status, working directory and most recent prompt."""
+    """A live agent: its claude id, name, status, working directory and most recent prompt."""
 
+    id: str
     name: str
     status: str
     cwd: Path
@@ -37,9 +38,13 @@ def agents(projects: Path | None = None) -> list[Agent]:
 
 
 def _describe(session: dict[str, object], projects: Path | None) -> Agent:
-    name = str(session.get('name') or session.get('sessionId') or '?')
+    # `id` is claude's short session handle; fall back to the leading block of the
+    # full sessionId (its own first 8 chars) when a session omits it.
+    id = str(session.get('id') or session.get('sessionId') or '?')[:8]
+    name = str(session.get('name') or id)
     cwd = str(session.get('cwd') or '')
     return Agent(
+        id=id,
         name=name,
         status=str(session.get('status') or session.get('state') or '?'),
         cwd=Path(cwd),
