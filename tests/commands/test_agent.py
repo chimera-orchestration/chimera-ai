@@ -207,6 +207,18 @@ def test_session_summary_takes_latest_of_each_record(tmpdir: TempDir) -> None:
     assert session_summary('/work/proj', 'agent', projects) == 'new name'
 
 
+def test_session_summary_skips_typed_record_missing_its_value(tmpdir: TempDir) -> None:
+    projects = tmpdir.makedir('projects')
+    _transcript(
+        projects / '-work-proj',
+        's.jsonl',
+        # a last-prompt record may carry no lastPrompt field; fall through to what does
+        '{"type": "last-prompt"}\n{"type": "ai-title", "aiTitle": "ai topic"}\n',
+        1000,
+    )
+    assert session_summary('/work/proj', 'agent', projects) == 'ai topic'
+
+
 def test_session_summary_when_no_folder(tmpdir: TempDir) -> None:
     assert session_summary('/work/proj', 'agent', tmpdir.path) is None
 
@@ -235,6 +247,16 @@ def test_agents_enriches_sessions_with_name_cwd_and_summary(
         Agent(name='proj@goal@agent', status='busy', cwd=Path('/work/proj'), summary='do it'),
         Agent(name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
     ]
+
+
+def test_agents_tolerates_sessions_missing_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        'chimera.commands.agent.all_sessions',
+        # a session without status/cwd (e.g. a foreground session) must not crash the listing;
+        # status falls back to state, then '?', and a missing cwd yields no summary
+        lambda: [{'sessionId': 'lonely', 'state': 'working'}],
+    )
+    assert agents() == [Agent(name='lonely', status='working', cwd=Path('.'), summary=None)]
 
 
 def test_agent_detail_falls_back_to_tilde_cwd(monkeypatch: pytest.MonkeyPatch) -> None:

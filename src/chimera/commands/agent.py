@@ -34,12 +34,13 @@ def agents(projects: Path | None = None) -> list[Agent]:
 
 
 def _describe(session: dict[str, object], projects: Path | None) -> Agent:
-    name = str(session.get('name') or session['sessionId'])
+    name = str(session.get('name') or session.get('sessionId') or '?')
+    cwd = str(session.get('cwd') or '')
     return Agent(
         name=name,
-        status=str(session['status']),
-        cwd=Path(str(session['cwd'])),
-        summary=session_summary(str(session['cwd']), name, projects),
+        status=str(session.get('status') or session.get('state') or '?'),
+        cwd=Path(cwd),
+        summary=session_summary(cwd, name, projects) if cwd else None,
     )
 
 
@@ -69,8 +70,9 @@ def session_summary(cwd: str, name: str, projects: Path | None = None) -> str | 
             continue
         record = json.loads(line)
         field = TITLES.get(str(record.get('type')))
-        if field and field not in latest:  # reversed, so first seen is the file's latest
-            latest[field] = ' '.join(str(record[field]).split())
+        value = record.get(field) if field else None  # a typed record may omit its value
+        if field and value and field not in latest:  # reversed, so first seen is the file's latest
+            latest[field] = ' '.join(str(value).split())
             if len(latest) == len(TITLES):
                 break
     return next((latest[f] for f in TITLES.values() if f in latest and latest[f] != name), None)
