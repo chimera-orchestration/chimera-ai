@@ -52,12 +52,20 @@ def _describe(session: dict[str, object], projects: Path | None) -> Agent:
     )
 
 
-def scoped(listing: list[Agent], scope: Scope) -> list[Agent]:
-    """The agents in scope: under the goal's worktrees, the project, else the workspace."""
+def scoped(listing: list[Agent], scope: Scope, *, otherwise: Path | None) -> list[Agent]:
+    """The agents in scope: under the goal's worktrees, the project, else ``otherwise``.
+
+    With no project pinned the fallback ``otherwise`` decides reach: ``None`` keeps every
+    agent (``agent ls`` is the global list), a path bounds them to it (the dashboard passes
+    the workspace, so it never shows strays from elsewhere on the machine).
+    """
     if scope.project is not None and scope.goal is not None:
         return [a for a in listing if in_goal(a.cwd, scope.project.worktrees, scope.goal)]
-    root = scope.project.dir if scope.project is not None else scope.workspace
-    return [a for a in listing if under(a.cwd, root)]
+    if scope.project is not None:
+        return [a for a in listing if under(a.cwd, scope.project.dir)]
+    if otherwise is None:
+        return listing
+    return [a for a in listing if under(a.cwd, otherwise)]
 
 
 def under(path: Path, root: Path) -> bool:

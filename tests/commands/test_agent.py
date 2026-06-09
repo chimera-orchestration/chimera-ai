@@ -283,11 +283,18 @@ def test_agent_detail_falls_back_to_tilde_cwd(monkeypatch: pytest.MonkeyPatch) -
     assert Agent('i', 'n', 'idle', Path('/other'), None).detail == '/other'
 
 
-def test_scoped_workspace_keeps_only_agents_under_the_workspace(tmpdir: TempDir) -> None:
+def test_scoped_unpinned_keeps_every_agent_when_otherwise_is_none(tmpdir: TempDir) -> None:
     ws = tmpdir.makedir('lycia')
     inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
     outside = _agent_at(tmpdir.path / 'elsewhere', 'outside')
-    assert scoped([inside, outside], Scope(ws, None, None)) == [inside]
+    assert scoped([inside, outside], Scope(ws, None, None), otherwise=None) == [inside, outside]
+
+
+def test_scoped_unpinned_bounds_to_otherwise_when_given(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
+    outside = _agent_at(tmpdir.path / 'elsewhere', 'outside')
+    assert scoped([inside, outside], Scope(ws, None, None), otherwise=ws) == [inside]
 
 
 def test_scoped_project_keeps_only_agents_under_the_project(tmpdir: TempDir) -> None:
@@ -295,7 +302,7 @@ def test_scoped_project_keeps_only_agents_under_the_project(tmpdir: TempDir) -> 
     project = _project_obj(ws / 'proj')
     inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
     other = _agent_at(ws / 'q' / 'worktrees' / 'g@agent', 'other')
-    assert scoped([inside, other], Scope(ws, project, None)) == [inside]
+    assert scoped([inside, other], Scope(ws, project, None), otherwise=None) == [inside]
 
 
 def test_scoped_goal_matches_every_actor_worktree_only(tmpdir: TempDir) -> None:
@@ -307,7 +314,7 @@ def test_scoped_goal_matches_every_actor_worktree_only(tmpdir: TempDir) -> None:
     other_goal = _agent_at(worktrees / 'gg@agent', 'other-goal')  # 'gg' must not match 'g'
     in_repo = _agent_at(ws / 'proj' / 'repo', 'repo')  # in the project, not a goal worktree
     listing = [agent_wt, reviewer_sub, other_goal, in_repo]
-    assert scoped(listing, Scope(ws, project, 'g')) == [agent_wt, reviewer_sub]
+    assert scoped(listing, Scope(ws, project, 'g'), otherwise=None) == [agent_wt, reviewer_sub]
 
 
 def test_under_and_in_goal(tmpdir: TempDir) -> None:
@@ -331,7 +338,9 @@ def _scoped_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Path:
     return project
 
 
-def test_agent_ls_cli_lists_scoped_agents(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_ls_cli_unpinned_lists_every_agent(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
     project = _scoped_cli(tmpdir, monkeypatch)
     worktree = project / 'worktrees' / 'g@agent'
     monkeypatch.setattr(
@@ -347,10 +356,11 @@ def test_agent_ls_cli_lists_scoped_agents(tmpdir: TempDir, monkeypatch: pytest.M
     )
     result = runner.invoke(app, ['agent', 'ls'])
     assert result.exit_code == 0
-    assert result.output.splitlines() == [  # the out-of-workspace stray is filtered out
+    assert result.output.splitlines() == [  # unpinned → every agent, even the outside stray
         'aaa11111  proj@g@agent  busy  fix it',
         'bbb22222  other         idle  do a thing',
         'ccc                     idle  unnamed',  # name blanked: it merely echoes the id
+        'ddd       stray         idle  x',
     ]
 
 
@@ -365,6 +375,23 @@ def test_agent_ls_cli_trims_long_detail(tmpdir: TempDir, monkeypatch: pytest.Mon
     result = runner.invoke(app, ['agent', 'ls'])
     assert result.exit_code == 0
     assert result.output.splitlines() == ['aaa  named  busy  ' + 'x' * 79 + '…']
+
+
+def test_agent_ls_cli_pinned_to_project_filters_strays(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = _scoped_cli(tmpdir, monkeypatch)
+    worktree = project / 'worktrees' / 'g@agent'
+    monkeypatch.setattr(
+        'chimera.__main__.agents',
+        lambda: [
+            Agent(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir.path / 'outside', summary='x'),
+        ],
+    )
+    result = runner.invoke(app, ['agent', 'ls', '-p', 'proj'])
+    assert result.exit_code == 0
+    assert result.output.splitlines() == ['aaa  proj@g@agent  busy  fix it']
 
 
 def test_agent_ls_cli_when_nothing_running(

@@ -109,15 +109,24 @@ def resolve_goal(cwd: Path, project: Project, explicit: str | None = None) -> st
     raise GoalRequiredError(cwd)
 
 
-def resolve_scope(cwd: Path, *, project: str | None = None, goal: str | None = None) -> Scope:
-    """The scope to list within: the narrowest axis pinned from cwd/flags, widening on failure.
+def resolve_scope(
+    cwd: Path, *, project: str | None = None, goal: str | None = None, infer: bool = True
+) -> Scope:
+    """The scope to list within.
 
-    Reuses the action resolvers but turns *inference* failure into a widened scope —
+    With ``infer`` (the default, for ``goal ls``/``agent ls``) the narrowest axis is pinned
+    from cwd/flags, and *inference* failure widens rather than raises —
     ``CannotIdentifyProjectError`` → all projects, ``GoalRequiredError`` → all goals.
-    A bad explicit ``--project`` still raises ``NotInProjectError`` (naming a ghost is an
+    Without it (the ``ch ls`` dashboard) only an explicit ``--project``/``--goal`` narrows;
+    cwd is never read, so the view stays workspace-wide wherever you stand.
+
+    A bad explicit ``--project`` always raises ``NotInProjectError`` (naming a ghost is an
     error, not a reason to widen), as does genuinely not being in a workspace.
     """
     workspace = resolve_workspace(cwd)
+    if not infer:
+        project_ = resolve_project(cwd, project) if project is not None else None
+        return Scope(workspace, project_, goal)
     try:
         resolved: Project | None = resolve_project(cwd, project)
     except CannotIdentifyProjectError:

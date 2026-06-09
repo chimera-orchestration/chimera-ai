@@ -105,12 +105,15 @@ def _project(ctx: typer.Context, explicit: str | None) -> Project:
     )
 
 
-def _scope(ctx: typer.Context, project: str | None, goal: str | None) -> Scope:
+def _scope(
+    ctx: typer.Context, project: str | None, goal: str | None, *, infer: bool = True
+) -> Scope:
     overrides = _overrides(ctx)
     return resolve_scope(
         Path.cwd(),
         project=project if project is not None else overrides.project,
         goal=goal if goal is not None else overrides.goal,
+        infer=infer,
     )
 
 
@@ -161,7 +164,7 @@ def _tag(finding: Finding) -> str:
 
 @app.command('ls')
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
-    _render_board(board(_scope(ctx, project, goal), agents()))
+    _render_board(board(_scope(ctx, project, goal, infer=False), agents()))
 
 
 # Detail (session title / last prompt) past this many chars is trimmed for listings.
@@ -327,7 +330,7 @@ def agent_start(
 
 @agent_app.command('ls')
 def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
-    listing = scoped(agents(), _scope(ctx, project, goal))
+    listing = scoped(agents(), _scope(ctx, project, goal), otherwise=None)
     if not listing:
         typer.echo('No agents running')
         return

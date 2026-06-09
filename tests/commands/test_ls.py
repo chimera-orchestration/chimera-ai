@@ -106,6 +106,25 @@ def test_ls_cli_renders_loose_agents(tmpdir: TempDir, monkeypatch: pytest.Monkey
     ]
 
 
+def test_ls_cli_stays_global_from_inside_a_project(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _cli_workspace(tmpdir, monkeypatch)
+    _project(ws, 'alpha', 'g')
+    _project(ws, 'beta')
+    monkeypatch.chdir(ws / 'alpha')  # standing in one project must not narrow the dashboard
+    monkeypatch.setattr('chimera.__main__.agents', list)
+    result = runner.invoke(app, ['ls'])
+    assert result.exit_code == 0
+    assert result.output.splitlines() == [
+        'lycia',
+        '  alpha',
+        '    g  (no agent)',
+        '  beta',
+        '    (no goals)',
+    ]
+
+
 def test_ls_cli_marks_empty_goals_and_projects(
     tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
 ) -> None:

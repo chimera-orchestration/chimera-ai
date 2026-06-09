@@ -243,3 +243,28 @@ def test_resolve_scope_bad_explicit_project_still_raises(
     monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
     with pytest.raises(NotInProjectError):
         resolve_scope(ws, project='ghost')
+
+
+def test_resolve_scope_without_infer_ignores_cwd(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, repo, ws = _scoped_project_with_goal(tmpdir, monkeypatch)
+    checkout = tmpdir.path / 'human'
+    Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
+    scope = resolve_scope(checkout, infer=False)  # standing in a goal worktree
+    assert scope.workspace == ws
+    assert scope.project is None  # cwd is never read — stays workspace-wide
+    assert scope.goal is None
+
+
+def test_resolve_scope_without_infer_honors_explicit_flags(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws = _workspace(tmpdir)
+    project = _project(ws)
+    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    scope = resolve_scope(tmpdir.path, project=project.name, goal='g', infer=False)
+    assert scope.project is not None and scope.project.dir == project
+    assert scope.goal == 'g'
+    with pytest.raises(NotInProjectError):
+        resolve_scope(ws, project='ghost', infer=False)

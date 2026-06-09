@@ -38,7 +38,7 @@ def board(scope: Scope, listing: list[Agent]) -> Board:
     worktree, else as project ``loose`` (e.g. a session in ``repo/``), else as board
     ``loose`` (under the workspace but no project) — a running agent is never dropped.
     """
-    universe = scoped(listing, scope)
+    universe = scoped(listing, scope, otherwise=scope.workspace)
     projects = [scope.project] if scope.project is not None else iter_projects(scope.workspace)
     boards: list[ProjectBoard] = []
     placed: set[Agent] = set()

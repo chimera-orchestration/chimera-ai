@@ -69,16 +69,20 @@ the workspace. Two rules:
   broadens to all of them (`CannotIdentifyProjectError` → `project=None`), and likewise for goals
   (`GoalRequiredError` → `goal=None`). A bad explicit `--project` still raises (naming a ghost is
   an error). Requires a resolvable workspace — `$CHIMERA_WORKSPACE` from an external checkout.
-- **Each command enumerates one axis, scoped by the one above** (agents are scoped by session
-  `cwd`, the only reliable axis — names aren't always the `<project>@<goal>@<actor>` triple):
+- **The bare dashboard is global; the `X ls` commands are local.** `ch ls` is the overview — its
+  job is to show what you *can't* already see from where you stand, so it never narrows by cwd
+  (`resolve_scope(..., infer=False)`); only an explicit `-p/-g` focuses it. The scoped listers
+  infer from cwd and widen when they can't pin. Each enumerates one axis, scoped by the one above
+  (agents are scoped by session `cwd`, the only reliable axis — names aren't always the
+  `<project>@<goal>@<actor>` triple):
   - `ch project ls` — always the workspace.
   - `ch goal ls` — the pinned project's goals (bare names), else every project's (qualified).
-  - `ch agent ls` — agents under the pinned goal's worktrees, else the project, else the workspace
-    (machine-wide sessions outside the workspace are excluded).
-  - `ch ls` — the scope-aware dashboard (project → goal → agent tree), narrowing by cwd; `-p/-g`
-    refocus it. Standing in a goal worktree narrows all the way to that goal — the inferred goal
-    isn't cleared by a same-project `-p` (a cross-project `-p` widens, since the goal won't exist
-    there). Agents not under any goal/project surface as `loose` so a running agent is never hidden.
+  - `ch agent ls` — agents under the pinned goal's worktrees, else the project, else **every**
+    agent on the machine (the flat global list; the workspace tree is `ch ls`'s job); `-p/-g`
+    filter explicitly.
+  - `ch ls` — the workspace-wide dashboard (project → goal → agent tree), the same wherever you
+    run it; `-p` focuses on one project, `-g` on one goal (by name, across projects). Agents not
+    under any goal/project surface as `loose` so a running agent is never hidden.
 
 ## Keeping a workspace healthy
 
