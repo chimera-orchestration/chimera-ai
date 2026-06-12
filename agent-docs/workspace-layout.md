@@ -134,7 +134,7 @@ Naming pattern (see core concepts): each actor gets branch `{goal}/{actor}`; age
 
 `<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out), falling back to `HEAD` if neither exists. Branches are created with no upstream tracking.
 
-`ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background when a `[prompt]` positional is given). `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches.
+`ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background when a `[prompt]` positional is given). `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches. It refuses while a claude session is live in the agent worktree, reporting each session's pid/kind/status/start/name (sessions can be invisible — see `research/claude-session-registration.md`); `--force` bypasses the liveness check as well as discarding unsaved work. `ch project rm --force` never bypasses it.
 
 Refuses if the repo has no commits (nothing to branch from) — including bare repos.
 

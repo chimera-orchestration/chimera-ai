@@ -3,8 +3,9 @@ from pathlib import Path
 
 import yaml
 
+from chimera.commands.worktree.rm import refuse_if_agent_running
 from chimera.commands.worktree.rm import remove as remove_worktrees
-from chimera.worktrees import goals
+from chimera.worktrees import AGENT, goals, worktree_path
 
 
 def remove(workspace: Path, name: str, force: bool = False) -> Path | None:
@@ -13,9 +14,10 @@ def remove(workspace: Path, name: str, force: bool = False) -> Path | None:
     A no-op returning None if the project is already gone. Refuses while the
     project still has goals unless ``force``, which first finishes every goal —
     discarding unmerged/uncommitted work — before removing the project directory.
-    A live agent in any worktree always aborts, even with ``force``: the one
-    safeguard goal finish never bypasses. Only the workspace's project directory
-    is removed; a tracked repo living outside it is left untouched.
+    A live agent in any worktree always aborts, even with ``force`` (unlike goal
+    finish, whose --force bypasses the liveness check for a single goal). Only the
+    workspace's project directory is removed; a tracked repo living outside it is
+    left untouched.
     """
     project = workspace / name
     if not project.exists():
@@ -31,6 +33,8 @@ def remove(workspace: Path, name: str, force: bool = False) -> Path | None:
             f'{name} still has goals ({joined}); run `ch goal finish` on each or use --force'
         )
     repo = Path(yaml.safe_load(config.read_text())['repo'])
+    for goal in sorted(existing):  # check every goal before touching any of them
+        refuse_if_agent_running(worktree_path(worktrees_root, goal, AGENT))
     for goal in sorted(existing):
         remove_worktrees(repo, worktrees_root, goal, force=True)
     shutil.rmtree(project)

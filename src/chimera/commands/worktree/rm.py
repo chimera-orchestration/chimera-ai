@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 from giterator import Git
@@ -18,11 +19,12 @@ def remove(repo: Path, worktrees_root: Path, goal: str, force: bool = False) -> 
     """Remove the goal's worktrees and branches; refuse on unsaved work unless force.
 
     Only touches worktrees/branches that actually exist, so re-running — or removing
-    a goal that was never fully created — is a safe no-op. Always aborts if a claude
-    agent is live in the agent worktree, even with force. Returns removed worktrees.
+    a goal that was never fully created — is a safe no-op. Refuses if a claude agent
+    is live in the agent worktree, unless force. Returns removed worktrees.
     """
     git = Git(repo)
-    _refuse_if_agent_running(worktree_path(worktrees_root, goal, AGENT))
+    if not force:
+        refuse_if_agent_running(worktree_path(worktrees_root, goal, AGENT))
     registered = registered_worktrees(git)
     branches = set(git.branches())
     worktrees = {actor: worktree_path(worktrees_root, goal, actor) for actor in ACTORS}
@@ -38,9 +40,24 @@ def remove(repo: Path, worktrees_root: Path, goal: str, force: bool = False) -> 
     return removed
 
 
-def _refuse_if_agent_running(agent_worktree: Path) -> None:
-    if live_sessions(agent_worktree):
-        raise RuntimeError(f'an agent is live in {agent_worktree}; stop it before cleaning up')
+def refuse_if_agent_running(agent_worktree: Path) -> None:
+    if sessions := live_sessions(agent_worktree):
+        described = '\n  '.join(_describe(session) for session in sessions)
+        raise RuntimeError(
+            f'an agent is live in {agent_worktree}:\n'
+            f'  {described}\n'
+            f'find its terminal or kill the pid, then re-run'
+        )
+
+
+def _describe(session: dict[str, object]) -> str:
+    fields = [f'pid {session.get("pid", "?")}']
+    fields += [str(value) for key in ('kind', 'status') if (value := session.get(key))]
+    if isinstance(ms := session.get('startedAt'), int | float):
+        fields.append(f'since {datetime.fromtimestamp(ms / 1000):%a %H:%M}')
+    if name := session.get('name'):
+        fields.append(str(name))
+    return '  '.join(fields)
 
 
 def _refuse_if_unsafe(

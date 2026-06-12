@@ -45,12 +45,41 @@ def test_remove_aborts_when_an_agent_is_running(
     repo, worktrees = _goal(tmpdir)
     monkeypatch.setattr(
         'chimera.commands.worktree.rm.live_sessions',
-        lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
+        lambda worktree: [
+            {
+                'pid': 4242,
+                'kind': 'interactive',
+                'status': 'idle',
+                'startedAt': 1781247747055,
+                'name': 'sybil@g@agent',
+                'sessionId': 'x',
+            }
+        ],
     )
-    with pytest.raises(RuntimeError, match='agent is live'):
-        remove(repo.path, worktrees, 'g', force=True)  # not even force bypasses it
+    with pytest.raises(RuntimeError) as excinfo:
+        remove(repo.path, worktrees, 'g')
+    message = str(excinfo.value)
+    assert 'agent is live' in message
+    assert 'pid 4242' in message
+    assert 'interactive' in message
+    assert 'idle' in message
+    assert 'since' in message
+    assert 'sybil@g@agent' in message
     assert (worktrees / 'g@agent').is_dir()  # nothing removed
     assert 'g/human' in Git(repo.path).branches()
+
+
+def test_remove_force_bypasses_the_liveness_check(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, worktrees = _goal(tmpdir)
+    monkeypatch.setattr(
+        'chimera.commands.worktree.rm.live_sessions',
+        lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
+    )
+    remove(repo.path, worktrees, 'g', force=True)
+    assert not (worktrees / 'g@agent').exists()
+    assert 'g/agent' not in Git(repo.path).branches()
 
 
 def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir) -> None:
