@@ -7,6 +7,7 @@ from testfixtures import TempDir
 @pytest.fixture(autouse=True)
 def _clear_workspace_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv('CHIMERA_WORKSPACE', raising=False)  # tests opt in explicitly
+    monkeypatch.delenv('SHELL', raising=False)  # keeps the shell-completion check inert
 
 
 @pytest.fixture()

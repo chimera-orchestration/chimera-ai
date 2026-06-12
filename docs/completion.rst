@@ -8,7 +8,8 @@ are read live from the workspace, scoped the same way as the ``ls`` commands:
 narrowed by flags already on the line or by the directory you're standing in,
 widened to the whole workspace otherwise.
 
-There are two ways to enable it.
+There are two ways to enable it — ``ch doctor`` checks that one of them is in
+place for your shell and prints both if not.
 
 Let ``ch`` install it
 ---------------------

@@ -205,6 +205,42 @@ class WorkspaceEnvCheck:
             )
 
 
+# Per supported shell: the script `ch --install-completion` writes (under home), the
+# startup files that may carry a hand-managed eval line instead, and the typer-style
+# source instruction for that line (the hint names the first startup file).
+_COMPLETION_SHELLS = {
+    'zsh': ('.zfunc/_ch', ('.zshrc', '.zshenv', '.zprofile'), 'source_zsh'),
+    'bash': ('.bash_completions/ch.sh', ('.bashrc', '.bash_profile', '.profile'), 'source_bash'),
+}
+
+
+class ShellCompletionCheck:
+    """Tab completion for ch is installed in the user's shell."""
+
+    name = 'shell-completion'
+
+    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+        shell = Path(os.environ.get('SHELL', '')).name
+        if shell not in _COMPLETION_SHELLS:
+            return  # unknown or unsupported shell — nothing to verify
+        script, rc_names, instruction = _COMPLETION_SHELLS[shell]
+        home = Path.home()
+        if (home / script).is_file():
+            return  # installed by ch --install-completion
+        if any(
+            (rc := home / name).is_file() and '_CH_COMPLETE' in rc.read_text() for name in rc_names
+        ):
+            return  # hand-managed eval line
+        yield Finding(
+            self.name,
+            f'tab completion for ch is not installed for {shell} — '
+            f'run `ch --install-completion`, or add to ~/{rc_names[0]}:\n'
+            f'    eval "$(env _CH_COMPLETE={instruction} ch)"',
+            False,
+            False,
+        )
+
+
 CHECKS: tuple[Check, ...] = (
     WorkspaceConfigCheck(),
     ProjectConfigCheck(),
@@ -212,4 +248,5 @@ CHECKS: tuple[Check, ...] = (
     LegacyWorktreeSeparatorCheck(),
     OrphanedWorktreeCheck(),
     WorkspaceEnvCheck(),
+    ShellCompletionCheck(),
 )

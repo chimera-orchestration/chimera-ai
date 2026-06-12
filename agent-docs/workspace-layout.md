@@ -103,6 +103,10 @@ add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-env** — `$CHIMERA_WORKSPACE` is set and points at this workspace; not auto-fixable
   (never touches your shell profile) — the finding prints the `export …` line to add to
   `~/.zshrc`/`~/.bashrc`/`~/.profile`
+- **shell-completion** — tab completion for `ch` is installed for `$SHELL` (zsh/bash; other or
+  unset shells are skipped): either the `ch --install-completion` artifact (`~/.zfunc/_ch` /
+  `~/.bash_completions/ch.sh`) or a `_CH_COMPLETE` eval line in a shell startup file; not
+  auto-fixable (same no-profile-edits rule) — the finding prints both fixes
 
 Reports findings and exits non-zero while any remain unresolved.
 
