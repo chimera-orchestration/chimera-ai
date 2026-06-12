@@ -21,6 +21,7 @@ from chimera.commands.project.ls import projects as _projects
 from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.rm import remove as _worktree_remove
+from chimera.completions import complete_actor, complete_goal, complete_project
 from chimera.context import (
     Project,
     Scope,
@@ -33,12 +34,29 @@ from chimera.worktrees import ACTORS, AGENT, session_name, worktree_dirs, worktr
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
-    str | None, typer.Option('--project', '-p', help='Project name (default: inferred from cwd)')
+    str | None,
+    typer.Option(
+        '--project',
+        '-p',
+        help='Project name (default: inferred from cwd)',
+        autocompletion=complete_project,
+    ),
 ]
 GoalOpt = Annotated[
-    str | None, typer.Option('--goal', '-g', help='Goal (default: inferred from cwd/branch)')
+    str | None,
+    typer.Option(
+        '--goal',
+        '-g',
+        help='Goal (default: inferred from cwd/branch)',
+        autocompletion=complete_goal,
+    ),
 ]
-ActorOpt = Annotated[str | None, typer.Option('--actor', '-a', help='Actor (default: agent)')]
+ActorOpt = Annotated[
+    str | None,
+    typer.Option('--actor', '-a', help='Actor (default: agent)', autocompletion=complete_actor),
+]
+# A positional naming a goal that already exists (finish/rm); new-goal args stay plain.
+ExistingGoalArg = Annotated[str, typer.Argument(autocompletion=complete_goal)]
 FromOpt = Annotated[
     str | None, typer.Option('--from', help='Start ref (default: newest of main/origin/main)')
 ]
@@ -217,7 +235,9 @@ def project_add(
 
 
 @project_app.command('rm')
-def project_rm(name: Annotated[str, typer.Argument()], force: ForceOpt = False) -> None:
+def project_rm(
+    name: Annotated[str, typer.Argument(autocompletion=complete_project)], force: ForceOpt = False
+) -> None:
     removed = _project_remove(resolve_workspace(Path.cwd()), name, force)
     typer.echo(f'Removed {removed}' if removed else f'No project named {name} to remove')
 
@@ -237,7 +257,8 @@ def worktree_add(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
     actors: Annotated[
-        list[str] | None, typer.Argument(help='Actors (default: human, agent)')
+        list[str] | None,
+        typer.Argument(help='Actors (default: human, agent)', autocompletion=complete_actor),
     ] = None,
     frm: FromOpt = None,
     project: ProjectOpt = None,
@@ -252,7 +273,7 @@ def worktree_add(
 @worktree_app.command('rm')
 def worktree_rm(
     ctx: typer.Context,
-    goal: Annotated[str, typer.Argument()],
+    goal: ExistingGoalArg,
     force: ForceOpt = False,
     project: ProjectOpt = None,
 ) -> None:
@@ -292,7 +313,7 @@ def goal_start(
 @goal_app.command('finish')
 def goal_finish(
     ctx: typer.Context,
-    goal: Annotated[str, typer.Argument()],
+    goal: ExistingGoalArg,
     force: ForceOpt = False,
     project: ProjectOpt = None,
 ) -> None:

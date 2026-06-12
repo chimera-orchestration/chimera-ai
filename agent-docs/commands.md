@@ -35,6 +35,18 @@ the synonym stays out of the command list. Add one by extending the dict. A syno
 must not collide with a real command name (a test enforces this; the canonical
 command would win anyway).
 
+## Shell completion
+
+Value-taking params complete via callbacks in `chimera/completions.py`, attached with
+`autocompletion=` on the shared `Annotated` types (`ProjectOpt`, `GoalOpt`, `ActorOpt`,
+`ExistingGoalArg`) — a new param that names a project/goal/actor should reuse those.
+Rules:
+- a completer must never raise or print — swallow everything, return `[]`
+- scope like the listers (narrow by flags/cwd, widen otherwise); read a typed `-p` by
+  walking `ctx`/`ctx.parent` params — group callbacks (so `ctx.obj`) don't run during
+  completion
+- args naming something *new* (e.g. `goal start`) get no completer
+
 ## Testing
 
 - Put logic depth in pure-function tests — assert on return values / raised exceptions.
