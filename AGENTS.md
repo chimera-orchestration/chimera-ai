@@ -60,7 +60,8 @@ Note: CLAUDE.md is a symlink to AGENTS.md — edits to either always show as `AG
 
 ## Research files
 
-`@research/` holds ad-hoc research notes as `.md` files (e.g. `research/dolt.md`). When asked to save research to a `.md` file, put it there.
+Research notes live in the chimera project's knowledge dir in the workspace
+(`$CHIMERA_WORKSPACE/chimera/knowledge/`), not in this repo. Save ad-hoc research there.
 
 ## Topic documentation
 
