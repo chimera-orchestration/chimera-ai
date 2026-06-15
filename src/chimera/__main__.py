@@ -7,6 +7,7 @@ import typer
 from typer._click.core import Command, Context
 from typer.core import TyperCommand, TyperGroup
 
+from chimera import logging
 from chimera.commands.agent import Agent
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import agents
@@ -117,6 +118,26 @@ def alias_group(aliases: dict[str, str]) -> type[TyperGroup]:
             return super().get_command(ctx, aliases.get(cmd_name, cmd_name))
 
     return AliasGroup
+
+
+class LoggingCommand(TyperCommand):
+    """A command that logs the action it is about to run before running it.
+
+    The chokepoint for the *"every CLI action must be logged"* principle: it configures
+    the loguru sink and records the canonical command path plus parsed params, then runs
+    the command. Synonyms are already resolved to their canonical command by the time
+    ``invoke`` is reached, so the logged name is always the canonical one.
+    """
+
+    def invoke(self, ctx: Context) -> object:
+        logging.configure()
+        logging.log_action(_action(ctx), dict(ctx.params))
+        return super().invoke(ctx)
+
+
+def _action(ctx: Context) -> str:
+    """The canonical command path without the program name (e.g. ``project ls``)."""
+    return ctx.command_path.partition(' ')[2]
 
 
 class PassthroughCommand(TyperCommand):
@@ -268,7 +289,7 @@ def project_rm(
     typer.echo(f'Removed {removed}' if removed else f'No project named {name} to remove')
 
 
-@project_app.command('ls')
+@project_app.command('ls', cls=LoggingCommand)
 def project_ls() -> None:
     for name in _projects(resolve_workspace(Path.cwd())):
         typer.echo(name)

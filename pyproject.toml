@@ -26,7 +26,7 @@ dev = [
     "ruff",
     "pytest",
     "pytest-cov",
-    "testfixtures>=11",
+    "testfixtures>=12.1.0",
     "sybil",
 ]
 docs = [
