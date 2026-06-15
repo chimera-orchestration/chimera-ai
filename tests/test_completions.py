@@ -1,6 +1,6 @@
+import os
 from pathlib import Path
 
-import pytest
 from testfixtures import Replacer, TempDir
 from typer.completion import completion_init
 from typer.main import get_command
@@ -55,11 +55,9 @@ def test_goal_scoped_by_project_flag_on_leaf(tmpdir: TempDir, replace: Replacer)
     assert _complete(['worktree', 'rm', '-p', 'beta']) == ['fix-search']
 
 
-def test_goal_scoped_by_cwd(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_goal_scoped_by_cwd(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _workspace(tmpdir, replace)
-    monkeypatch.chdir(ws / 'beta')  # cwd inside a project scopes the goal completion to it
+    os.chdir(ws / 'beta')  # cwd inside a project scopes the goal completion to it
     assert _complete(['goal', 'finish']) == ['fix-search']
 
 

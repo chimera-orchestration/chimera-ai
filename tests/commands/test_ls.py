@@ -1,6 +1,6 @@
+import os
 from pathlib import Path
 
-import pytest
 from testfixtures import Replacer, TempDir
 from typer.testing import CliRunner
 
@@ -108,13 +108,11 @@ def test_ls_cli_renders_loose_agents(tmpdir: TempDir, replace: Replacer) -> None
     ]
 
 
-def test_ls_cli_stays_global_from_inside_a_project(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_ls_cli_stays_global_from_inside_a_project(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _cli_workspace(tmpdir, replace)
     _project(ws, 'alpha', 'g')
     _project(ws, 'beta')
-    monkeypatch.chdir(ws / 'alpha')  # standing in a project must not narrow the dashboard
+    os.chdir(ws / 'alpha')  # standing in a project must not narrow the dashboard
     replace.in_module(agents, list, module=chimera_main)
     result = runner.invoke(app, ['ls'])
     assert result.exit_code == 0

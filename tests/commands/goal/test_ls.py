@@ -1,6 +1,6 @@
+import os
 from pathlib import Path
 
-import pytest
 from giterator.testing import Repo
 from testfixtures import Replacer, TempDir
 from typer.testing import CliRunner
@@ -41,13 +41,11 @@ def test_goals_in_scope_single_project_when_pinned(tmpdir: TempDir) -> None:
     assert goals_in_scope(Scope(ws, project, None)) == [('alpha', 'x'), ('alpha', 'y')]
 
 
-def test_goal_ls_cli_prints_bare_names_inside_a_project(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_goal_ls_cli_prints_bare_names_inside_a_project(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _workspace(tmpdir)
     project = _project(ws, 'alpha', 'y', 'x')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(project)  # standing in the project → bare goal names
+    os.chdir(project)  # standing in the project → bare goal names
     result = runner.invoke(app, ['goal', 'ls'])
     assert result.exit_code == 0
     assert result.output.splitlines() == ['x', 'y']
@@ -63,9 +61,7 @@ def test_goal_ls_cli_qualifies_names_when_widened(tmpdir: TempDir, replace: Repl
     assert result.output.splitlines() == ['alpha  x', 'beta  z']
 
 
-def test_goal_ls_cli_reflects_real_worktrees(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_goal_ls_cli_reflects_real_worktrees(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
@@ -73,7 +69,7 @@ def test_goal_ls_cli_reflects_real_worktrees(
     project.mkdir()
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(project)  # worktree add + goal ls both infer the project from cwd
+    os.chdir(project)  # worktree add + goal ls both infer the project from cwd
     runner.invoke(app, ['worktree', 'add', 'alpha'])
     runner.invoke(app, ['worktree', 'add', 'beta'])
     result = runner.invoke(app, ['goal', 'ls'])

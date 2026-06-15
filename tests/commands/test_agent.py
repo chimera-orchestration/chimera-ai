@@ -155,18 +155,16 @@ def test_all_sessions_queries_claude_unscoped(replace: Replacer) -> None:
     assert captured['cmd'] == ['claude', 'agents', '--json']  # no --cwd → every project
 
 
-def _project_with_worktree(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _project_with_worktree(tmpdir: TempDir) -> Path:
     project = tmpdir.makedir('myproject')
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
     (project / 'worktrees' / 'g@agent').mkdir(parents=True)
-    monkeypatch.chdir(project)  # the CLI infers the project (and its name) from cwd
+    os.chdir(project)  # the CLI infers the project (and its name) from cwd
     return project
 
 
-def test_agent_start_cli(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    _project_with_worktree(tmpdir, monkeypatch)
+def test_agent_start_cli(tmpdir: TempDir, replace: Replacer) -> None:
+    _project_with_worktree(tmpdir)
     calls = _stub(replace)
     result = runner.invoke(app, ['agent', 'start', '-g', 'g'])
     assert result.exit_code == 0
@@ -174,10 +172,8 @@ def test_agent_start_cli(
     assert calls == [(['claude', '--name', 'myproject@g@agent'], expected, True)]
 
 
-def test_agent_start_cli_with_prompt(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    _project_with_worktree(tmpdir, monkeypatch)
+def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer) -> None:
+    _project_with_worktree(tmpdir)
     calls = _stub(replace)
     result = runner.invoke(app, ['agent', 'start', 'do it', '-g', 'g'])
     assert result.exit_code == 0
@@ -185,10 +181,8 @@ def test_agent_start_cli_with_prompt(
     assert calls == [(['claude', '--bg', '--name', 'myproject@g@agent', 'do it'], expected, True)]
 
 
-def test_agent_start_cli_with_actor(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    project = _project_with_worktree(tmpdir, monkeypatch)
+def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer) -> None:
+    project = _project_with_worktree(tmpdir)
     (project / 'worktrees' / 'g@reviewer').mkdir()
     calls = _stub(replace)
     result = runner.invoke(app, ['agent', 'start', '-g', 'g', '-a', 'reviewer'])
@@ -197,10 +191,8 @@ def test_agent_start_cli_with_actor(
     assert calls == [(['claude', '--name', 'myproject@g@reviewer'], expected, True)]
 
 
-def test_agent_start_cli_forwards_flags_after_dashdash(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    _project_with_worktree(tmpdir, monkeypatch)
+def test_agent_start_cli_forwards_flags_after_dashdash(tmpdir: TempDir, replace: Replacer) -> None:
+    _project_with_worktree(tmpdir)
     calls = _stub(replace)
     # no prompt, only passthrough: the flag must not be mistaken for the prompt
     result = runner.invoke(
@@ -212,10 +204,8 @@ def test_agent_start_cli_forwards_flags_after_dashdash(
     assert calls == [(command, expected, True)]
 
 
-def test_agent_start_cli_with_prompt_and_passthrough(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    _project_with_worktree(tmpdir, monkeypatch)
+def test_agent_start_cli_with_prompt_and_passthrough(tmpdir: TempDir, replace: Replacer) -> None:
+    _project_with_worktree(tmpdir)
     calls = _stub(replace)
     result = runner.invoke(app, ['agent', 'start', 'do it', '-g', 'g', '--', '--model', 'opus'])
     assert result.exit_code == 0
@@ -224,10 +214,8 @@ def test_agent_start_cli_with_prompt_and_passthrough(
     assert calls == [(command, expected, True)]
 
 
-def test_agent_resume_cli(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    _project_with_worktree(tmpdir, monkeypatch)
+def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer) -> None:
+    _project_with_worktree(tmpdir)
     calls = _stub(replace)
     result = runner.invoke(app, ['agent', 'resume', '-g', 'g'])
     assert result.exit_code == 0
@@ -235,10 +223,8 @@ def test_agent_resume_cli(
     assert calls == [(['claude', '--resume', 'myproject@g@agent'], expected, True)]
 
 
-def test_agent_resume_cli_with_passthrough(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    _project_with_worktree(tmpdir, monkeypatch)
+def test_agent_resume_cli_with_passthrough(tmpdir: TempDir, replace: Replacer) -> None:
+    _project_with_worktree(tmpdir)
     calls = _stub(replace)
     result = runner.invoke(
         app, ['agent', 'resume', '-g', 'g', '--', '--dangerously-skip-permissions']

@@ -1,6 +1,6 @@
+import os
 from pathlib import Path
 
-import pytest
 from giterator import Git
 from giterator.testing import Repo
 from testfixtures import Replacer, TempDir
@@ -20,10 +20,10 @@ def _seeded_repo(tmpdir: TempDir) -> Repo:
     return repo
 
 
-def _project(tmpdir: TempDir, repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _project(tmpdir: TempDir, repo: Repo) -> Path:
     project = tmpdir.makedir('project')
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    monkeypatch.chdir(project)  # the CLI infers the project (and its name) from cwd
+    os.chdir(project)  # the CLI infers the project (and its name) from cwd
     return project
 
 
@@ -58,11 +58,9 @@ def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer
     assert calls == [(worktrees / 'g@agent', 'proj@g@agent', 'do it', ())]
 
 
-def test_goal_start_cli(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_goal_start_cli(tmpdir: TempDir, replace: Replacer) -> None:
     repo = _seeded_repo(tmpdir)
-    project = _project(tmpdir, repo, monkeypatch)
+    project = _project(tmpdir, repo)
     calls: list[object] = []  # stub the agent so real git runs but no claude launches
     replace.in_module(
         agent,
@@ -76,11 +74,9 @@ def test_goal_start_cli(
     assert calls == [(expected, 'project@feature-x@agent', None, [])]
 
 
-def test_goal_start_cli_with_prompt(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_goal_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer) -> None:
     repo = _seeded_repo(tmpdir)
-    _project(tmpdir, repo, monkeypatch)
+    _project(tmpdir, repo)
     calls: list[object] = []
     replace.in_module(
         agent,
@@ -93,11 +89,9 @@ def test_goal_start_cli_with_prompt(
     assert calls == [(expected, 'project@feature-x@agent', 'go build it', [])]
 
 
-def test_goal_start_cli_passes_extra_flags_through(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_goal_start_cli_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -> None:
     repo = _seeded_repo(tmpdir)
-    _project(tmpdir, repo, monkeypatch)
+    _project(tmpdir, repo)
     calls: list[object] = []
     replace.in_module(
         agent,
