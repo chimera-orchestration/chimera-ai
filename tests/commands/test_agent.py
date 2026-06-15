@@ -159,7 +159,7 @@ def _project_with_worktree(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> 
     project = tmpdir.makedir('myproject')
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
     (project / 'worktrees' / 'g@agent').mkdir(parents=True)
-    monkeypatch.chdir(project)
+    monkeypatch.chdir(project)  # the CLI infers the project (and its name) from cwd
     return project
 
 
@@ -430,21 +430,18 @@ def test_under_and_in_goal(tmpdir: TempDir) -> None:
     assert not in_goal(worktrees, worktrees, 'g')  # the worktrees dir itself is not in a goal
 
 
-def _scoped_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer) -> Path:
+def _scoped_cli(tmpdir: TempDir, replace: Replacer) -> Path:
     ws = tmpdir.makedir('lycia')
     (ws / 'config.yaml').write_text('kind: workspace\n')
     project = ws / 'proj'
     (project / 'worktrees' / 'g@agent').mkdir(parents=True)
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(ws)
     return project
 
 
-def test_agent_ls_cli_unpinned_lists_every_agent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    project = _scoped_cli(tmpdir, monkeypatch, replace)
+def test_agent_ls_cli_unpinned_lists_every_agent(tmpdir: TempDir, replace: Replacer) -> None:
+    project = _scoped_cli(tmpdir, replace)
     worktree = project / 'worktrees' / 'g@agent'
     replace.in_module(
         agents,
@@ -468,10 +465,8 @@ def test_agent_ls_cli_unpinned_lists_every_agent(
     ]
 
 
-def test_agent_ls_cli_trims_long_detail(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    project = _scoped_cli(tmpdir, monkeypatch, replace)
+def test_agent_ls_cli_trims_long_detail(tmpdir: TempDir, replace: Replacer) -> None:
+    project = _scoped_cli(tmpdir, replace)
     worktree = project / 'worktrees' / 'g@agent'
     detail = 'x' * 200
     replace.in_module(
@@ -484,10 +479,8 @@ def test_agent_ls_cli_trims_long_detail(
     assert result.output.splitlines() == ['aaa  named  busy  ' + 'x' * 79 + '…']
 
 
-def test_agent_ls_cli_pinned_to_project_filters_strays(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    project = _scoped_cli(tmpdir, monkeypatch, replace)
+def test_agent_ls_cli_pinned_to_project_filters_strays(tmpdir: TempDir, replace: Replacer) -> None:
+    project = _scoped_cli(tmpdir, replace)
     worktree = project / 'worktrees' / 'g@agent'
     replace.in_module(
         agents,
@@ -502,10 +495,8 @@ def test_agent_ls_cli_pinned_to_project_filters_strays(
     assert result.output.splitlines() == ['aaa  proj@g@agent  busy  fix it']
 
 
-def test_agent_ls_cli_when_nothing_running(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    _scoped_cli(tmpdir, monkeypatch, replace)
+def test_agent_ls_cli_when_nothing_running(tmpdir: TempDir, replace: Replacer) -> None:
+    _scoped_cli(tmpdir, replace)
     replace.in_module(agents, list, module=chimera_main)
     result = runner.invoke(app, ['agent', 'ls'])
     assert result.exit_code == 0

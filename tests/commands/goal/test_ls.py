@@ -47,20 +47,17 @@ def test_goal_ls_cli_prints_bare_names_inside_a_project(
     ws = _workspace(tmpdir)
     project = _project(ws, 'alpha', 'y', 'x')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(project)
+    monkeypatch.chdir(project)  # standing in the project → bare goal names
     result = runner.invoke(app, ['goal', 'ls'])
     assert result.exit_code == 0
     assert result.output.splitlines() == ['x', 'y']
 
 
-def test_goal_ls_cli_qualifies_names_when_widened(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_goal_ls_cli_qualifies_names_when_widened(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _workspace(tmpdir)
     _project(ws, 'alpha', 'x')
     _project(ws, 'beta', 'z')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(ws)
     result = runner.invoke(app, ['goal', 'ls'])
     assert result.exit_code == 0
     assert result.output.splitlines() == ['alpha  x', 'beta  z']
@@ -76,7 +73,7 @@ def test_goal_ls_cli_reflects_real_worktrees(
     project.mkdir()
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(project)
+    monkeypatch.chdir(project)  # worktree add + goal ls both infer the project from cwd
     runner.invoke(app, ['worktree', 'add', 'alpha'])
     runner.invoke(app, ['worktree', 'add', 'beta'])
     result = runner.invoke(app, ['goal', 'ls'])

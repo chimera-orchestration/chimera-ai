@@ -146,11 +146,10 @@ def test_add_refuses_bare_repo_without_commits(tmpdir: TempDir) -> None:
         add(bare, worktrees, 'g')
 
 
-def test_worktree_add_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worktree_add_cli(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
-    project = tmpdir.makedir('project')
+    project = tmpdir.path
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    monkeypatch.chdir(project)
     result = runner.invoke(app, ['worktree', 'add', 'feature-x'])
     assert result.exit_code == 0
     assert (project / 'worktrees' / 'feature-x@agent').is_dir()
@@ -158,24 +157,22 @@ def test_worktree_add_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> N
     assert 'feature-x/human' in Git(repo.path).branches()
 
 
-def test_worktree_add_cli_from_option(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worktree_add_cli_from_option(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     repo('checkout', '-b', 'release')
     release = repo.commit_content('release-work', short=False)
     repo('checkout', 'main')
-    project = tmpdir.makedir('project')
+    project = tmpdir.path
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    monkeypatch.chdir(project)
     result = runner.invoke(app, ['worktree', 'add', 'feature-x', '--from', 'release'])
     assert result.exit_code == 0
     assert _head(project / 'worktrees' / 'feature-x@agent') == release
 
 
-def test_worktree_ls_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worktree_ls_cli(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
-    project = tmpdir.makedir('project')
+    project = tmpdir.path
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    monkeypatch.chdir(project)
     runner.invoke(app, ['worktree', 'add', 'g'])
     result = runner.invoke(app, ['worktree', 'ls'])
     assert result.exit_code == 0

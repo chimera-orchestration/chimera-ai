@@ -28,11 +28,9 @@ def _goal(tmpdir: TempDir) -> tuple[Repo, Path]:
     return repo, worktrees
 
 
-def _project(tmpdir: TempDir, repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Path:
-    project = tmpdir.makedir('project')
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    monkeypatch.chdir(project)
-    return project
+def _project(tmpdir: TempDir, repo: Repo) -> Path:
+    (tmpdir.path / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
+    return tmpdir.path
 
 
 def test_remove_is_a_noop_for_a_goal_that_was_never_created(tmpdir: TempDir) -> None:
@@ -121,10 +119,10 @@ def test_remove_force_discards_unsaved_work(tmpdir: TempDir) -> None:
     assert 'g/agent' not in branches
 
 
-def test_worktree_rm_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_worktree_rm_cli(tmpdir: TempDir) -> None:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
-    project = _project(tmpdir, repo, monkeypatch)
+    project = _project(tmpdir, repo)
     runner.invoke(app, ['worktree', 'add', 'g'])
     result = runner.invoke(app, ['worktree', 'rm', 'g'])
     assert result.exit_code == 0
@@ -132,21 +130,19 @@ def test_worktree_rm_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> No
     assert 'g/human' not in Git(repo.path).branches()
 
 
-def test_worktree_rm_cli_reports_nothing_to_remove(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_worktree_rm_cli_reports_nothing_to_remove(tmpdir: TempDir) -> None:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
-    _project(tmpdir, repo, monkeypatch)
+    _project(tmpdir, repo)
     result = runner.invoke(app, ['worktree', 'rm', 'ghost'])
     assert result.exit_code == 0
     assert 'Nothing to remove' in result.output
 
 
-def test_goal_finish_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_goal_finish_cli(tmpdir: TempDir) -> None:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
-    project = _project(tmpdir, repo, monkeypatch)
+    project = _project(tmpdir, repo)
     runner.invoke(app, ['worktree', 'add', 'g'])
     result = runner.invoke(app, ['goal', 'finish', 'g'])  # finish is the lifecycle name for rm
     assert result.exit_code == 0

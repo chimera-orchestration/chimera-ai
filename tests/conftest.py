@@ -24,7 +24,7 @@ def _clear_workspace_env(replace: Replacer) -> None:
 
 @pytest.fixture()
 def tmpdir() -> Iterator[TempDir]:
-    with TempDir() as d:
+    with TempDir(cwd=True) as d:
         yield d
 
 

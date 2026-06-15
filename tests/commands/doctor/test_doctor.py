@@ -95,25 +95,19 @@ def test_doctor_aggregates_findings_and_passes_fix_through(tmpdir: TempDir) -> N
     assert check.seen == [(ws, True)]
 
 
-def test_doctor_cli_all_clean(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: workspace\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(ws)
     result = runner.invoke(app, ['doctor'])
     assert result.exit_code == 0
     assert 'All checks passed!' in result.output
 
 
-def test_doctor_cli_verbose_lists_every_check(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_doctor_cli_verbose_lists_every_check(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: workspace\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(ws)
     result = runner.invoke(app, ['doctor', '--verbose'])
     assert result.exit_code == 0
     assert '[workspace-config] (ok)' in result.output
@@ -126,7 +120,7 @@ def test_doctor_cli_flags_unset_workspace_env(
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: workspace\n')
     replace.in_environ('CHIMERA_WORKSPACE', not_there)
-    monkeypatch.chdir(ws)
+    monkeypatch.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
     result = runner.invoke(app, ['doctor'])
     assert result.exit_code == 1
     assert '$CHIMERA_WORKSPACE is not set' in result.output
@@ -137,7 +131,7 @@ def test_doctor_cli_reports_and_exits_nonzero(
     tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     ws = _ws(tmpdir)  # missing root config.yaml → a fixable finding
-    monkeypatch.chdir(ws)
+    monkeypatch.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
     result = runner.invoke(app, ['doctor'])
     assert result.exit_code == 1
     assert 'would fix — run with --fix' in result.output
@@ -161,14 +155,11 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir) -> None:
     assert 'needs attention' in result.output
 
 
-def test_doctor_cli_navigates_from_a_project(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
+def test_doctor_cli_navigates_from_a_project(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: workspace\n')
     project = _project(ws, name='chimera')  # legacy repo:-only config
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(project)  # the mistake: doctor run inside the project
     result = runner.invoke(app, ['doctor', '--fix'])
     assert result.exit_code == 0
     assert f'resolved workspace root: {ws.resolve()}' in result.output

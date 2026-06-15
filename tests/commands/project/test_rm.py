@@ -85,21 +85,19 @@ def test_remove_force_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: 
     assert (project / 'worktrees' / 'g@agent').is_dir()
 
 
-def test_project_rm_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_project_rm_cli(tmpdir: TempDir, replace: Replacer) -> None:
     workspace, repo, project = _project(tmpdir)
-    monkeypatch.chdir(workspace)
+    replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
     result = runner.invoke(app, ['project', 'rm', 'myproj'])
     assert result.exit_code == 0
     assert 'Removed' in result.output
     assert not project.exists()
 
 
-def test_project_rm_cli_reports_nothing_to_remove(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_project_rm_cli_reports_nothing_to_remove(tmpdir: TempDir, replace: Replacer) -> None:
     workspace = tmpdir.makedir('lycia')
     (workspace / 'config.yaml').write_text('kind: workspace\n')
-    monkeypatch.chdir(workspace)
+    replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
     result = runner.invoke(app, ['project', 'rm', 'ghost'])
     assert result.exit_code == 0
     assert 'No project named ghost' in result.output

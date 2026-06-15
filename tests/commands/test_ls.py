@@ -61,17 +61,14 @@ def test_board_pinned_goal_shows_only_that_goal(tmpdir: TempDir) -> None:
     assert result == Board('lycia', [ProjectBoard('alpha', [GoalBoard('g', [a])], [])], [])
 
 
-def _cli_workspace(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer) -> Path:
+def _cli_workspace(tmpdir: TempDir, replace: Replacer) -> Path:
     ws = _workspace(tmpdir)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    monkeypatch.chdir(ws)
     return ws
 
 
-def test_ls_cli_renders_the_tree(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    ws = _cli_workspace(tmpdir, monkeypatch, replace)
+def test_ls_cli_renders_the_tree(tmpdir: TempDir, replace: Replacer) -> None:
+    ws = _cli_workspace(tmpdir, replace)
     _project(ws, 'alpha', 'g')
     worktree = ws / 'alpha' / 'worktrees' / 'g@agent'
     replace.in_module(
@@ -89,10 +86,8 @@ def test_ls_cli_renders_the_tree(
     ]
 
 
-def test_ls_cli_renders_loose_agents(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    ws = _cli_workspace(tmpdir, monkeypatch, replace)
+def test_ls_cli_renders_loose_agents(tmpdir: TempDir, replace: Replacer) -> None:
+    ws = _cli_workspace(tmpdir, replace)
     _project(ws, 'alpha')  # no goals; a session in repo/ is project-loose
     stray = ws / 'scratch'  # under the workspace but no project → board-loose
     replace.in_module(
@@ -116,10 +111,10 @@ def test_ls_cli_renders_loose_agents(
 def test_ls_cli_stays_global_from_inside_a_project(
     tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
 ) -> None:
-    ws = _cli_workspace(tmpdir, monkeypatch, replace)
+    ws = _cli_workspace(tmpdir, replace)
     _project(ws, 'alpha', 'g')
     _project(ws, 'beta')
-    monkeypatch.chdir(ws / 'alpha')  # standing in one project must not narrow the dashboard
+    monkeypatch.chdir(ws / 'alpha')  # standing in a project must not narrow the dashboard
     replace.in_module(agents, list, module=chimera_main)
     result = runner.invoke(app, ['ls'])
     assert result.exit_code == 0
@@ -132,10 +127,8 @@ def test_ls_cli_stays_global_from_inside_a_project(
     ]
 
 
-def test_ls_cli_marks_empty_goals_and_projects(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
-) -> None:
-    ws = _cli_workspace(tmpdir, monkeypatch, replace)
+def test_ls_cli_marks_empty_goals_and_projects(tmpdir: TempDir, replace: Replacer) -> None:
+    ws = _cli_workspace(tmpdir, replace)
     _project(ws, 'alpha', 'g')
     _project(ws, 'beta')
     replace.in_module(agents, list, module=chimera_main)

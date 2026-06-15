@@ -1,4 +1,3 @@
-import pytest
 from testfixtures import TempDir
 from typer.testing import CliRunner
 
@@ -22,9 +21,8 @@ def test_projects_lists_tracked_projects_sorted(tmpdir: TempDir) -> None:
     assert projects(tmpdir.path) == ['alpha', 'beta']
 
 
-def test_project_ls_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
-    workspace = _workspace_with_projects(tmpdir)
-    monkeypatch.chdir(workspace.path)
+def test_project_ls_cli(tmpdir: TempDir) -> None:
+    _workspace_with_projects(tmpdir)
     result = runner.invoke(app, ['project', 'ls'])
     assert result.exit_code == 0
     assert result.output.split() == ['alpha', 'beta']

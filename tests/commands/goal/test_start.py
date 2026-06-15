@@ -23,7 +23,7 @@ def _seeded_repo(tmpdir: TempDir) -> Repo:
 def _project(tmpdir: TempDir, repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Path:
     project = tmpdir.makedir('project')
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    monkeypatch.chdir(project)
+    monkeypatch.chdir(project)  # the CLI infers the project (and its name) from cwd
     return project
 
 
