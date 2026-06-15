@@ -8,6 +8,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from chimera.config import NotInWorkspaceError
 from chimera.context import resolve_workspace
 
 LOG_RELPATH = Path('logs') / 'chimera.jsonl'
@@ -19,8 +20,16 @@ def log_path(workspace: Path) -> Path:
 
 
 def configure() -> None:
-    """Point loguru at the current workspace's action log (one sink, one file)."""
-    workspace = resolve_workspace(Path.cwd())
+    """Point loguru at the current workspace's action log (one sink, one file).
+
+    Best-effort: an action run outside any workspace (e.g. ``ch init`` before one
+    exists) has no log file to write to, so loguru's default sink is left in place —
+    better than nothing.
+    """
+    try:
+        workspace = resolve_workspace(Path.cwd())
+    except NotInWorkspaceError:
+        return
     logger.remove()
     logger.add(log_path(workspace), serialize=True, level='INFO')
 

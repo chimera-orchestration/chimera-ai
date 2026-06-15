@@ -1,11 +1,7 @@
 import pytest
-from testfixtures import TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, TempDir
 
-from chimera.__main__ import app
 from chimera.commands.init import init
-
-runner = CliRunner()
 
 
 def test_init_creates_workspace(tmpdir: TempDir) -> None:
@@ -29,16 +25,16 @@ def test_init_existing_path_raises(tmpdir: TempDir) -> None:
         init(path)
 
 
-def test_init_cli(tmpdir: TempDir) -> None:
+def test_init_cli(tmpdir: TempDir, command: Command) -> None:
     path = tmpdir.path / 'ws'
-    result = runner.invoke(app, ['init', str(path)])
-    assert result.exit_code == 0
-    assert f'Initialized workspace at {path}' in result.output
+    command.run('init', str(path)).check(
+        output=f'Initialized workspace at {path}', logging=[('INFO', 'init')]
+    )
     assert (path / '.git').is_dir()
 
 
-def test_init_cli_existing_path(tmpdir: TempDir) -> None:
+def test_init_cli_existing_path(tmpdir: TempDir, command: Command) -> None:
     path = tmpdir.path / 'existing'
     path.mkdir()
-    result = runner.invoke(app, ['init', str(path)])
-    assert result.exit_code != 0
+    with pytest.raises(FileExistsError):
+        command.run('init', str(path))

@@ -140,7 +140,7 @@ def _action(ctx: Context) -> str:
     return ctx.command_path.partition(' ')[2]
 
 
-class PassthroughCommand(TyperCommand):
+class PassthroughCommand(LoggingCommand):
     """A command that forwards everything after ``--`` to the underlying binary, verbatim.
 
     Click otherwise lets a declared positional (the prompt) swallow the first post-``--``
@@ -185,12 +185,12 @@ def _scope(
 app = typer.Typer(callback=_context, help='Chimera — AI agent orchestration.')
 
 
-@app.command()
+@app.command(cls=LoggingCommand)
 def init(path: Annotated[Path, typer.Argument()]) -> None:
     typer.echo(f'Initialized workspace at {_init(path)}')
 
 
-@app.command()
+@app.command(cls=LoggingCommand)
 def doctor(
     path: Annotated[Path | None, typer.Argument()] = None,
     fix: Annotated[
@@ -227,7 +227,7 @@ def _tag(finding: Finding) -> str:
     return 'would fix — run with --fix' if finding.fixable else 'needs attention'
 
 
-@app.command('ls')
+@app.command('ls', cls=LoggingCommand)
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     _render_board(board(_scope(ctx, project, goal, infer=False), agents()))
 
@@ -274,14 +274,14 @@ project_app = typer.Typer(help='Manage projects.')
 app.add_typer(project_app, name='project')
 
 
-@project_app.command('add')
+@project_app.command('add', cls=LoggingCommand)
 def project_add(
     source: Annotated[str, typer.Argument(help='Git URL to clone, or local path to track')],
 ) -> None:
     typer.echo(f'Added {_project_add(resolve_workspace(Path.cwd()), source)}')
 
 
-@project_app.command('rm')
+@project_app.command('rm', cls=LoggingCommand)
 def project_rm(
     name: Annotated[str, typer.Argument(autocompletion=complete_project)], force: ForceOpt = False
 ) -> None:
@@ -299,7 +299,7 @@ worktree_app = typer.Typer(callback=_context, help="Manage a goal's worktrees an
 app.add_typer(worktree_app, name='worktree')
 
 
-@worktree_app.command('add')
+@worktree_app.command('add', cls=LoggingCommand)
 def worktree_add(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
@@ -317,7 +317,7 @@ def worktree_add(
         typer.echo(f'Created {created}')
 
 
-@worktree_app.command('rm')
+@worktree_app.command('rm', cls=LoggingCommand)
 def worktree_rm(
     ctx: typer.Context,
     goal: ExistingGoalArg,
@@ -328,7 +328,7 @@ def worktree_rm(
     _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force), goal)
 
 
-@worktree_app.command('ls')
+@worktree_app.command('ls', cls=LoggingCommand)
 def worktree_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
     for worktree in worktree_dirs(_project(ctx, project).worktrees):
         typer.echo(worktree)
@@ -357,7 +357,7 @@ def goal_start(
     typer.echo(f'Started {goal} in {worktree}')
 
 
-@goal_app.command('finish')
+@goal_app.command('finish', cls=LoggingCommand)
 def goal_finish(
     ctx: typer.Context,
     goal: ExistingGoalArg,
@@ -368,7 +368,7 @@ def goal_finish(
     _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force), goal)
 
 
-@goal_app.command('ls')
+@goal_app.command('ls', cls=LoggingCommand)
 def goal_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
     scope = _scope(ctx, project, None)
     for proj, goal in goals_in_scope(scope):
@@ -413,7 +413,7 @@ def agent_resume(
     typer.echo(f'Resumed agent in {worktree}')
 
 
-@agent_app.command('ls')
+@agent_app.command('ls', cls=LoggingCommand)
 def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     listing = scoped(agents(), _scope(ctx, project, goal), otherwise=None)
     if not listing:

@@ -41,3 +41,14 @@ def test_configure_is_idempotent(workspace: TempDir) -> None:
     configure()  # a second sink would duplicate every line
     log_action('project ls', {})
     assert len(_records(workspace)) == 1
+
+
+def test_configure_outside_a_workspace_keeps_the_default(tmpdir: TempDir) -> None:
+    # cwd is the temp root and the env is cleared, so no workspace resolves: configure
+    # must not raise and must leave loguru's existing sinks in place (better than none).
+    core = getattr(logger, '_core')
+    with Replacer() as replace:
+        sentinel = {'kept': object()}
+        replace(target=core.handlers, container=core, name='handlers', replacement=sentinel)
+        configure()
+        assert core.handlers == sentinel
