@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import TempDir
+from testfixtures import Replacer, TempDir
 
 from chimera.config import NotInProjectError, NotInWorkspaceError
 from chimera.context import (
@@ -35,16 +35,16 @@ def _project(parent: Path, name: str = 'proj', repo: str = '/r') -> Path:
 # ---- workspace -------------------------------------------------------------
 
 
-def test_resolve_workspace_prefers_env(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_workspace_prefers_env(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _workspace(tmpdir)
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     assert resolve_workspace(tmpdir.path / 'somewhere-else') == ws  # env wins over cwd
 
 
 def test_resolve_workspace_env_must_point_at_a_workspace(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, replace: Replacer
 ) -> None:
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(tmpdir.makedir('not-a-workspace')))
+    replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir.makedir('not-a-workspace')))
     with pytest.raises(NotInWorkspaceError):
         resolve_workspace(tmpdir.path)
 
@@ -85,18 +85,18 @@ def test_resolve_project_by_name_raises_when_absent(tmpdir: TempDir) -> None:
 
 
 def test_resolve_project_matches_repo_from_external_checkout(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'external')  # lives outside the workspace
     repo.commit_content('seed')
     project = _project(ws, 'myproj', repo=str(repo.path))
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))  # cwd is outside lycia, so anchor by env
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))  # cwd is outside lycia, so anchor by env
     assert resolve_project(repo.path).dir == project
 
 
 def test_resolve_project_matches_repo_from_a_linked_worktree(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'external')
@@ -104,17 +104,17 @@ def test_resolve_project_matches_repo_from_a_linked_worktree(
     project = _project(ws, 'myproj', repo=str(repo.path))
     checkout = tmpdir.path / 'review'
     Git(repo.path)('worktree', 'add', '-b', 'review', str(checkout), 'main')  # worktree elsewhere
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     assert resolve_project(checkout).dir == project  # matched via the main repo
 
 
 def test_resolve_project_raises_when_repo_matches_nothing(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
     stranger = Repo.make(tmpdir.path / 'stranger')  # not registered as a project
     stranger.commit_content('seed')
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     with pytest.raises(CannotIdentifyProjectError):
         resolve_project(stranger.path)
 
@@ -125,11 +125,9 @@ def test_resolve_project_raises_at_the_workspace_root(tmpdir: TempDir) -> None:
         resolve_project(ws)
 
 
-def test_resolve_project_raises_outside_any_git_repo(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_resolve_project_raises_outside_any_git_repo(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _workspace(tmpdir)
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     with pytest.raises(CannotIdentifyProjectError):
         resolve_project(tmpdir.makedir('bare'))  # not a git repo, no markers
 
@@ -188,15 +186,13 @@ def test_resolve_goal_requires_one_outside_a_repo(tmpdir: TempDir) -> None:
 # ---- scope -----------------------------------------------------------------
 
 
-def _scoped_project_with_goal(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> tuple[Project, Repo, Path]:
+def _scoped_project_with_goal(tmpdir: TempDir, replace: Replacer) -> tuple[Project, Repo, Path]:
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     project_dir = _project(ws, 'proj', repo=str(repo.path))
     add(repo.path, project_dir / 'worktrees', 'g')
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     return resolve_project(project_dir), repo, ws
 
 
@@ -216,10 +212,8 @@ def test_resolve_scope_pins_the_project_from_within_it(tmpdir: TempDir) -> None:
     assert scope.goal is None  # not on a goal branch
 
 
-def test_resolve_scope_pins_the_goal_from_a_goal_branch(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project, repo, _ws = _scoped_project_with_goal(tmpdir, monkeypatch)
+def test_resolve_scope_pins_the_goal_from_a_goal_branch(tmpdir: TempDir, replace: Replacer) -> None:
+    project, repo, _ws = _scoped_project_with_goal(tmpdir, replace)
     checkout = tmpdir.path / 'human'
     Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
     scope = resolve_scope(checkout)
@@ -228,27 +222,25 @@ def test_resolve_scope_pins_the_goal_from_a_goal_branch(
 
 
 def test_resolve_scope_external_checkout_pins_project_not_goal(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, replace: Replacer
 ) -> None:
-    project, repo, _ws = _scoped_project_with_goal(tmpdir, monkeypatch)
+    project, repo, _ws = _scoped_project_with_goal(tmpdir, replace)
     scope = resolve_scope(repo.path)  # the repo is on plain 'main'
     assert scope.project is not None and scope.project.dir == project.dir
     assert scope.goal is None
 
 
 def test_resolve_scope_bad_explicit_project_still_raises(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     with pytest.raises(NotInProjectError):
         resolve_scope(ws, project='ghost')
 
 
-def test_resolve_scope_without_infer_ignores_cwd(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project, repo, ws = _scoped_project_with_goal(tmpdir, monkeypatch)
+def test_resolve_scope_without_infer_ignores_cwd(tmpdir: TempDir, replace: Replacer) -> None:
+    project, repo, ws = _scoped_project_with_goal(tmpdir, replace)
     checkout = tmpdir.path / 'human'
     Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
     scope = resolve_scope(checkout, infer=False)  # standing in a goal worktree
@@ -258,11 +250,11 @@ def test_resolve_scope_without_infer_ignores_cwd(
 
 
 def test_resolve_scope_without_infer_honors_explicit_flags(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
     project = _project(ws)
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     scope = resolve_scope(tmpdir.path, project=project.name, goal='g', infer=False)
     assert scope.project is not None and scope.project.dir == project
     assert scope.goal == 'g'

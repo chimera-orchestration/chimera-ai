@@ -1,5 +1,4 @@
 import json
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -11,12 +10,12 @@ from chimera.logging import configure, log_action, log_path
 
 
 @pytest.fixture()
-def workspace(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Iterator[TempDir]:
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(init(tmpdir.path / 'ws')))
-    core = getattr(logger, '_core')  # loguru keeps its handlers here; restore them after
-    with Replacer() as replace:
-        replace(core.handlers, {}, container=core, name='handlers')
-        yield tmpdir
+def workspace(tmpdir: TempDir, replace: Replacer) -> TempDir:
+    replace.in_environ('CHIMERA_WORKSPACE', str(init(tmpdir.path / 'ws')))
+    # No typed helper fits an instance attribute; loguru keeps its handlers here.
+    core = getattr(logger, '_core')
+    replace(target=core.handlers, container=core, name='handlers', replacement={})
+    return tmpdir
 
 
 def _records(path: TempDir) -> list[Any]:

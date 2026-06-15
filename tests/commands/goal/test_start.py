@@ -3,10 +3,12 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import TempDir
+from testfixtures import Replacer, TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
+from chimera.commands.agent import agent
+from chimera.commands.goal import start as goal_start
 from chimera.commands.goal.start import start
 
 runner = CliRunner()
@@ -26,14 +28,15 @@ def _project(tmpdir: TempDir, repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Pa
 
 
 def test_start_creates_worktrees_then_launches_the_agent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, replace: Replacer
 ) -> None:
     repo = _seeded_repo(tmpdir)
     worktrees = tmpdir.path / 'worktrees'
     calls: list[object] = []
-    monkeypatch.setattr(
-        'chimera.commands.goal.start.agent',
+    replace.in_module(
+        agent,
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
+        module=goal_start,
     )
     created = start(repo.path, worktrees, 'g', 'proj@g@agent')
     assert created == worktrees / 'g@agent'
@@ -42,27 +45,29 @@ def test_start_creates_worktrees_then_launches_the_agent(
     assert calls == [(worktrees / 'g@agent', 'proj@g@agent', None, ())]  # foreground (no prompt)
 
 
-def test_start_passes_the_prompt_to_the_agent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer) -> None:
     repo = _seeded_repo(tmpdir)
     worktrees = tmpdir.path / 'worktrees'
     calls: list[object] = []
-    monkeypatch.setattr(
-        'chimera.commands.goal.start.agent',
+    replace.in_module(
+        agent,
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
+        module=goal_start,
     )
     start(repo.path, worktrees, 'g', 'proj@g@agent', prompt='do it')
     assert calls == [(worktrees / 'g@agent', 'proj@g@agent', 'do it', ())]
 
 
-def test_goal_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_goal_start_cli(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
+) -> None:
     repo = _seeded_repo(tmpdir)
     project = _project(tmpdir, repo, monkeypatch)
     calls: list[object] = []  # stub the agent so real git runs but no claude launches
-    monkeypatch.setattr(
-        'chimera.commands.goal.start.agent',
+    replace.in_module(
+        agent,
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
+        module=goal_start,
     )
     result = runner.invoke(app, ['goal', 'start', 'feature-x'])
     assert result.exit_code == 0
@@ -71,13 +76,16 @@ def test_goal_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Non
     assert calls == [(expected, 'project@feature-x@agent', None, [])]
 
 
-def test_goal_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_goal_start_cli_with_prompt(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
+) -> None:
     repo = _seeded_repo(tmpdir)
     _project(tmpdir, repo, monkeypatch)
     calls: list[object] = []
-    monkeypatch.setattr(
-        'chimera.commands.goal.start.agent',
+    replace.in_module(
+        agent,
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
+        module=goal_start,
     )
     result = runner.invoke(app, ['goal', 'start', 'feature-x', 'go build it'])
     assert result.exit_code == 0
@@ -86,14 +94,15 @@ def test_goal_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyP
 
 
 def test_goal_start_cli_passes_extra_flags_through(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
 ) -> None:
     repo = _seeded_repo(tmpdir)
     _project(tmpdir, repo, monkeypatch)
     calls: list[object] = []
-    monkeypatch.setattr(
-        'chimera.commands.goal.start.agent',
+    replace.in_module(
+        agent,
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
+        module=goal_start,
     )
     result = runner.invoke(app, ['goal', 'start', 'feature-x', '--', '--model', 'opus'])
     assert result.exit_code == 0

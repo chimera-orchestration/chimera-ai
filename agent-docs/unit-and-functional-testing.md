@@ -2,6 +2,16 @@
 - collect tests for a component in `test_{component}.py`
 - commands: test the pure function for logic, the CLI for wiring — see @agent-docs/commands.md
 
+## Mocking
+
+Use `testfixtures.Replacer` — never `monkeypatch.setattr`, never a dotted-path string target.
+Reach for the typed helper that fits:
+- `replace.in_module(thing, replacement)` — module-level functions/objects
+- `replace.on_class(Cls.method, replacement)` — methods/attributes on a class
+- `replace.in_environ(name, value)` — environment variables
+If (and only if) none of those can express it, fall back to the explicit form:
+`replace(target=thing, container=parent, name='<attr>', replacement=<>)`.
+
 ## Fixture return types
 
 yield-based fixtures return `Iterator[T]` — not `Generator[T, None, None]` (verbose) or `Iterable[T]` (too broad):

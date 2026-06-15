@@ -3,10 +3,12 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import TempDir
+from testfixtures import Replacer, TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
+from chimera.commands.agent import live_sessions
+from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
 from chimera.commands.worktree.rm import remove
 
@@ -14,8 +16,8 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def _no_agents(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr('chimera.commands.worktree.rm.live_sessions', lambda worktree: [])
+def _no_agents(replace: Replacer) -> None:
+    replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
 
 
 def _goal(tmpdir: TempDir) -> tuple[Repo, Path]:
@@ -39,12 +41,10 @@ def test_remove_is_a_noop_for_a_goal_that_was_never_created(tmpdir: TempDir) -> 
     assert remove(repo.path, tmpdir.path / 'worktrees', 'ghost') == []
 
 
-def test_remove_aborts_when_an_agent_is_running(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_remove_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: Replacer) -> None:
     repo, worktrees = _goal(tmpdir)
-    monkeypatch.setattr(
-        'chimera.commands.worktree.rm.live_sessions',
+    replace.in_module(
+        live_sessions,
         lambda worktree: [
             {
                 'pid': 4242,
@@ -55,6 +55,7 @@ def test_remove_aborts_when_an_agent_is_running(
                 'sessionId': 'x',
             }
         ],
+        module=worktree_rm,
     )
     with pytest.raises(RuntimeError) as excinfo:
         remove(repo.path, worktrees, 'g')
@@ -69,13 +70,12 @@ def test_remove_aborts_when_an_agent_is_running(
     assert 'g/human' in Git(repo.path).branches()
 
 
-def test_remove_force_bypasses_the_liveness_check(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_remove_force_bypasses_the_liveness_check(tmpdir: TempDir, replace: Replacer) -> None:
     repo, worktrees = _goal(tmpdir)
-    monkeypatch.setattr(
-        'chimera.commands.worktree.rm.live_sessions',
+    replace.in_module(
+        live_sessions,
         lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
+        module=worktree_rm,
     )
     remove(repo.path, worktrees, 'g', force=True)
     assert not (worktrees / 'g@agent').exists()

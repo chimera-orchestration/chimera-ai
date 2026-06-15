@@ -1,19 +1,25 @@
 from collections.abc import Iterator, Sequence
 
 import pytest
-from testfixtures import Command, LogCapture, TempDir
+from testfixtures import Command, LogCapture, Replacer, TempDir, not_there
 from testfixtures.command import AbstractRun
 from testfixtures.loguru import LoguruSource
 from testfixtures.mock import Mock, call
-from testfixtures.replace import Replacer
 
 from chimera.__main__ import app
+from chimera.logging import configure
+
+
+@pytest.fixture()
+def replace() -> Iterator[Replacer]:
+    with Replacer() as replacer:
+        yield replacer
 
 
 @pytest.fixture(autouse=True)
-def _clear_workspace_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv('CHIMERA_WORKSPACE', raising=False)  # tests opt in explicitly
-    monkeypatch.delenv('SHELL', raising=False)  # keeps the shell-completion check inert
+def _clear_workspace_env(replace: Replacer) -> None:
+    replace.in_environ('CHIMERA_WORKSPACE', not_there)  # tests opt in explicitly
+    replace.in_environ('SHELL', not_there)  # keeps the shell-completion check inert
 
 
 @pytest.fixture()
@@ -43,7 +49,7 @@ class Run(AbstractRun):
     @classmethod
     def setup_mocks(cls, replace: Replacer) -> Mock:
         mocks = Mock()
-        replace('chimera.logging.configure', mocks.configure)
+        replace.in_module(configure, mocks.configure)
         return mocks
 
     def check(

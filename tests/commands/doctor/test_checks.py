@@ -1,10 +1,9 @@
 import shutil
 
-import pytest
 import yaml
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import TempDir
+from testfixtures import Replacer, TempDir, not_there
 
 from chimera.commands.doctor.checks import (
     LegacyWorktreeSeparatorCheck,
@@ -110,30 +109,24 @@ def test_workspace_config_with_repo_is_not_stamped(tmpdir: TempDir) -> None:
 # --- WorkspaceEnvCheck ---
 
 
-def test_workspace_env_unset_reports_export_line(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_workspace_env_unset_reports_export_line(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _ws(tmpdir)
-    monkeypatch.delenv('CHIMERA_WORKSPACE', raising=False)
+    replace.in_environ('CHIMERA_WORKSPACE', not_there)
     [finding] = _run(WorkspaceEnvCheck(), ws)
     assert not finding.fixable and not finding.resolved
     assert 'not set' in finding.message
     assert f'export CHIMERA_WORKSPACE="{ws}"' in finding.message
 
 
-def test_workspace_env_set_to_this_workspace_is_silent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_workspace_env_set_to_this_workspace_is_silent(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _ws(tmpdir)
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     assert _run(WorkspaceEnvCheck(), ws) == []
 
 
-def test_workspace_env_pointing_elsewhere_reported(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_workspace_env_pointing_elsewhere_reported(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _ws(tmpdir)
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(tmpdir.makedir('other')))
+    replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir.makedir('other')))
     [finding] = _run(WorkspaceEnvCheck(), ws)
     assert not finding.fixable and not finding.resolved
     assert 'not this workspace' in finding.message
@@ -401,17 +394,15 @@ def test_orphaned_skips_project_without_a_live_repo(tmpdir: TempDir) -> None:
 # --- ShellCompletionCheck ---
 
 
-def _shell_home(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, shell: str):
+def _shell_home(tmpdir: TempDir, replace: Replacer, shell: str):
     home = tmpdir.makedir('home')
-    monkeypatch.setenv('HOME', str(home))
-    monkeypatch.setenv('SHELL', f'/bin/{shell}')
+    replace.in_environ('HOME', str(home))
+    replace.in_environ('SHELL', f'/bin/{shell}')
     return home
 
 
-def test_completion_unknown_shell_is_silent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _shell_home(tmpdir, monkeypatch, 'fish')
+def test_completion_unknown_shell_is_silent(tmpdir: TempDir, replace: Replacer) -> None:
+    _shell_home(tmpdir, replace, 'fish')
     assert _run(ShellCompletionCheck(), _ws(tmpdir)) == []
 
 
@@ -420,25 +411,21 @@ def test_completion_no_shell_is_silent(tmpdir: TempDir) -> None:
     assert _run(ShellCompletionCheck(), _ws(tmpdir)) == []
 
 
-def test_completion_zsh_installed_script_is_silent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    home = _shell_home(tmpdir, monkeypatch, 'zsh')
+def test_completion_zsh_installed_script_is_silent(tmpdir: TempDir, replace: Replacer) -> None:
+    home = _shell_home(tmpdir, replace, 'zsh')
     (home / '.zfunc').mkdir()
     (home / '.zfunc' / '_ch').write_text('#compdef ch')
     assert _run(ShellCompletionCheck(), _ws(tmpdir)) == []
 
 
-def test_completion_zsh_eval_line_is_silent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    home = _shell_home(tmpdir, monkeypatch, 'zsh')
+def test_completion_zsh_eval_line_is_silent(tmpdir: TempDir, replace: Replacer) -> None:
+    home = _shell_home(tmpdir, replace, 'zsh')
     (home / '.zshrc').write_text('eval "$(env _CH_COMPLETE=source_zsh ch)"\n')
     assert _run(ShellCompletionCheck(), _ws(tmpdir)) == []
 
 
-def test_completion_zsh_missing_reported(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
-    home = _shell_home(tmpdir, monkeypatch, 'zsh')
+def test_completion_zsh_missing_reported(tmpdir: TempDir, replace: Replacer) -> None:
+    home = _shell_home(tmpdir, replace, 'zsh')
     (home / '.zshrc').write_text('# no completion here\n')
     [finding] = _run(ShellCompletionCheck(), _ws(tmpdir))
     assert not finding.fixable and not finding.resolved
@@ -447,25 +434,21 @@ def test_completion_zsh_missing_reported(tmpdir: TempDir, monkeypatch: pytest.Mo
     assert 'eval "$(env _CH_COMPLETE=source_zsh ch)"' in finding.message
 
 
-def test_completion_bash_installed_script_is_silent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    home = _shell_home(tmpdir, monkeypatch, 'bash')
+def test_completion_bash_installed_script_is_silent(tmpdir: TempDir, replace: Replacer) -> None:
+    home = _shell_home(tmpdir, replace, 'bash')
     (home / '.bash_completions').mkdir()
     (home / '.bash_completions' / 'ch.sh').write_text('complete')
     assert _run(ShellCompletionCheck(), _ws(tmpdir)) == []
 
 
-def test_completion_bash_eval_line_in_profile_is_silent(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    home = _shell_home(tmpdir, monkeypatch, 'bash')
+def test_completion_bash_eval_line_in_profile_is_silent(tmpdir: TempDir, replace: Replacer) -> None:
+    home = _shell_home(tmpdir, replace, 'bash')
     (home / '.bash_profile').write_text('eval "$(env _CH_COMPLETE=source_bash ch)"\n')
     assert _run(ShellCompletionCheck(), _ws(tmpdir)) == []
 
 
-def test_completion_bash_missing_reported(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
-    _shell_home(tmpdir, monkeypatch, 'bash')
+def test_completion_bash_missing_reported(tmpdir: TempDir, replace: Replacer) -> None:
+    _shell_home(tmpdir, replace, 'bash')
     [finding] = _run(ShellCompletionCheck(), _ws(tmpdir))
     assert not finding.fixable and not finding.resolved
     assert '~/.bashrc' in finding.message

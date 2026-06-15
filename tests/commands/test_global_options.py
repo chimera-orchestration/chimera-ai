@@ -2,10 +2,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from testfixtures import TempDir
+from testfixtures import Replacer, TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
+from chimera.commands.agent import live_sessions
 
 runner = CliRunner()
 
@@ -46,15 +47,13 @@ def test_leaf_flag_wins_over_an_earlier_one(
 
 
 def test_goal_and_actor_before_the_command(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir, monkeypatch)
     (ws / 'myproject' / 'worktrees' / 'g@reviewer').mkdir()
     calls: list[object] = []
-    monkeypatch.setattr('chimera.commands.agent.live_sessions', lambda worktree: [])
-    monkeypatch.setattr(
-        subprocess, 'run', lambda cmd, cwd=None, check=False: calls.append((cmd, cwd))
-    )
+    replace.in_module(live_sessions, lambda worktree: [])
+    replace.in_module(subprocess.run, lambda cmd, cwd=None, check=False: calls.append((cmd, cwd)))
     result = runner.invoke(app, ['agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start'])
     assert result.exit_code == 0
     worktree = (ws / 'myproject' / 'worktrees' / 'g@reviewer').resolve()

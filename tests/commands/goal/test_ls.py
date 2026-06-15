@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from giterator.testing import Repo
-from testfixtures import TempDir
+from testfixtures import Replacer, TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
@@ -42,11 +42,11 @@ def test_goals_in_scope_single_project_when_pinned(tmpdir: TempDir) -> None:
 
 
 def test_goal_ls_cli_prints_bare_names_inside_a_project(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
     project = _project(ws, 'alpha', 'y', 'x')
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     monkeypatch.chdir(project)
     result = runner.invoke(app, ['goal', 'ls'])
     assert result.exit_code == 0
@@ -54,12 +54,12 @@ def test_goal_ls_cli_prints_bare_names_inside_a_project(
 
 
 def test_goal_ls_cli_qualifies_names_when_widened(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
     _project(ws, 'alpha', 'x')
     _project(ws, 'beta', 'z')
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     monkeypatch.chdir(ws)
     result = runner.invoke(app, ['goal', 'ls'])
     assert result.exit_code == 0
@@ -67,7 +67,7 @@ def test_goal_ls_cli_qualifies_names_when_widened(
 
 
 def test_goal_ls_cli_reflects_real_worktrees(
-    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'repo')
@@ -75,7 +75,7 @@ def test_goal_ls_cli_reflects_real_worktrees(
     project = ws / 'proj'
     project.mkdir()
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    monkeypatch.setenv('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     monkeypatch.chdir(project)
     runner.invoke(app, ['worktree', 'add', 'alpha'])
     runner.invoke(app, ['worktree', 'add', 'beta'])

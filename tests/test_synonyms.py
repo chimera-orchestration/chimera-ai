@@ -2,10 +2,12 @@ from pathlib import Path
 
 import pytest
 from giterator.testing import Repo
-from testfixtures import TempDir
+from testfixtures import Replacer, TempDir
 from typer.testing import CliRunner
 
 from chimera.__main__ import app
+from chimera.commands.agent import agent
+from chimera.commands.goal import start as goal_start
 
 runner = CliRunner()
 
@@ -23,19 +25,23 @@ def _project(tmpdir: TempDir, repo: Repo, monkeypatch: pytest.MonkeyPatch) -> Pa
     return project
 
 
-def test_new_dispatches_to_start(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_new_dispatches_to_start(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
+) -> None:
     repo = _seeded_repo(tmpdir)
     project = _project(tmpdir, repo, monkeypatch)
-    monkeypatch.setattr('chimera.commands.goal.start.agent', lambda *a, **k: None)
+    replace.in_module(agent, lambda *a, **k: None, module=goal_start)
     result = runner.invoke(app, ['goal', 'new', 'feature-x'])
     assert result.exit_code == 0
     assert (project / 'worktrees' / 'feature-x@agent').is_dir()
 
 
-def test_cleanup_dispatches_to_finish(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cleanup_dispatches_to_finish(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch, replace: Replacer
+) -> None:
     repo = _seeded_repo(tmpdir)
     project = _project(tmpdir, repo, monkeypatch)
-    monkeypatch.setattr('chimera.commands.goal.start.agent', lambda *a, **k: None)
+    replace.in_module(agent, lambda *a, **k: None, module=goal_start)
     runner.invoke(app, ['goal', 'start', 'feature-x'])
     result = runner.invoke(app, ['goal', 'cleanup', 'feature-x'])
     assert result.exit_code == 0
