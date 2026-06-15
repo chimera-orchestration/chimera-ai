@@ -54,4 +54,4 @@ def _is_workspace_root(directory: Path) -> bool:
     if raw and raw.get('kind') == 'workspace':
         return True
     # legacy root: shows workspace evidence and isn't a project
-    return (directory / '.beads').is_dir() or (directory / 'processes').is_dir()
+    return (directory / 'processes').is_dir()

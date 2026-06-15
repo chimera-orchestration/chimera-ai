@@ -5,7 +5,8 @@
 
 Chimera orchestrates AI agents working on goals across projects. It manages a workspace directory tree (e.g. `~/lycia`) and provides the `ch` CLI.
 
-**Core concepts** (use this terminology consistently):
+**Core concepts** (use this terminology consistently). Some name design intent that
+isn't built yet — the vocabulary stands regardless; what's implemented is the CLI you can run today.
 - **Workspace** - a directory tree managed by Chimera where all work is done (default name: `lycia`)
 - **Project** — a project managed by Chimera within a workspace
 - **Goal** — a thing that needs doing (e.g. "implement feature X")
@@ -14,11 +15,11 @@ Chimera orchestrates AI agents working on goals across projects. It manages a wo
 - **Branch** — a git branch named `<goal>/<actor>`
 - **Worktree** — a git worktree named `<goal>@<actor>` (agents only)
 - **Process** — an ordered sequence of steps to complete a task
-- **Step** — a single atomic thing that must be done, tracked in a bead
+- **Step** — a single atomic thing that must be done
 - **Principle** — context an agent must load before beginning a process, task or step
 - **Knowledge** — named, versioned context loaded on demand (e.g. "load knowledge for testfixtures")
 - **Reference** — a project used only for tracking knowledge
-- **Service** — a long-running system process managed by Chimera (e.g. dolt sql-server, tmux session); distinct from the workflow concept "Process"
+- **Service** — a long-running system process managed by Chimera (e.g. a tmux session or docker container); distinct from the workflow concept "Process"
 - **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera; always works in a **worktree**
 
 ## Principles

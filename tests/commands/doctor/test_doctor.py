@@ -27,7 +27,7 @@ class _FakeCheck:
 
 def _ws(tmpdir: TempDir):
     ws = tmpdir.makedir('lycia')
-    (ws / '.beads').mkdir()
+    (ws / 'processes').mkdir()
     return ws
 
 
@@ -45,7 +45,7 @@ def test_find_workspace_root_at_a_marked_root(tmpdir: TempDir) -> None:
 
 
 def test_find_workspace_root_by_legacy_evidence(tmpdir: TempDir) -> None:
-    ws = _ws(tmpdir)  # .beads/, no config yet
+    ws = _ws(tmpdir)  # processes/, no config yet
     assert find_workspace_root(ws) == ws
 
 
@@ -65,7 +65,7 @@ def test_find_workspace_root_skips_a_project_even_when_mislabeled(tmpdir: TempDi
 
 def test_find_workspace_root_raises_when_none(tmpdir: TempDir) -> None:
     with pytest.raises(NotInWorkspaceError):
-        find_workspace_root(tmpdir.path)  # no .beads / processes / config.yaml
+        find_workspace_root(tmpdir.path)  # no processes / config.yaml
 
 
 def test_resolve_root_prefers_explicit_path(tmpdir: TempDir) -> None:

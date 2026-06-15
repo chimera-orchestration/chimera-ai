@@ -14,11 +14,11 @@ from chimera.service_config import (
 FULL_YAML = """\
 services:
   - type: docker
-    name: dolt
-    use: dolt
+    name: cache
+    use: cache
     ports:
-      mysql: 3306
-    image: dolthub/dolt-sql-server:latest
+      redis: 6379
+    image: redis:7
   - type: tmux
     name: my-agent
     use: agent
@@ -40,10 +40,10 @@ def test_load_docker_service(tmpdir: TempDir) -> None:
     assert len(config.services) == 3
     svc = config.services[0]
     assert isinstance(svc, DockerServiceConfig)
-    assert svc.name == "dolt"
-    assert svc.use == "dolt"
-    assert svc.ports == {"mysql": 3306}
-    assert svc.image == "dolthub/dolt-sql-server:latest"
+    assert svc.name == "cache"
+    assert svc.use == "cache"
+    assert svc.ports == {"redis": 6379}
+    assert svc.image == "redis:7"
     assert svc.command is None
 
 
@@ -72,7 +72,7 @@ def test_docker_command_optional(tmpdir: TempDir) -> None:
 services:
   - type: docker
     name: db
-    use: dolt
+    use: cache
     image: some-image:latest
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
@@ -88,15 +88,15 @@ def test_docker_command_set(tmpdir: TempDir) -> None:
 services:
   - type: docker
     name: db
-    use: dolt
+    use: cache
     image: some-image:latest
-    command: dolt sql-server
+    command: redis-server --appendonly yes
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
     config = load_services_config(path)
     svc = config.services[0]
     assert isinstance(svc, DockerServiceConfig)
-    assert svc.command == "dolt sql-server"
+    assert svc.command == "redis-server --appendonly yes"
 
 
 def test_unknown_type_raises(tmpdir: TempDir) -> None:
@@ -116,7 +116,7 @@ def test_missing_required_field_raises(tmpdir: TempDir) -> None:
 services:
   - type: docker
     name: no-image
-    use: dolt
+    use: cache
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
     with pytest.raises(ValidationError):

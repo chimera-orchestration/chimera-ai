@@ -13,7 +13,6 @@ def test_init_creates_workspace(tmpdir: TempDir) -> None:
     assert init(path) == path
     assert (path / '.git').is_dir()
     assert (path / 'processes').is_dir()
-    assert (path / '.beads').is_dir()
     assert (path / 'config.yaml').read_text() == 'kind: workspace\n'
 
 

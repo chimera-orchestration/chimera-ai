@@ -21,7 +21,7 @@ from chimera.worktrees import registered_worktrees
 
 def _ws(tmpdir: TempDir):
     ws = tmpdir.makedir('lycia')
-    (ws / '.beads').mkdir()
+    (ws / 'processes').mkdir()
     return ws
 
 

@@ -28,12 +28,12 @@ def test_tmux_service_roundtrip() -> None:
 def test_docker_service_roundtrip() -> None:
     svc = DockerService(
         type="docker",
-        name="dolt",
-        use="dolt",
-        ports={"mysql": 3306},
+        name="cache",
+        use="cache",
+        ports={"redis": 6379},
         started_at=STARTED,
         container_id="abc123def456",
-        container_name="dolt-server",
+        container_name="cache-server",
     )
     data = svc.model_dump()
     restored = adapter.validate_python(data)
@@ -45,11 +45,11 @@ def test_process_service_roundtrip() -> None:
     svc = ProcessService(
         type="process",
         name="my-proc",
-        use="beads",
+        use="worker",
         ports={},
         started_at=STARTED,
         pid=12345,
-        cmd="beads serve",
+        cmd="python worker.py",
     )
     data = svc.model_dump()
     restored = adapter.validate_python(data)
@@ -112,12 +112,12 @@ def test_missing_type_specific_field_raises() -> None:
 def test_json_serialisation_roundtrip() -> None:
     svc = DockerService(
         type="docker",
-        name="dolt",
-        use="dolt",
-        ports={"mysql": 3306},
+        name="cache",
+        use="cache",
+        ports={"redis": 6379},
         started_at=STARTED,
         container_id="abc123def456",
-        container_name="dolt-server",
+        container_name="cache-server",
     )
     json_str = svc.model_dump_json()
     restored = adapter.validate_json(json_str)
