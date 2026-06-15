@@ -5,11 +5,13 @@ from typing import Annotated
 
 import typer
 from typer._click.core import Command, Context
-from typer.core import TyperGroup
+from typer.core import TyperCommand, TyperGroup
 
 from chimera.commands.agent import Agent
 from chimera.commands.agent import agent as _agent
-from chimera.commands.agent import agents, scoped
+from chimera.commands.agent import agents
+from chimera.commands.agent import resume as _resume
+from chimera.commands.agent import scoped
 from chimera.commands.doctor import CHECKS, Finding, resolve_root
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.ls import goals_in_scope
@@ -115,6 +117,30 @@ def alias_group(aliases: dict[str, str]) -> type[TyperGroup]:
             return super().get_command(ctx, aliases.get(cmd_name, cmd_name))
 
     return AliasGroup
+
+
+class PassthroughCommand(TyperCommand):
+    """A command that forwards everything after ``--`` to the underlying binary, verbatim.
+
+    Click otherwise lets a declared positional (the prompt) swallow the first post-``--``
+    token, so ``ch agent start -- --dangerously-skip-permissions`` would mistake the flag
+    for the prompt. We split on ``--`` ourselves (as git/cargo do) before Click parses:
+    the tail is stashed on ``ctx.meta`` and the head alone fills the command's own params.
+    """
+
+    def parse_args(self, ctx: Context, args: list[str]) -> list[str]:
+        if '--' in args:
+            cut = args.index('--')
+            ctx.meta['passthrough'] = args[cut + 1 :]
+            args = args[:cut]
+        else:
+            ctx.meta['passthrough'] = []
+        return super().parse_args(ctx, args)
+
+
+def _passthrough(ctx: typer.Context) -> list[str]:
+    """The args given after ``--``, forwarded straight to claude (see ``PassthroughCommand``)."""
+    return ctx.meta.get('passthrough', [])
 
 
 def _project(ctx: typer.Context, explicit: str | None) -> Project:
@@ -295,7 +321,7 @@ goal_app = typer.Typer(
 app.add_typer(goal_app, name='goal')
 
 
-@goal_app.command('start')
+@goal_app.command('start', cls=PassthroughCommand)
 def goal_start(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
@@ -305,7 +331,7 @@ def goal_start(
 ) -> None:
     p = _project(ctx, project)
     worktree = _goal_start(
-        p.repo, p.worktrees, goal, session_name(p.name, goal, AGENT), prompt, frm
+        p.repo, p.worktrees, goal, session_name(p.name, goal, AGENT), prompt, frm, _passthrough(ctx)
     )
     typer.echo(f'Started {goal} in {worktree}')
 
@@ -332,7 +358,7 @@ agent_app = typer.Typer(callback=_context, help='Launch and list agents.')
 app.add_typer(agent_app, name='agent')
 
 
-@agent_app.command('start')
+@agent_app.command('start', cls=PassthroughCommand)
 def agent_start(
     ctx: typer.Context,
     prompt: PromptArg = None,
@@ -345,8 +371,25 @@ def agent_start(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
-    _agent(worktree, session_name(p.name, g, actor), prompt)
+    _agent(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx))
     typer.echo(f'Launched agent in {worktree}')
+
+
+@agent_app.command('resume', cls=PassthroughCommand)
+def agent_resume(
+    ctx: typer.Context,
+    prompt: PromptArg = None,
+    goal: GoalOpt = None,
+    actor: ActorOpt = None,
+    project: ProjectOpt = None,
+) -> None:
+    overrides = _overrides(ctx)
+    p = _project(ctx, project)
+    g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
+    actor = actor or overrides.actor or AGENT
+    worktree = worktree_path(p.worktrees, g, actor)
+    _resume(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx))
+    typer.echo(f'Resumed agent in {worktree}')
 
 
 @agent_app.command('ls')

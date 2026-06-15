@@ -33,13 +33,13 @@ def test_start_creates_worktrees_then_launches_the_agent(
     calls: list[object] = []
     monkeypatch.setattr(
         'chimera.commands.goal.start.agent',
-        lambda worktree, name, prompt=None: calls.append((worktree, name, prompt)),
+        lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
     )
     created = start(repo.path, worktrees, 'g', 'proj@g@agent')
     assert created == worktrees / 'g@agent'
     assert (worktrees / 'g@agent').is_dir()
     assert 'g/human' in Git(repo.path).branches()
-    assert calls == [(worktrees / 'g@agent', 'proj@g@agent', None)]  # foreground (no prompt)
+    assert calls == [(worktrees / 'g@agent', 'proj@g@agent', None, ())]  # foreground (no prompt)
 
 
 def test_start_passes_the_prompt_to_the_agent(
@@ -50,10 +50,10 @@ def test_start_passes_the_prompt_to_the_agent(
     calls: list[object] = []
     monkeypatch.setattr(
         'chimera.commands.goal.start.agent',
-        lambda worktree, name, prompt=None: calls.append((worktree, name, prompt)),
+        lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
     )
     start(repo.path, worktrees, 'g', 'proj@g@agent', prompt='do it')
-    assert calls == [(worktrees / 'g@agent', 'proj@g@agent', 'do it')]
+    assert calls == [(worktrees / 'g@agent', 'proj@g@agent', 'do it', ())]
 
 
 def test_goal_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,13 +62,13 @@ def test_goal_start_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> Non
     calls: list[object] = []  # stub the agent so real git runs but no claude launches
     monkeypatch.setattr(
         'chimera.commands.goal.start.agent',
-        lambda worktree, name, prompt=None: calls.append((worktree, name, prompt)),
+        lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
     )
     result = runner.invoke(app, ['goal', 'start', 'feature-x'])
     assert result.exit_code == 0
     assert (project / 'worktrees' / 'feature-x@agent').is_dir()
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
-    assert calls == [(expected, 'project@feature-x@agent', None)]
+    assert calls == [(expected, 'project@feature-x@agent', None, [])]
 
 
 def test_goal_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,9 +77,25 @@ def test_goal_start_cli_with_prompt(tmpdir: TempDir, monkeypatch: pytest.MonkeyP
     calls: list[object] = []
     monkeypatch.setattr(
         'chimera.commands.goal.start.agent',
-        lambda worktree, name, prompt=None: calls.append((worktree, name, prompt)),
+        lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
     )
     result = runner.invoke(app, ['goal', 'start', 'feature-x', 'go build it'])
     assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
-    assert calls == [(expected, 'project@feature-x@agent', 'go build it')]
+    assert calls == [(expected, 'project@feature-x@agent', 'go build it', [])]
+
+
+def test_goal_start_cli_passes_extra_flags_through(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _seeded_repo(tmpdir)
+    _project(tmpdir, repo, monkeypatch)
+    calls: list[object] = []
+    monkeypatch.setattr(
+        'chimera.commands.goal.start.agent',
+        lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
+    )
+    result = runner.invoke(app, ['goal', 'start', 'feature-x', '--', '--model', 'opus'])
+    assert result.exit_code == 0
+    expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
+    assert calls == [(expected, 'project@feature-x@agent', None, ['--model', 'opus'])]

@@ -1,6 +1,7 @@
 import json
 import re
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -118,26 +119,49 @@ def session_summary(cwd: str, name: str, projects: Path | None = None) -> str | 
 
 
 def agent(
-    worktree: Path, name: str, prompt: str | None = None
+    worktree: Path, name: str, prompt: str | None = None, extra: Sequence[str] = ()
 ) -> subprocess.CompletedProcess[bytes]:
     """Run a claude agent named <name>, with cwd set to the worktree.
 
     Runs interactively in the foreground unless ``prompt`` is given, in which case
-    it daemonizes (`claude --bg`) to work on the prompt autonomously. Refuses if a
-    claude session is already live in the worktree.
+    it daemonizes (`claude --bg`) to work on the prompt autonomously. ``extra`` is
+    passed straight through to ``claude`` (e.g. ``--model``, ``--dangerously-skip-permissions``).
+    Refuses if a claude session is already live in the worktree.
     """
+    return _launch(worktree, _session_args(['--name', name], prompt, extra))
+
+
+def resume(
+    worktree: Path, name: str, prompt: str | None = None, extra: Sequence[str] = ()
+) -> subprocess.CompletedProcess[bytes]:
+    """Resume the claude session named <name>, with cwd set to the worktree.
+
+    The inverse of ``agent``: where ``agent`` launches a session with ``--name <name>``,
+    ``resume`` reattaches to that same label with ``--resume <name>``. The cwd is the
+    key — claude has no ``--cwd``, so setting it here is what lets a session be revived
+    in its worktree from anywhere. Interactive foreground by default; with ``prompt`` it
+    resumes in the background (``--bg``) to keep working. ``extra`` passes straight
+    through to ``claude``. Refuses if a claude session is already live in the worktree.
+    """
+    return _launch(worktree, _session_args(['--resume', name], prompt, extra))
+
+
+def _session_args(lead: list[str], prompt: str | None, extra: Sequence[str]) -> list[str]:
+    """The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, then prompt."""
+    args = (['--bg'] if prompt is not None else []) + [*lead, *extra]
+    if prompt is not None:
+        args.append(prompt)
+    return args
+
+
+def _launch(worktree: Path, args: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
+    """Run ``claude <args>`` with cwd set to the worktree; refuse if one is already live."""
     if not worktree.is_dir():
         raise FileNotFoundError(worktree)
     if running := live_sessions(worktree):
         ids = ', '.join(f'{s["sessionId"]} ({s["status"]})' for s in running)
         raise RuntimeError(f'an agent is already live in {worktree}: {ids} — attach or stop it')
-    command = ['claude']
-    if prompt is not None:
-        command.append('--bg')
-    command += ['--name', name]
-    if prompt is not None:
-        command.append(prompt)
-    return subprocess.run(command, cwd=worktree, check=True)
+    return subprocess.run(['claude', *args], cwd=worktree, check=True)
 
 
 def live_sessions(worktree: Path) -> list[dict[str, object]]:

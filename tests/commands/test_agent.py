@@ -16,6 +16,7 @@ from chimera.commands.agent import (
     all_sessions,
     in_goal,
     live_sessions,
+    resume,
     scoped,
     session_summary,
     under,
@@ -76,6 +77,59 @@ def test_agent_refuses_when_a_session_is_live(
 def test_agent_missing_worktree_raises(tmpdir: TempDir) -> None:
     with pytest.raises(FileNotFoundError):
         agent(tmpdir.path / 'nope', 'x')
+
+
+def test_agent_passes_extra_flags_through(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(monkeypatch)
+    agent(worktree, 'proj@goal@agent', extra=['--model', 'opus'])
+    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'opus']
+    assert calls == [(expected, worktree, True)]
+
+
+def test_resume_runs_claude_resume_in_the_foreground_by_default(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(monkeypatch)
+    resume(worktree, 'proj@goal@agent')
+    assert calls == [(['claude', '--resume', 'proj@goal@agent'], worktree, True)]
+
+
+def test_resume_runs_in_the_background_when_given_a_prompt(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(monkeypatch)
+    resume(worktree, 'proj@goal@agent', 'carry on')
+    assert calls == [
+        (['claude', '--bg', '--resume', 'proj@goal@agent', 'carry on'], worktree, True)
+    ]
+
+
+def test_resume_passes_extra_flags_through(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(monkeypatch)
+    resume(worktree, 'proj@goal@agent', extra=['--dangerously-skip-permissions'])
+    expected = ['claude', '--resume', 'proj@goal@agent', '--dangerously-skip-permissions']
+    assert calls == [(expected, worktree, True)]
+
+
+def test_resume_refuses_when_a_session_is_live(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(monkeypatch, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
+    with pytest.raises(RuntimeError, match='already live'):
+        resume(worktree, 'proj@goal@agent')
+    assert calls == []  # never launched
+
+
+def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
+    with pytest.raises(FileNotFoundError):
+        resume(tmpdir.path / 'nope', 'x')
 
 
 def test_live_sessions_queries_claude_by_cwd(
@@ -144,6 +198,56 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, monkeypatch: pytest.MonkeyP
     assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g@reviewer'
     assert calls == [(['claude', '--name', 'myproject@g@reviewer'], expected, True)]
+
+
+def test_agent_start_cli_forwards_flags_after_dashdash(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project_with_worktree(tmpdir, monkeypatch)
+    calls = _stub(monkeypatch)
+    # no prompt, only passthrough: the flag must not be mistaken for the prompt
+    result = runner.invoke(
+        app, ['agent', 'start', '-g', 'g', '--', '--dangerously-skip-permissions']
+    )
+    assert result.exit_code == 0
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command = ['claude', '--name', 'myproject@g@agent', '--dangerously-skip-permissions']
+    assert calls == [(command, expected, True)]
+
+
+def test_agent_start_cli_with_prompt_and_passthrough(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project_with_worktree(tmpdir, monkeypatch)
+    calls = _stub(monkeypatch)
+    result = runner.invoke(app, ['agent', 'start', 'do it', '-g', 'g', '--', '--model', 'opus'])
+    assert result.exit_code == 0
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command = ['claude', '--bg', '--name', 'myproject@g@agent', '--model', 'opus', 'do it']
+    assert calls == [(command, expected, True)]
+
+
+def test_agent_resume_cli(tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch) -> None:
+    _project_with_worktree(tmpdir, monkeypatch)
+    calls = _stub(monkeypatch)
+    result = runner.invoke(app, ['agent', 'resume', '-g', 'g'])
+    assert result.exit_code == 0
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    assert calls == [(['claude', '--resume', 'myproject@g@agent'], expected, True)]
+
+
+def test_agent_resume_cli_with_passthrough(
+    tmpdir: TempDir, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _project_with_worktree(tmpdir, monkeypatch)
+    calls = _stub(monkeypatch)
+    result = runner.invoke(
+        app, ['agent', 'resume', '-g', 'g', '--', '--dangerously-skip-permissions']
+    )
+    assert result.exit_code == 0
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
+    assert calls == [(command, expected, True)]
 
 
 def _transcript(folder: Path, name: str, body: str, mtime: float) -> Path:
