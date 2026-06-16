@@ -1,14 +1,11 @@
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, Replacer, TempDir
 
 from chimera.__main__ import app
 from chimera.commands.agent import agent
 from chimera.commands.goal import start as goal_start
-
-runner = CliRunner()
 
 
 def _seeded_repo(tmpdir: TempDir) -> Repo:
@@ -22,29 +19,34 @@ def _project(tmpdir: TempDir, repo: Repo) -> Path:
     return tmpdir.path
 
 
-def test_new_dispatches_to_start(tmpdir: TempDir, replace: Replacer) -> None:
+def test_new_dispatches_to_start(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     project = _project(tmpdir, repo)
     replace.in_module(agent, lambda *a, **k: None, module=goal_start)
-    result = runner.invoke(app, ['goal', 'new', 'feature-x'])
-    assert result.exit_code == 0
+    worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
+    # the synonym dispatches to the canonical command, which is what gets logged
+    command.run('goal', 'new', 'feature-x').check(
+        output=f'Started feature-x in {worktree}', logging=[('INFO', 'goal start')]
+    )
     assert (project / 'worktrees' / 'feature-x@agent').is_dir()
 
 
-def test_cleanup_dispatches_to_finish(tmpdir: TempDir, replace: Replacer) -> None:
+def test_cleanup_dispatches_to_finish(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     project = _project(tmpdir, repo)
     replace.in_module(agent, lambda *a, **k: None, module=goal_start)
-    runner.invoke(app, ['goal', 'start', 'feature-x'])
-    result = runner.invoke(app, ['goal', 'cleanup', 'feature-x'])
-    assert result.exit_code == 0
+    command.run('goal', 'start', 'feature-x')
+    worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
+    command.run('goal', 'cleanup', 'feature-x').check(
+        output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
+    )
     assert not (project / 'worktrees' / 'feature-x@agent').exists()
 
 
-def test_synonyms_are_hidden_from_help() -> None:
-    result = runner.invoke(app, ['goal', '--help'])
-    assert 'new' not in result.output
-    assert 'cleanup' not in result.output
+def test_synonyms_are_hidden_from_help(command: Command) -> None:
+    output = command.run('goal', '--help').output.captured  # --help is not a logged action
+    assert 'new' not in output
+    assert 'cleanup' not in output
 
 
 def test_no_synonym_shadows_a_real_command() -> None:

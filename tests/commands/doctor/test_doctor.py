@@ -1,17 +1,23 @@
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import yaml
-from testfixtures import Replacer, TempDir, not_there
-from typer.testing import CliRunner
+from testfixtures import Command, Replacer, TempDir, not_there
 
-from chimera.__main__ import app
 from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
 from chimera.commands.doctor.core import Finding
 from chimera.config import NotInWorkspaceError
 
-runner = CliRunner()
+
+def _env_not_set(workspace: Path) -> str:
+    """The workspace-env finding's exact text when $CHIMERA_WORKSPACE is unset."""
+    return (
+        '[workspace-env] (needs attention) $CHIMERA_WORKSPACE is not set — '
+        'add to your shell profile (~/.zshrc, ~/.bashrc, ~/.profile):\n'
+        f'    export CHIMERA_WORKSPACE="{workspace}"'
+    )
 
 
 class _FakeCheck:
@@ -96,69 +102,113 @@ def test_doctor_aggregates_findings_and_passes_fix_through(tmpdir: TempDir) -> N
     assert check.seen == [(ws, True)]
 
 
-def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer) -> None:
+def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: workspace\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    result = runner.invoke(app, ['doctor'])
-    assert result.exit_code == 0
-    assert 'All checks passed!' in result.output
+    command.run('doctor').check(  # cwd is the tmpdir, not ws, so the note appears
+        output=f'note: resolved workspace root: {ws.resolve()}\nAll checks passed!',
+        logging=[('INFO', 'doctor')],
+    )
 
 
-def test_doctor_cli_verbose_lists_every_check(tmpdir: TempDir, replace: Replacer) -> None:
+def test_doctor_cli_verbose_lists_every_check(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: workspace\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    result = runner.invoke(app, ['doctor', '--verbose'])
-    assert result.exit_code == 0
-    assert '[workspace-config] (ok)' in result.output
-    assert '[workspace-env] (ok)' in result.output
+    command.run('doctor', '--verbose').check(
+        output='\n'.join(
+            [
+                f'note: resolved workspace root: {ws.resolve()}',
+                '[workspace-config] (ok)',
+                '[project-config] (ok)',
+                '[human-worktrees] (ok)',
+                '[worktree-separator] (ok)',
+                '[orphaned-worktrees] (ok)',
+                '[workspace-env] (ok)',
+                '[shell-completion] (ok)',
+                'All checks passed!',
+            ]
+        ),
+        logging=[('INFO', 'doctor')],
+    )
 
 
-def test_doctor_cli_flags_unset_workspace_env(tmpdir: TempDir, replace: Replacer) -> None:
+def test_doctor_cli_flags_unset_workspace_env(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: workspace\n')
     replace.in_environ('CHIMERA_WORKSPACE', not_there)
     os.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
-    result = runner.invoke(app, ['doctor'])
-    assert result.exit_code == 1
-    assert '$CHIMERA_WORKSPACE is not set' in result.output
-    assert f'export CHIMERA_WORKSPACE="{ws.resolve()}"' in result.output
+    command.run('doctor').check(
+        output=_env_not_set(ws.resolve()),
+        return_code=1,
+        logging=[('INFO', 'doctor')],
+    )
 
 
-def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir) -> None:
+def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command) -> None:
     ws = _ws(tmpdir)  # missing root config.yaml → a fixable finding
     os.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
-    result = runner.invoke(app, ['doctor'])
-    assert result.exit_code == 1
-    assert 'would fix — run with --fix' in result.output
+    command.run('doctor').check(
+        output='\n'.join(
+            [
+                f'[workspace-config] (would fix — run with --fix) {ws.resolve()}/config.yaml missing',
+                _env_not_set(ws.resolve()),
+            ]
+        ),
+        return_code=1,
+        logging=[('INFO', 'doctor')],
+    )
     assert not (ws / 'config.yaml').exists()  # report only, nothing written
 
 
-def test_doctor_cli_fix_resolves_and_exits_zero(tmpdir: TempDir, replace: Replacer) -> None:
+def test_doctor_cli_fix_resolves_and_exits_zero(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     ws = _ws(tmpdir)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    result = runner.invoke(app, ['doctor', str(ws), '--fix'])
-    assert result.exit_code == 0
-    assert 'fixed' in result.output
+    command.run('doctor', str(ws), '--fix').check(
+        output=f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing',
+        logging=[('INFO', 'doctor')],
+    )
     assert yaml.safe_load((ws / 'config.yaml').read_text()) == {'kind': 'workspace'}
 
 
-def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir) -> None:
+def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Command) -> None:
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: nonsense\n')  # not auto-fixable
-    result = runner.invoke(app, ['doctor', str(ws), '--fix'])
-    assert result.exit_code == 1
-    assert 'needs attention' in result.output
+    command.run('doctor', str(ws), '--fix').check(
+        output='\n'.join(
+            [
+                f'[workspace-config] (needs attention) {ws.resolve()}/config.yaml '
+                'has kind: nonsense at the workspace root',
+                _env_not_set(ws.resolve()),
+            ]
+        ),
+        return_code=1,
+        logging=[('INFO', 'doctor')],
+    )
 
 
-def test_doctor_cli_navigates_from_a_project(tmpdir: TempDir, replace: Replacer) -> None:
+def test_doctor_cli_navigates_from_a_project(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     ws = _ws(tmpdir)
     (ws / 'config.yaml').write_text('kind: workspace\n')
     project = _project(ws, name='chimera')  # legacy repo:-only config
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    result = runner.invoke(app, ['doctor', '--fix'])
-    assert result.exit_code == 0
-    assert f'resolved workspace root: {ws.resolve()}' in result.output
+    command.run('doctor', '--fix').check(  # cwd is the tmpdir, not ws, so the note appears
+        output='\n'.join(
+            [
+                f'note: resolved workspace root: {ws.resolve()}',
+                f'[project-config] (fixed) {ws.resolve()}/chimera/config.yaml missing kind: project',
+            ]
+        ),
+        logging=[('INFO', 'doctor')],
+    )
     config = yaml.safe_load((project / 'config.yaml').read_text())
     assert config == {'kind': 'project', 'repo': '/some/repo'}  # fixed, not corrupted

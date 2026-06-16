@@ -2,14 +2,10 @@ import os
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, Replacer, TempDir
 
-from chimera.__main__ import app
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.context import Scope, resolve_project
-
-runner = CliRunner()
 
 
 def _workspace(tmpdir: TempDir) -> Path:
@@ -41,27 +37,29 @@ def test_goals_in_scope_single_project_when_pinned(tmpdir: TempDir) -> None:
     assert goals_in_scope(Scope(ws, project, None)) == [('alpha', 'x'), ('alpha', 'y')]
 
 
-def test_goal_ls_cli_prints_bare_names_inside_a_project(tmpdir: TempDir, replace: Replacer) -> None:
+def test_goal_ls_cli_prints_bare_names_inside_a_project(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     ws = _workspace(tmpdir)
     project = _project(ws, 'alpha', 'y', 'x')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     os.chdir(project)  # standing in the project → bare goal names
-    result = runner.invoke(app, ['goal', 'ls'])
-    assert result.exit_code == 0
-    assert result.output.splitlines() == ['x', 'y']
+    command.run('goal', 'ls').check(output='x\ny', logging=[('INFO', 'goal ls')])
 
 
-def test_goal_ls_cli_qualifies_names_when_widened(tmpdir: TempDir, replace: Replacer) -> None:
+def test_goal_ls_cli_qualifies_names_when_widened(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     ws = _workspace(tmpdir)
     _project(ws, 'alpha', 'x')
     _project(ws, 'beta', 'z')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    result = runner.invoke(app, ['goal', 'ls'])
-    assert result.exit_code == 0
-    assert result.output.splitlines() == ['alpha  x', 'beta  z']
+    command.run('goal', 'ls').check(output='alpha  x\nbeta  z', logging=[('INFO', 'goal ls')])
 
 
-def test_goal_ls_cli_reflects_real_worktrees(tmpdir: TempDir, replace: Replacer) -> None:
+def test_goal_ls_cli_reflects_real_worktrees(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
@@ -70,8 +68,6 @@ def test_goal_ls_cli_reflects_real_worktrees(tmpdir: TempDir, replace: Replacer)
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     os.chdir(project)  # worktree add + goal ls both infer the project from cwd
-    runner.invoke(app, ['worktree', 'add', 'alpha'])
-    runner.invoke(app, ['worktree', 'add', 'beta'])
-    result = runner.invoke(app, ['goal', 'ls'])
-    assert result.exit_code == 0
-    assert result.output.split() == ['alpha', 'beta']
+    command.run('worktree', 'add', 'alpha')
+    command.run('worktree', 'add', 'beta')
+    command.run('goal', 'ls').check(output='alpha\nbeta', logging=[('INFO', 'goal ls')])

@@ -5,11 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from testfixtures import Replacer, TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, Replacer, TempDir
 
 from chimera import __main__ as chimera_main
-from chimera.__main__ import app
 from chimera.commands.agent import (
     Agent,
     agent,
@@ -24,8 +22,6 @@ from chimera.commands.agent import (
 )
 from chimera.config import ProjectConfig
 from chimera.context import Project, Scope
-
-runner = CliRunner()
 
 
 def _project_obj(directory: Path) -> Project:
@@ -163,76 +159,85 @@ def _project_with_worktree(tmpdir: TempDir) -> Path:
     return project
 
 
-def test_agent_start_cli(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
-    result = runner.invoke(app, ['agent', 'start', '-g', 'g'])
-    assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g@agent'  # cwd resolves symlinks like the wrapper
+    command.run('agent', 'start', '-g', 'g').check(
+        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+    )
     assert calls == [(['claude', '--name', 'myproject@g@agent'], expected, True)]
 
 
-def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
-    result = runner.invoke(app, ['agent', 'start', 'do it', '-g', 'g'])
-    assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'start', 'do it', '-g', 'g').check(
+        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+    )
     assert calls == [(['claude', '--bg', '--name', 'myproject@g@agent', 'do it'], expected, True)]
 
 
-def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     project = _project_with_worktree(tmpdir)
     (project / 'worktrees' / 'g@reviewer').mkdir()
     calls = _stub(replace)
-    result = runner.invoke(app, ['agent', 'start', '-g', 'g', '-a', 'reviewer'])
-    assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g@reviewer'
+    command.run('agent', 'start', '-g', 'g', '-a', 'reviewer').check(
+        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+    )
     assert calls == [(['claude', '--name', 'myproject@g@reviewer'], expected, True)]
 
 
-def test_agent_start_cli_forwards_flags_after_dashdash(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_start_cli_forwards_flags_after_dashdash(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
     # no prompt, only passthrough: the flag must not be mistaken for the prompt
-    result = runner.invoke(
-        app, ['agent', 'start', '-g', 'g', '--', '--dangerously-skip-permissions']
+    command.run('agent', 'start', '-g', 'g', '--', '--dangerously-skip-permissions').check(
+        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
-    assert result.exit_code == 0
-    expected = Path.cwd() / 'worktrees' / 'g@agent'
-    command = ['claude', '--name', 'myproject@g@agent', '--dangerously-skip-permissions']
-    assert calls == [(command, expected, True)]
+    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--dangerously-skip-permissions']
+    assert calls == [(claude_cmd, expected, True)]
 
 
-def test_agent_start_cli_with_prompt_and_passthrough(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_start_cli_with_prompt_and_passthrough(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
-    result = runner.invoke(app, ['agent', 'start', 'do it', '-g', 'g', '--', '--model', 'opus'])
-    assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g@agent'
-    command = ['claude', '--bg', '--name', 'myproject@g@agent', '--model', 'opus', 'do it']
-    assert calls == [(command, expected, True)]
+    command.run('agent', 'start', 'do it', '-g', 'g', '--', '--model', 'opus').check(
+        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+    )
+    claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', '--model', 'opus', 'do it']
+    assert calls == [(claude_cmd, expected, True)]
 
 
-def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
-    result = runner.invoke(app, ['agent', 'resume', '-g', 'g'])
-    assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'resume', '-g', 'g').check(
+        output=f'Resumed agent in {expected}', logging=[('INFO', 'agent resume')]
+    )
     assert calls == [(['claude', '--resume', 'myproject@g@agent'], expected, True)]
 
 
-def test_agent_resume_cli_with_passthrough(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_resume_cli_with_passthrough(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
-    result = runner.invoke(
-        app, ['agent', 'resume', '-g', 'g', '--', '--dangerously-skip-permissions']
-    )
-    assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'g@agent'
-    command = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
-    assert calls == [(command, expected, True)]
+    command.run('agent', 'resume', '-g', 'g', '--', '--dangerously-skip-permissions').check(
+        output=f'Resumed agent in {expected}', logging=[('INFO', 'agent resume')]
+    )
+    claude_cmd = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
+    assert calls == [(claude_cmd, expected, True)]
 
 
 def _transcript(folder: Path, name: str, body: str, mtime: float) -> Path:
@@ -426,7 +431,9 @@ def _scoped_cli(tmpdir: TempDir, replace: Replacer) -> Path:
     return project
 
 
-def test_agent_ls_cli_unpinned_lists_every_agent(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_ls_cli_unpinned_lists_every_agent(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     project = _scoped_cli(tmpdir, replace)
     worktree = project / 'worktrees' / 'g@agent'
     replace.in_module(
@@ -441,17 +448,22 @@ def test_agent_ls_cli_unpinned_lists_every_agent(tmpdir: TempDir, replace: Repla
         ],
         module=chimera_main,
     )
-    result = runner.invoke(app, ['agent', 'ls'])
-    assert result.exit_code == 0
-    assert result.output.splitlines() == [  # unpinned → every agent, even the outside stray
-        'aaa11111  proj@g@agent  busy  fix it',
-        'bbb22222  other         idle  do a thing',
-        'ccc                     idle  unnamed',  # name blanked: it merely echoes the id
-        'ddd       stray         idle  x',
-    ]
+    command.run('agent', 'ls').check(  # unpinned → every agent, even the outside stray
+        output='\n'.join(
+            [
+                'aaa11111  proj@g@agent  busy  fix it',
+                'bbb22222  other         idle  do a thing',
+                'ccc                     idle  unnamed',  # name blanked: it merely echoes the id
+                'ddd       stray         idle  x',
+            ]
+        ),
+        logging=[('INFO', 'agent ls')],
+    )
 
 
-def test_agent_ls_cli_trims_long_detail(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_ls_cli_trims_long_detail(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     project = _scoped_cli(tmpdir, replace)
     worktree = project / 'worktrees' / 'g@agent'
     detail = 'x' * 200
@@ -460,12 +472,14 @@ def test_agent_ls_cli_trims_long_detail(tmpdir: TempDir, replace: Replacer) -> N
         lambda: [Agent(id='aaa', name='named', status='busy', cwd=worktree, summary=detail)],
         module=chimera_main,
     )
-    result = runner.invoke(app, ['agent', 'ls'])
-    assert result.exit_code == 0
-    assert result.output.splitlines() == ['aaa  named  busy  ' + 'x' * 79 + '…']
+    command.run('agent', 'ls').check(
+        output='aaa  named  busy  ' + 'x' * 79 + '…', logging=[('INFO', 'agent ls')]
+    )
 
 
-def test_agent_ls_cli_pinned_to_project_filters_strays(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_ls_cli_pinned_to_project_filters_strays(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     project = _scoped_cli(tmpdir, replace)
     worktree = project / 'worktrees' / 'g@agent'
     replace.in_module(
@@ -476,14 +490,14 @@ def test_agent_ls_cli_pinned_to_project_filters_strays(tmpdir: TempDir, replace:
         ],
         module=chimera_main,
     )
-    result = runner.invoke(app, ['agent', 'ls', '-p', 'proj'])
-    assert result.exit_code == 0
-    assert result.output.splitlines() == ['aaa  proj@g@agent  busy  fix it']
+    command.run('agent', 'ls', '-p', 'proj').check(
+        output='aaa  proj@g@agent  busy  fix it', logging=[('INFO', 'agent ls')]
+    )
 
 
-def test_agent_ls_cli_when_nothing_running(tmpdir: TempDir, replace: Replacer) -> None:
+def test_agent_ls_cli_when_nothing_running(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     _scoped_cli(tmpdir, replace)
     replace.in_module(agents, list, module=chimera_main)
-    result = runner.invoke(app, ['agent', 'ls'])
-    assert result.exit_code == 0
-    assert 'No agents running' in result.output
+    command.run('agent', 'ls').check(output='No agents running', logging=[('INFO', 'agent ls')])

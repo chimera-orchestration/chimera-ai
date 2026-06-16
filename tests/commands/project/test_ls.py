@@ -1,10 +1,6 @@
-from testfixtures import TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, TempDir
 
-from chimera.__main__ import app
 from chimera.commands.project.ls import projects
-
-runner = CliRunner()
 
 
 def _workspace_with_projects(tmpdir: TempDir) -> TempDir:
@@ -21,8 +17,6 @@ def test_projects_lists_tracked_projects_sorted(tmpdir: TempDir) -> None:
     assert projects(tmpdir.path) == ['alpha', 'beta']
 
 
-def test_project_ls_cli(tmpdir: TempDir) -> None:
+def test_project_ls_cli(tmpdir: TempDir, command: Command) -> None:
     _workspace_with_projects(tmpdir)
-    result = runner.invoke(app, ['project', 'ls'])
-    assert result.exit_code == 0
-    assert result.output.split() == ['alpha', 'beta']
+    command.run('project', 'ls').check(output='alpha\nbeta', logging=[('INFO', 'project ls')])

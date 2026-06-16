@@ -3,16 +3,12 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, Replacer, TempDir
 
-from chimera.__main__ import app
 from chimera.commands.agent import live_sessions
 from chimera.commands.project.rm import remove
 from chimera.commands.worktree.add import add
 from chimera.commands.worktree import rm as worktree_rm
-
-runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
@@ -85,19 +81,21 @@ def test_remove_force_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: 
     assert (project / 'worktrees' / 'g@agent').is_dir()
 
 
-def test_project_rm_cli(tmpdir: TempDir, replace: Replacer) -> None:
+def test_project_rm_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     workspace, repo, project = _project(tmpdir)
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
-    result = runner.invoke(app, ['project', 'rm', 'myproj'])
-    assert result.exit_code == 0
-    assert 'Removed' in result.output
+    command.run('project', 'rm', 'myproj').check(
+        output=f'Removed {project}', logging=[('INFO', 'project rm')]
+    )
     assert not project.exists()
 
 
-def test_project_rm_cli_reports_nothing_to_remove(tmpdir: TempDir, replace: Replacer) -> None:
+def test_project_rm_cli_reports_nothing_to_remove(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     workspace = tmpdir.makedir('lycia')
     (workspace / 'config.yaml').write_text('kind: workspace\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
-    result = runner.invoke(app, ['project', 'rm', 'ghost'])
-    assert result.exit_code == 0
-    assert 'No project named ghost' in result.output
+    command.run('project', 'rm', 'ghost').check(
+        output='No project named ghost to remove', logging=[('INFO', 'project rm')]
+    )

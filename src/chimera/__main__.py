@@ -136,8 +136,15 @@ class LoggingCommand(TyperCommand):
 
 
 def _action(ctx: Context) -> str:
-    """The canonical command path without the program name (e.g. ``project ls``)."""
-    return ctx.command_path.partition(' ')[2]
+    """The canonical command path without the program name (e.g. ``project ls``).
+
+    The last segment of ``command_path`` is the name as typed, so a synonym would log
+    itself; replacing it with the resolved command's own name logs the canonical command
+    it dispatches to (``goal new`` → ``goal start``).
+    """
+    segments = ctx.command_path.split(' ')
+    segments[-1] = ctx.command.name or segments[-1]
+    return ' '.join(segments[1:])
 
 
 class PassthroughCommand(LoggingCommand):

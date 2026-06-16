@@ -3,16 +3,12 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, Replacer, TempDir
 
-from chimera.__main__ import app
 from chimera.commands.agent import live_sessions
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
 from chimera.commands.worktree.rm import remove
-
-runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
@@ -119,32 +115,37 @@ def test_remove_force_discards_unsaved_work(tmpdir: TempDir) -> None:
     assert 'g/agent' not in branches
 
 
-def test_worktree_rm_cli(tmpdir: TempDir) -> None:
+def test_worktree_rm_cli(tmpdir: TempDir, command: Command) -> None:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     project = _project(tmpdir, repo)
-    runner.invoke(app, ['worktree', 'add', 'g'])
-    result = runner.invoke(app, ['worktree', 'rm', 'g'])
-    assert result.exit_code == 0
+    command.run('worktree', 'add', 'g')
+    worktree = (project / 'worktrees' / 'g@agent').resolve()
+    command.run('worktree', 'rm', 'g').check(
+        output=f'Removed {worktree}', logging=[('INFO', 'worktree rm')]
+    )
     assert not (project / 'worktrees' / 'g@agent').exists()
     assert 'g/human' not in Git(repo.path).branches()
 
 
-def test_worktree_rm_cli_reports_nothing_to_remove(tmpdir: TempDir) -> None:
+def test_worktree_rm_cli_reports_nothing_to_remove(tmpdir: TempDir, command: Command) -> None:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     _project(tmpdir, repo)
-    result = runner.invoke(app, ['worktree', 'rm', 'ghost'])
-    assert result.exit_code == 0
-    assert 'Nothing to remove' in result.output
+    command.run('worktree', 'rm', 'ghost').check(
+        output='Nothing to remove for ghost', logging=[('INFO', 'worktree rm')]
+    )
 
 
-def test_goal_finish_cli(tmpdir: TempDir) -> None:
+def test_goal_finish_cli(tmpdir: TempDir, command: Command) -> None:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     project = _project(tmpdir, repo)
-    runner.invoke(app, ['worktree', 'add', 'g'])
-    result = runner.invoke(app, ['goal', 'finish', 'g'])  # finish is the lifecycle name for rm
-    assert result.exit_code == 0
+    command.run('worktree', 'add', 'g')
+    worktree = (project / 'worktrees' / 'g@agent').resolve()
+    # finish is the lifecycle name for rm
+    command.run('goal', 'finish', 'g').check(
+        output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
+    )
     assert not (project / 'worktrees' / 'g@agent').exists()
     assert 'g/agent' not in Git(repo.path).branches()

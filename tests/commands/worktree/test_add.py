@@ -4,13 +4,9 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, TempDir
 
-from chimera.__main__ import app
 from chimera.commands.worktree.add import add
-
-runner = CliRunner()
 
 
 def _seeded_repo(tmpdir: TempDir) -> Repo:
@@ -146,34 +142,37 @@ def test_add_refuses_bare_repo_without_commits(tmpdir: TempDir) -> None:
         add(bare, worktrees, 'g')
 
 
-def test_worktree_add_cli(tmpdir: TempDir) -> None:
+def test_worktree_add_cli(tmpdir: TempDir, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     project = tmpdir.path
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    result = runner.invoke(app, ['worktree', 'add', 'feature-x'])
-    assert result.exit_code == 0
+    worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
+    command.run('worktree', 'add', 'feature-x').check(
+        output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
+    )
     assert (project / 'worktrees' / 'feature-x@agent').is_dir()
     assert not (project / 'worktrees' / 'feature-x@human').exists()
     assert 'feature-x/human' in Git(repo.path).branches()
 
 
-def test_worktree_add_cli_from_option(tmpdir: TempDir) -> None:
+def test_worktree_add_cli_from_option(tmpdir: TempDir, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     repo('checkout', '-b', 'release')
     release = repo.commit_content('release-work', short=False)
     repo('checkout', 'main')
     project = tmpdir.path
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    result = runner.invoke(app, ['worktree', 'add', 'feature-x', '--from', 'release'])
-    assert result.exit_code == 0
+    worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
+    command.run('worktree', 'add', 'feature-x', '--from', 'release').check(
+        output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
+    )
     assert _head(project / 'worktrees' / 'feature-x@agent') == release
 
 
-def test_worktree_ls_cli(tmpdir: TempDir) -> None:
+def test_worktree_ls_cli(tmpdir: TempDir, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     project = tmpdir.path
     (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
-    runner.invoke(app, ['worktree', 'add', 'g'])
-    result = runner.invoke(app, ['worktree', 'ls'])
-    assert result.exit_code == 0
-    assert str(project / 'worktrees' / 'g@agent') in result.output
+    command.run('worktree', 'add', 'g')
+    worktree = (project / 'worktrees' / 'g@agent').resolve()
+    command.run('worktree', 'ls').check(output=str(worktree), logging=[('INFO', 'worktree ls')])

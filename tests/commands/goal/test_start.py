@@ -3,15 +3,11 @@ from pathlib import Path
 
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, Replacer, TempDir
 
-from chimera.__main__ import app
 from chimera.commands.agent import agent
 from chimera.commands.goal import start as goal_start
 from chimera.commands.goal.start import start
-
-runner = CliRunner()
 
 
 def _seeded_repo(tmpdir: TempDir) -> Repo:
@@ -58,7 +54,7 @@ def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer
     assert calls == [(worktrees / 'g@agent', 'proj@g@agent', 'do it', ())]
 
 
-def test_goal_start_cli(tmpdir: TempDir, replace: Replacer) -> None:
+def test_goal_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     project = _project(tmpdir, repo)
     calls: list[object] = []  # stub the agent so real git runs but no claude launches
@@ -67,14 +63,15 @@ def test_goal_start_cli(tmpdir: TempDir, replace: Replacer) -> None:
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
         module=goal_start,
     )
-    result = runner.invoke(app, ['goal', 'start', 'feature-x'])
-    assert result.exit_code == 0
-    assert (project / 'worktrees' / 'feature-x@agent').is_dir()
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
+    command.run('goal', 'start', 'feature-x').check(
+        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+    )
+    assert (project / 'worktrees' / 'feature-x@agent').is_dir()
     assert calls == [(expected, 'project@feature-x@agent', None, [])]
 
 
-def test_goal_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer) -> None:
+def test_goal_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     _project(tmpdir, repo)
     calls: list[object] = []
@@ -83,13 +80,16 @@ def test_goal_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer) -> None:
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
         module=goal_start,
     )
-    result = runner.invoke(app, ['goal', 'start', 'feature-x', 'go build it'])
-    assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
+    command.run('goal', 'start', 'feature-x', 'go build it').check(
+        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+    )
     assert calls == [(expected, 'project@feature-x@agent', 'go build it', [])]
 
 
-def test_goal_start_cli_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -> None:
+def test_goal_start_cli_passes_extra_flags_through(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
     repo = _seeded_repo(tmpdir)
     _project(tmpdir, repo)
     calls: list[object] = []
@@ -98,7 +98,8 @@ def test_goal_start_cli_passes_extra_flags_through(tmpdir: TempDir, replace: Rep
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
         module=goal_start,
     )
-    result = runner.invoke(app, ['goal', 'start', 'feature-x', '--', '--model', 'opus'])
-    assert result.exit_code == 0
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
+    command.run('goal', 'start', 'feature-x', '--', '--model', 'opus').check(
+        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+    )
     assert calls == [(expected, 'project@feature-x@agent', None, ['--model', 'opus'])]

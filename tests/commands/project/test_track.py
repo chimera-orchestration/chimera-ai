@@ -1,12 +1,9 @@
 import pytest
 import yaml
-from testfixtures import Replacer, TempDir
-from typer.testing import CliRunner
+from testfixtures import Command, Replacer, TempDir
 
-from chimera.__main__ import app
 from chimera.commands.project.track import track
-
-runner = CliRunner()
+from chimera.config import NotInWorkspaceError
 
 _DIRS = ('knowledge', 'prompts', 'principles', 'processes')
 
@@ -46,18 +43,19 @@ def test_track_repo_not_a_dir_raises(tmpdir: TempDir) -> None:
         track(workspace, repo)
 
 
-def test_track_cli(tmpdir: TempDir, replace: Replacer) -> None:
+def test_track_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     workspace = tmpdir.makedir('lycia')
     (workspace / 'config.yaml').write_text('kind: workspace\n')
     repo = tmpdir.makedir('myrepo')
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
-    result = runner.invoke(app, ['project', 'add', str(repo)])
-    assert result.exit_code == 0
+    command.run('project', 'add', str(repo)).check(
+        output=f'Added {workspace / "myrepo"}', logging=[('INFO', 'project add')]
+    )
     assert (workspace / 'myrepo' / 'config.yaml').is_file()
 
 
-def test_track_cli_outside_a_workspace(tmpdir: TempDir) -> None:
+def test_track_cli_outside_a_workspace(tmpdir: TempDir, command: Command) -> None:
     repo = tmpdir.makedir('myrepo')
-    result = runner.invoke(app, ['project', 'add', str(repo)])
-    assert result.exit_code != 0
+    with pytest.raises(NotInWorkspaceError):
+        command.run('project', 'add', str(repo))
     assert not (tmpdir.path / 'myrepo' / 'config.yaml').is_file()  # nothing written
