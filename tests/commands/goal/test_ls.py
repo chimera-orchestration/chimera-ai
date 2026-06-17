@@ -38,7 +38,7 @@ def test_goals_in_scope_lists_every_project_when_widened(tmpdir: TempDir) -> Non
 def test_goals_in_scope_single_project_when_pinned(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
     project = resolve_project(_project(tmpdir, ws, 'alpha', 'y', 'x'))
-    _project(tmpdir, ws, 'beta', 'z')
+    _project(tmpdir, ws, 'beta', 'z')  # a second project that must not appear
     compare(goals_in_scope(Scope(ws, project, None)), expected=[('alpha', 'x'), ('alpha', 'y')])
 
 

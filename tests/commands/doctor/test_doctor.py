@@ -95,8 +95,10 @@ def test_resolve_root_walks_up_without_env(tmpdir: TempDir) -> None:
 def test_doctor_aggregates_findings_and_passes_fix_through(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     check = _FakeCheck(Finding('fake', 'a thing', resolved=True, fixable=True))
-    findings = doctor(ws, fix=True, checks=(check,))
-    compare(findings, expected=[Finding('fake', 'a thing', resolved=True, fixable=True)])
+    compare(
+        doctor(ws, fix=True, checks=(check,)),
+        expected=[Finding('fake', 'a thing', resolved=True, fixable=True)],
+    )
     compare(check.seen, expected=[(ws, True)])
 
 
@@ -208,5 +210,8 @@ def test_doctor_cli_navigates_from_a_project(
         ),
         logging=[('INFO', 'doctor')],
     )
-    config = tmpdir.parse('lycia/chimera/config.yaml')
-    compare(config, expected={'kind': 'project', 'repo': '/some/repo'})  # fixed, not corrupted
+    # fixed, not corrupted
+    compare(
+        tmpdir.parse('lycia/chimera/config.yaml'),
+        expected={'kind': 'project', 'repo': '/some/repo'},
+    )

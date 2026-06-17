@@ -474,12 +474,12 @@ def test_orphaned_leftover_dir_reported(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
     project = _project(tmpdir, ws, repo.path)
-    (project / 'worktrees' / 'random').mkdir()  # never a git worktree
-    child = project / 'worktrees' / 'random'
+    leftover = project / 'worktrees' / 'random'  # a dir that was never a git worktree
+    leftover.mkdir()
     compare(
         _run(OrphanedWorktreeCheck(), ws),
         expected=[
-            Finding('orphaned-worktrees', f'{child} is not a registered worktree', False, False)
+            Finding('orphaned-worktrees', f'{leftover} is not a registered worktree', False, False)
         ],
     )
 

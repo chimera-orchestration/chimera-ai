@@ -137,9 +137,8 @@ def test_live_sessions_queries_claude_by_cwd(tmpdir: TempDir, replace: Replacer)
         return SimpleNamespace(stdout='[{"sessionId": "x", "status": "idle"}]')
 
     replace.in_module(subprocess.run, fake_run)
-    sessions = live_sessions(worktree)
+    compare(live_sessions(worktree), expected=[{'sessionId': 'x', 'status': 'idle'}])
     compare(captured['cmd'], expected=['claude', 'agents', '--json', '--cwd', str(worktree)])
-    compare(sessions, expected=[{'sessionId': 'x', 'status': 'idle'}])
 
 
 def test_all_sessions_queries_claude_unscoped(replace: Replacer) -> None:

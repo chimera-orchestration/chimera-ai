@@ -34,8 +34,7 @@ def test_start_creates_worktrees_then_launches_the_agent(
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
         module=goal_start,
     )
-    created = start(repo.path, worktrees, 'g', 'proj@g@agent')
-    compare(created, expected=worktrees / 'g@agent')
+    compare(start(repo.path, worktrees, 'g', 'proj@g@agent'), expected=worktrees / 'g@agent')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
     # foreground (no prompt)
