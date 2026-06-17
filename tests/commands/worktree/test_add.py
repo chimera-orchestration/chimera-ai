@@ -1,10 +1,9 @@
 from datetime import datetime
 from pathlib import Path
 
-import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, TempDir, compare
+from testfixtures import Command, ShouldRaise, TempDir, compare
 
 from chimera.commands.worktree.add import add
 
@@ -129,7 +128,7 @@ def test_add_falls_back_to_head_without_a_main_branch(tmpdir: TempDir) -> None:
 def test_add_refuses_repo_without_commits(tmpdir: TempDir) -> None:
     repo = Repo.make(tmpdir.path / 'repo')  # no commit → unborn HEAD
     worktrees = tmpdir.path / 'worktrees'
-    with pytest.raises(RuntimeError, match='no commits'):
+    with ShouldRaise(RuntimeError, match='no commits'):  # message embeds `git status` output
         add(repo.path, worktrees, 'g')
     assert worktrees.exists() is False
 
@@ -138,7 +137,7 @@ def test_add_refuses_bare_repo_without_commits(tmpdir: TempDir) -> None:
     bare = tmpdir.path / 'bare.git'
     Git(tmpdir.path)('init', '--bare', str(bare))  # no work tree, unborn HEAD
     worktrees = tmpdir.path / 'worktrees'
-    with pytest.raises(RuntimeError, match='no commits'):
+    with ShouldRaise(RuntimeError, match='no commits'):  # bare repo: unborn HEAD
         add(bare, worktrees, 'g')
 
 

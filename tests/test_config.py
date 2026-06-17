@@ -1,7 +1,6 @@
 from pathlib import Path
 
-import pytest
-from testfixtures import TempDir, compare
+from testfixtures import ShouldRaise, TempDir, compare
 
 from chimera.config import (
     NotInProjectError,
@@ -52,7 +51,7 @@ def test_find_workspace_from_nested_project(tmpdir: TempDir) -> None:
 
 
 def test_find_workspace_raises_outside(tmpdir: TempDir) -> None:
-    with pytest.raises(NotInWorkspaceError):
+    with ShouldRaise(NotInWorkspaceError(tmpdir.path)):
         find_workspace(tmpdir.path)
 
 
@@ -64,5 +63,6 @@ def test_find_project_at_start(tmpdir: TempDir) -> None:
 
 
 def test_find_project_raises_in_a_bare_workspace(tmpdir: TempDir) -> None:
-    with pytest.raises(NotInProjectError):
-        find_project(_workspace(tmpdir))  # workspace config is not a project
+    ws = _workspace(tmpdir)  # workspace config is not a project
+    with ShouldRaise(NotInProjectError(ws)):
+        find_project(ws)

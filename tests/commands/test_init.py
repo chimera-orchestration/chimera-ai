@@ -1,5 +1,4 @@
-import pytest
-from testfixtures import Command, TempDir, compare
+from testfixtures import Command, ShouldRaise, TempDir, compare
 
 from chimera.commands.init import init
 
@@ -20,7 +19,7 @@ def test_init_gitignores_repos_and_worktrees(tmpdir: TempDir) -> None:
 def test_init_existing_path_raises(tmpdir: TempDir) -> None:
     path = tmpdir.path / 'existing'
     path.mkdir()
-    with pytest.raises(FileExistsError):
+    with ShouldRaise(FileExistsError(path)):
         init(path)
 
 
@@ -35,5 +34,6 @@ def test_init_cli(tmpdir: TempDir, command: Command) -> None:
 def test_init_cli_existing_path(tmpdir: TempDir, command: Command) -> None:
     path = tmpdir.path / 'existing'
     path.mkdir()
-    with pytest.raises(FileExistsError):
+    # raised through typer, which annotates the instance — match the message instead
+    with ShouldRaise(FileExistsError, match=str(path)):
         command.run('init', str(path))

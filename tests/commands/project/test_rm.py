@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, TempDir, compare
+from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
 
 from chimera.commands.agent import live_sessions
 from chimera.commands.project.rm import remove
@@ -38,7 +38,7 @@ def test_remove_refuses_a_dir_that_is_not_a_tracked_project(tmpdir: TempDir) -> 
     workspace = tmpdir.makedir('lycia')
     stray = workspace / 'stray'
     stray.mkdir()
-    with pytest.raises(RuntimeError, match='not a tracked project'):
+    with ShouldRaise(RuntimeError(f'{stray} is not a tracked project (no config.yaml)')):
         remove(workspace, 'stray')
     assert stray.is_dir() is True
 
@@ -52,7 +52,9 @@ def test_remove_takes_out_a_project_with_no_goals(tmpdir: TempDir) -> None:
 
 def test_remove_refuses_while_goals_exist(tmpdir: TempDir) -> None:
     workspace, repo, project = _project(tmpdir, with_goal=True)
-    with pytest.raises(RuntimeError, match='still has goals'):
+    with ShouldRaise(
+        RuntimeError('myproj still has goals (g); run `ch goal finish` on each or use --force')
+    ):
         remove(workspace, 'myproj')
     assert (project / 'worktrees' / 'g@agent').is_dir() is True
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
@@ -74,7 +76,13 @@ def test_remove_force_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: 
         lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
         module=worktree_rm,
     )
-    with pytest.raises(RuntimeError, match='agent is live'):
+    with ShouldRaise(
+        RuntimeError(
+            f'an agent is live in {project / "worktrees" / "g@agent"}:\n'
+            '  pid ?  idle\n'
+            'find its terminal or kill the pid, then re-run'
+        )
+    ):
         remove(workspace, 'myproj', force=True)  # not even force nukes a live agent
     assert (project / 'worktrees' / 'g@agent').is_dir() is True
 

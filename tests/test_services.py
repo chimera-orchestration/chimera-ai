@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
 
-import pytest
 from pydantic import TypeAdapter, ValidationError
-from testfixtures import compare
+from testfixtures import ShouldRaise, compare
 
 from chimera.services import AnyService, DockerService, ProcessService, TmuxService
 
@@ -107,19 +106,19 @@ def test_discriminator_selects_correct_type() -> None:
 
 
 def test_unknown_type_raises() -> None:
-    with pytest.raises(ValidationError):
+    with ShouldRaise(ValidationError):
         adapter.validate_python(
             {"type": "unknown", "name": "x", "use": "y", "ports": {}, "started_at": STARTED}
         )
 
 
 def test_missing_type_raises() -> None:
-    with pytest.raises(ValidationError):
+    with ShouldRaise(ValidationError):
         adapter.validate_python({"name": "x", "use": "y", "ports": {}, "started_at": STARTED})
 
 
 def test_missing_type_specific_field_raises() -> None:
-    with pytest.raises(ValidationError):
+    with ShouldRaise(ValidationError):
         adapter.validate_python(
             {"type": "tmux", "name": "x", "use": "y", "ports": {}, "started_at": STARTED}
         )

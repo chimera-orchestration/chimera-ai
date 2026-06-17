@@ -12,7 +12,27 @@ permitted `assert`. Every other check uses `compare` from testfixtures:
 - Equality, membership, contents — all `compare`, never `assert ==` or `assert in`.
 - Only when an exact whole-object compare is genuinely impossible, narrow with `like(Cls, attr=…)`
   (a typed partial `Comparison`) — never fall back to a bare `assert`.
-- `pytest.raises`/`ShouldRaise` are context managers, not asserts — this rule leaves them alone.
+
+## Exceptions
+
+Assert raised exceptions with `ShouldRaise` from testfixtures — never `pytest.raises`:
+- `ShouldRaise(SomeError(...))` — the **exact** exception instance (type *and* message). The
+  default; mirrors the whole-object rule above. Build the message from the test's own inputs.
+- `ShouldRaise(SomeError, match='…')` — only when the message embeds something you can't
+  reconstruct (a subprocess's output, a timestamp); `match` is a substring/regex of `str(exc)`.
+- `ShouldRaise(SomeError)` — type only, when the message is genuinely uninteresting (e.g. a
+  pydantic `ValidationError`, whose text isn't ours to pin).
+
+```python
+with ShouldRaise(NotInProjectError(ws / 'ghost')):   # exact: type + message
+    resolve_project(ws, 'ghost')
+with ShouldRaise(RuntimeError, match='no commits'):  # message embeds `git status` output
+    add(repo.path, worktrees, 'g')
+with ShouldRaise(ValidationError):                   # type alone is the contract
+    load_services_config(path)
+```
+`ShouldRaise` is a context manager like `pytest.raises`; the value check lives in its argument,
+not an `assert` afterwards.
 
 ## Mocking
 

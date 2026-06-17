@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, TempDir, compare
+from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
 
 from chimera.commands.agent import live_sessions
 from chimera.commands.worktree import rm as worktree_rm
@@ -52,17 +52,15 @@ def test_remove_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: Replac
         ],
         module=worktree_rm,
     )
-    with pytest.raises(RuntimeError) as excinfo:
-        remove(repo.path, worktrees, 'g')
     since = f'{datetime.fromtimestamp(1781247747055 / 1000):%a %H:%M}'
-    compare(
-        str(excinfo.value),
-        expected=(
+    with ShouldRaise(
+        RuntimeError(
             f'an agent is live in {worktrees / "g@agent"}:\n'
             f'  pid 4242  interactive  idle  since {since}  sybil@g@agent\n'
             'find its terminal or kill the pid, then re-run'
-        ),
-    )
+        )
+    ):
+        remove(repo.path, worktrees, 'g')
     assert (worktrees / 'g@agent').is_dir() is True  # nothing removed
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
@@ -89,7 +87,12 @@ def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir) -> None:
 def test_remove_refuses_uncommitted_changes(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
     (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')
-    with pytest.raises(RuntimeError, match='changes'):
+    with ShouldRaise(
+        RuntimeError(
+            'refusing to clean up (use --force to discard):\n'
+            f'  {worktrees / "g@agent"} has uncommitted or untracked changes'
+        )
+    ):
         remove(repo.path, worktrees, 'g')
     assert (worktrees / 'g@agent').is_dir() is True
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
@@ -98,7 +101,11 @@ def test_remove_refuses_uncommitted_changes(tmpdir: TempDir) -> None:
 def test_remove_refuses_unmerged_branch(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
     Repo(worktrees / 'g@agent').commit_content('work')  # branch now ahead of main
-    with pytest.raises(RuntimeError, match='unmerged'):
+    with ShouldRaise(
+        RuntimeError(
+            'refusing to clean up (use --force to discard):\n  branch g/agent has unmerged commits'
+        )
+    ):
         remove(repo.path, worktrees, 'g')
     assert (worktrees / 'g@agent').is_dir() is True
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])

@@ -2,9 +2,8 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-import pytest
 import yaml
-from testfixtures import Command, Replacer, TempDir, compare, not_there
+from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare, not_there
 
 from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
 from chimera.commands.doctor.core import Finding
@@ -71,8 +70,8 @@ def test_find_workspace_root_skips_a_project_even_when_mislabeled(tmpdir: TempDi
 
 
 def test_find_workspace_root_raises_when_none(tmpdir: TempDir) -> None:
-    with pytest.raises(NotInWorkspaceError):
-        find_workspace_root(tmpdir.path)  # no processes / config.yaml
+    with ShouldRaise(NotInWorkspaceError(tmpdir.path)):  # no processes / config.yaml
+        find_workspace_root(tmpdir.path)
 
 
 def test_resolve_root_prefers_explicit_path(tmpdir: TempDir) -> None:

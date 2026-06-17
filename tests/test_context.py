@@ -1,9 +1,8 @@
 from pathlib import Path
 
-import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir, compare
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.config import NotInProjectError, NotInWorkspaceError, ProjectConfig
 from chimera.context import (
@@ -49,8 +48,9 @@ def test_resolve_workspace_prefers_env(tmpdir: TempDir, replace: Replacer) -> No
 def test_resolve_workspace_env_must_point_at_a_workspace(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
-    replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir.makedir('not-a-workspace')))
-    with pytest.raises(NotInWorkspaceError):
+    nope = tmpdir.makedir('not-a-workspace')
+    replace.in_environ('CHIMERA_WORKSPACE', str(nope))
+    with ShouldRaise(NotInWorkspaceError(nope)):
         resolve_workspace(tmpdir.path)
 
 
@@ -60,7 +60,7 @@ def test_resolve_workspace_falls_back_to_walk_up(tmpdir: TempDir) -> None:
 
 
 def test_resolve_workspace_raises_when_unfound(tmpdir: TempDir) -> None:
-    with pytest.raises(NotInWorkspaceError):
+    with ShouldRaise(NotInWorkspaceError(tmpdir.path)):
         resolve_workspace(tmpdir.path)
 
 
@@ -81,7 +81,7 @@ def test_resolve_project_by_name_overrides_cwd(tmpdir: TempDir) -> None:
 
 def test_resolve_project_by_name_raises_when_absent(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
-    with pytest.raises(NotInProjectError):
+    with ShouldRaise(NotInProjectError(ws / 'ghost')):
         resolve_project(ws, 'ghost')
 
 
@@ -116,21 +116,22 @@ def test_resolve_project_raises_when_repo_matches_nothing(
     stranger = Repo.make(tmpdir.path / 'stranger')  # not registered as a project
     stranger.commit_content('seed')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    with pytest.raises(CannotIdentifyProjectError):
+    with ShouldRaise(CannotIdentifyProjectError(stranger.path)):
         resolve_project(stranger.path)
 
 
 def test_resolve_project_raises_at_the_workspace_root(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)  # walk-up reaches the workspace marker without crossing a project
-    with pytest.raises(CannotIdentifyProjectError):
+    with ShouldRaise(CannotIdentifyProjectError(ws)):
         resolve_project(ws)
 
 
 def test_resolve_project_raises_outside_any_git_repo(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _workspace(tmpdir)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    with pytest.raises(CannotIdentifyProjectError):
-        resolve_project(tmpdir.makedir('bare'))  # not a git repo, no markers
+    bare = tmpdir.makedir('bare')  # not a git repo, no markers
+    with ShouldRaise(CannotIdentifyProjectError(bare)):
+        resolve_project(bare)
 
 
 def test_iter_projects_lists_only_projects_sorted(tmpdir: TempDir) -> None:
@@ -166,7 +167,7 @@ def test_resolve_goal_infers_from_a_goal_branch(tmpdir: TempDir) -> None:
 
 def test_resolve_goal_ignores_a_non_goal_branch(tmpdir: TempDir) -> None:
     project, repo = _project_with_goal(tmpdir)  # repo itself is on plain 'main'
-    with pytest.raises(GoalRequiredError):
+    with ShouldRaise(GoalRequiredError(repo.path)):
         resolve_goal(repo.path, project)
 
 
@@ -174,14 +175,15 @@ def test_resolve_goal_ignores_a_branch_that_is_not_a_real_goal(tmpdir: TempDir) 
     project, repo = _project_with_goal(tmpdir)
     checkout = tmpdir.path / 'review'
     Git(repo.path)('worktree', 'add', '-b', 'ghost/human', str(checkout), 'main')
-    with pytest.raises(GoalRequiredError):  # shaped right, but 'ghost' is not a goal
+    with ShouldRaise(GoalRequiredError(checkout)):  # shaped right, but 'ghost' is not a goal
         resolve_goal(checkout, project)
 
 
 def test_resolve_goal_requires_one_outside_a_repo(tmpdir: TempDir) -> None:
     project, _repo = _project_with_goal(tmpdir)
-    with pytest.raises(GoalRequiredError):
-        resolve_goal(tmpdir.makedir('bare'), project)
+    bare = tmpdir.makedir('bare')
+    with ShouldRaise(GoalRequiredError(bare)):
+        resolve_goal(bare, project)
 
 
 # ---- scope -----------------------------------------------------------------
@@ -228,7 +230,7 @@ def test_resolve_scope_bad_explicit_project_still_raises(
 ) -> None:
     ws = _workspace(tmpdir)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    with pytest.raises(NotInProjectError):
+    with ShouldRaise(NotInProjectError(ws / 'ghost')):
         resolve_scope(ws, project='ghost')
 
 
@@ -250,5 +252,5 @@ def test_resolve_scope_without_infer_honors_explicit_flags(
         resolve_scope(tmpdir.path, project=project.name, goal='g', infer=False),
         expected=Scope(ws, _resolved(project), 'g'),
     )
-    with pytest.raises(NotInProjectError):
+    with ShouldRaise(NotInProjectError(ws / 'ghost')):
         resolve_scope(ws, project='ghost', infer=False)

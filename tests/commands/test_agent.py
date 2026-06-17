@@ -4,8 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-from testfixtures import Command, Replacer, TempDir, compare
+from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
 
 from chimera import __main__ as chimera_main
 from chimera.commands.agent import (
@@ -63,13 +62,15 @@ def test_agent_runs_in_the_background_when_given_a_prompt(
 def test_agent_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
-    with pytest.raises(RuntimeError, match='already live'):
+    with ShouldRaise(
+        RuntimeError(f'an agent is already live in {worktree}: abc123 (idle) — attach or stop it')
+    ):
         agent(worktree, 'proj@goal@agent')
     compare(calls, expected=[])  # never launched
 
 
 def test_agent_missing_worktree_raises(tmpdir: TempDir) -> None:
-    with pytest.raises(FileNotFoundError):
+    with ShouldRaise(FileNotFoundError(tmpdir.path / 'nope')):
         agent(tmpdir.path / 'nope', 'x')
 
 
@@ -113,13 +114,15 @@ def test_resume_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -
 def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
-    with pytest.raises(RuntimeError, match='already live'):
+    with ShouldRaise(
+        RuntimeError(f'an agent is already live in {worktree}: abc123 (idle) — attach or stop it')
+    ):
         resume(worktree, 'proj@goal@agent')
     compare(calls, expected=[])  # never launched
 
 
 def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
-    with pytest.raises(FileNotFoundError):
+    with ShouldRaise(FileNotFoundError(tmpdir.path / 'nope')):
         resume(tmpdir.path / 'nope', 'x')
 
 

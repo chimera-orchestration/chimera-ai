@@ -1,6 +1,5 @@
-import pytest
 from pydantic import ValidationError
-from testfixtures import TempDir, compare
+from testfixtures import ShouldRaise, TempDir, compare
 
 from chimera.service_config import (
     DockerServiceConfig,
@@ -126,7 +125,7 @@ services:
     use: bad
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
-    with pytest.raises(ValidationError):
+    with ShouldRaise(ValidationError):
         load_services_config(path)
 
 
@@ -138,7 +137,7 @@ services:
     use: cache
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
-    with pytest.raises(ValidationError):
+    with ShouldRaise(ValidationError):
         load_services_config(path)
 
 

@@ -1,6 +1,5 @@
-import pytest
 import yaml
-from testfixtures import Command, Replacer, TempDir, compare
+from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
 
 from chimera.commands.project.track import track
 from chimera.config import NotInWorkspaceError
@@ -31,14 +30,14 @@ def test_track_is_idempotent(tmpdir: TempDir) -> None:
 
 def test_track_missing_repo_raises(tmpdir: TempDir) -> None:
     workspace = tmpdir.makedir('lycia')
-    with pytest.raises(FileNotFoundError):
+    with ShouldRaise(FileNotFoundError((tmpdir.path / 'nope').resolve())):  # track resolves first
         track(workspace, tmpdir.path / 'nope')
 
 
 def test_track_repo_not_a_dir_raises(tmpdir: TempDir) -> None:
     workspace = tmpdir.makedir('lycia')
     repo = tmpdir.write('afile', b'')
-    with pytest.raises(NotADirectoryError):
+    with ShouldRaise(NotADirectoryError(repo.resolve())):  # track resolves first
         track(workspace, repo)
 
 
@@ -55,6 +54,7 @@ def test_track_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None
 
 def test_track_cli_outside_a_workspace(tmpdir: TempDir, command: Command) -> None:
     repo = tmpdir.makedir('myrepo')
-    with pytest.raises(NotInWorkspaceError):
+    # raised through typer, which annotates the instance — match the message instead
+    with ShouldRaise(NotInWorkspaceError, match='is not inside a Chimera workspace'):
         command.run('project', 'add', str(repo))
     assert (tmpdir.path / 'myrepo' / 'config.yaml').is_file() is False  # nothing written
