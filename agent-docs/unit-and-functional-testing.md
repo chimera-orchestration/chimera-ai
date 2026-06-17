@@ -2,6 +2,13 @@
 - collect tests for a component in `test_{component}.py`
 - commands: test the pure function for logic, the CLI for wiring — see @agent-docs/commands.md
 
+## Grouping
+
+Group related tests into a class-based suite (`class TestResolveScope: ...`), never with
+banner comments like `# ---- scope ----`. The class name carries the grouping; method names
+drop the redundant prefix (`TestResolveScope.test_pins_the_goal`, not `test_resolve_scope_*`).
+Module-level helpers stay at module scope, above the class that uses them.
+
 ## Assertions
 
 `assert a is b` (identity/singletons only: `is None`, `is True`, `is obj`) is the **only**
@@ -57,6 +64,10 @@ def tmpdir() -> Iterator[TempDir]: ...
 **testfixtures.TempDir** (`from testfixtures import TempDir`)
 - Use as context manager: `with TempDir() as d: ...`
 - `d.path` is already a `Path` object — use directly, no wrapping needed
+- `d / 'sub'` works (≡ `d.path / 'sub'`) — prefer it; reserve `d.path` for passing the dir itself
+- path args accept an **absolute** `Path` inside the tempdir (auto-relativised) as well as a
+  relative str — so `d.dump(project / 'config.yaml', …)`, never
+  `d.dump(str(project.relative_to(d.path) / 'config.yaml'), …)`
 - `d.write('file.txt', b'data')` returns `Path`; `d.makedir('subdir')` returns `Path`
 - `TempDirectory` is the old deprecated API with str/bytes interface — do NOT use it
 - dep: `testfixtures @ git+https://github.com/simplistix/testfixtures` (main branch)
