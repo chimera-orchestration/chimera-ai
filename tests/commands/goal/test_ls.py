@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, TempDir
+from testfixtures import Command, Replacer, TempDir, compare
 
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.context import Scope, resolve_project
@@ -27,14 +27,17 @@ def test_goals_in_scope_lists_every_project_when_widened(tmpdir: TempDir) -> Non
     ws = _workspace(tmpdir)
     _project(ws, 'alpha', 'y', 'x')
     _project(ws, 'beta', 'z')
-    assert goals_in_scope(Scope(ws, None, None)) == [('alpha', 'x'), ('alpha', 'y'), ('beta', 'z')]
+    compare(
+        goals_in_scope(Scope(ws, None, None)),
+        expected=[('alpha', 'x'), ('alpha', 'y'), ('beta', 'z')],
+    )
 
 
 def test_goals_in_scope_single_project_when_pinned(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
     project = resolve_project(_project(ws, 'alpha', 'y', 'x'))
     _project(ws, 'beta', 'z')
-    assert goals_in_scope(Scope(ws, project, None)) == [('alpha', 'x'), ('alpha', 'y')]
+    compare(goals_in_scope(Scope(ws, project, None)), expected=[('alpha', 'x'), ('alpha', 'y')])
 
 
 def test_goal_ls_cli_prints_bare_names_inside_a_project(

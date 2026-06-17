@@ -28,7 +28,7 @@ def test_every_command_logs_its_action(path: str) -> None:
     # The guard for "every CLI action must be logged": a command that isn't a
     # LoggingCommand silently skips the chokepoint. Adding one without cls=LoggingCommand
     # (directly or via PassthroughCommand) fails here.
-    assert isinstance(_leaf_commands()[path], LoggingCommand)
+    assert isinstance(_leaf_commands()[path], LoggingCommand) is True
 
 
 def test_logs_fixture_captures_loguru(logs: LogCapture) -> None:

@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from testfixtures import Command, Replacer, TempDir
+from testfixtures import Command, Replacer, TempDir, compare
 
 from chimera import __main__ as chimera_main
 from chimera.commands.agent import (
@@ -45,7 +45,7 @@ def test_agent_runs_claude_in_the_foreground_by_default(tmpdir: TempDir, replace
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent')
-    assert calls == [(['claude', '--name', 'proj@goal@agent'], worktree, True)]
+    compare(calls, expected=[(['claude', '--name', 'proj@goal@agent'], worktree, True)])
 
 
 def test_agent_runs_in_the_background_when_given_a_prompt(
@@ -54,9 +54,10 @@ def test_agent_runs_in_the_background_when_given_a_prompt(
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent', 'fix the bug')
-    assert calls == [
-        (['claude', '--bg', '--name', 'proj@goal@agent', 'fix the bug'], worktree, True)
-    ]
+    compare(
+        calls,
+        expected=[(['claude', '--bg', '--name', 'proj@goal@agent', 'fix the bug'], worktree, True)],
+    )
 
 
 def test_agent_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
@@ -64,7 +65,7 @@ def test_agent_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer
     calls = _stub(replace, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
     with pytest.raises(RuntimeError, match='already live'):
         agent(worktree, 'proj@goal@agent')
-    assert calls == []  # never launched
+    compare(calls, expected=[])  # never launched
 
 
 def test_agent_missing_worktree_raises(tmpdir: TempDir) -> None:
@@ -77,7 +78,7 @@ def test_agent_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) ->
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent', extra=['--model', 'opus'])
     expected = ['claude', '--name', 'proj@goal@agent', '--model', 'opus']
-    assert calls == [(expected, worktree, True)]
+    compare(calls, expected=[(expected, worktree, True)])
 
 
 def test_resume_runs_claude_resume_in_the_foreground_by_default(
@@ -86,7 +87,7 @@ def test_resume_runs_claude_resume_in_the_foreground_by_default(
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     resume(worktree, 'proj@goal@agent')
-    assert calls == [(['claude', '--resume', 'proj@goal@agent'], worktree, True)]
+    compare(calls, expected=[(['claude', '--resume', 'proj@goal@agent'], worktree, True)])
 
 
 def test_resume_runs_in_the_background_when_given_a_prompt(
@@ -95,9 +96,10 @@ def test_resume_runs_in_the_background_when_given_a_prompt(
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     resume(worktree, 'proj@goal@agent', 'carry on')
-    assert calls == [
-        (['claude', '--bg', '--resume', 'proj@goal@agent', 'carry on'], worktree, True)
-    ]
+    compare(
+        calls,
+        expected=[(['claude', '--bg', '--resume', 'proj@goal@agent', 'carry on'], worktree, True)],
+    )
 
 
 def test_resume_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -> None:
@@ -105,7 +107,7 @@ def test_resume_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -
     calls = _stub(replace)
     resume(worktree, 'proj@goal@agent', extra=['--dangerously-skip-permissions'])
     expected = ['claude', '--resume', 'proj@goal@agent', '--dangerously-skip-permissions']
-    assert calls == [(expected, worktree, True)]
+    compare(calls, expected=[(expected, worktree, True)])
 
 
 def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
@@ -113,7 +115,7 @@ def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replace
     calls = _stub(replace, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
     with pytest.raises(RuntimeError, match='already live'):
         resume(worktree, 'proj@goal@agent')
-    assert calls == []  # never launched
+    compare(calls, expected=[])  # never launched
 
 
 def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
@@ -133,8 +135,8 @@ def test_live_sessions_queries_claude_by_cwd(tmpdir: TempDir, replace: Replacer)
 
     replace.in_module(subprocess.run, fake_run)
     sessions = live_sessions(worktree)
-    assert captured['cmd'] == ['claude', 'agents', '--json', '--cwd', str(worktree)]
-    assert sessions == [{'sessionId': 'x', 'status': 'idle'}]
+    compare(captured['cmd'], expected=['claude', 'agents', '--json', '--cwd', str(worktree)])
+    compare(sessions, expected=[{'sessionId': 'x', 'status': 'idle'}])
 
 
 def test_all_sessions_queries_claude_unscoped(replace: Replacer) -> None:
@@ -147,8 +149,8 @@ def test_all_sessions_queries_claude_unscoped(replace: Replacer) -> None:
         return SimpleNamespace(stdout='[{"sessionId": "x", "status": "idle"}]')
 
     replace.in_module(subprocess.run, fake_run)
-    assert all_sessions() == [{'sessionId': 'x', 'status': 'idle'}]
-    assert captured['cmd'] == ['claude', 'agents', '--json']  # no --cwd → every project
+    compare(all_sessions(), expected=[{'sessionId': 'x', 'status': 'idle'}])
+    compare(captured['cmd'], expected=['claude', 'agents', '--json'])  # no --cwd → every project
 
 
 def _project_with_worktree(tmpdir: TempDir) -> Path:
@@ -166,7 +168,7 @@ def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
-    assert calls == [(['claude', '--name', 'myproject@g@agent'], expected, True)]
+    compare(calls, expected=[(['claude', '--name', 'myproject@g@agent'], expected, True)])
 
 
 def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -176,7 +178,10 @@ def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command
     command.run('agent', 'start', 'do it', '-g', 'g').check(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
-    assert calls == [(['claude', '--bg', '--name', 'myproject@g@agent', 'do it'], expected, True)]
+    compare(
+        calls,
+        expected=[(['claude', '--bg', '--name', 'myproject@g@agent', 'do it'], expected, True)],
+    )
 
 
 def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -187,7 +192,7 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command:
     command.run('agent', 'start', '-g', 'g', '-a', 'reviewer').check(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
-    assert calls == [(['claude', '--name', 'myproject@g@reviewer'], expected, True)]
+    compare(calls, expected=[(['claude', '--name', 'myproject@g@reviewer'], expected, True)])
 
 
 def test_agent_start_cli_forwards_flags_after_dashdash(
@@ -201,7 +206,7 @@ def test_agent_start_cli_forwards_flags_after_dashdash(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent', '--dangerously-skip-permissions']
-    assert calls == [(claude_cmd, expected, True)]
+    compare(calls, expected=[(claude_cmd, expected, True)])
 
 
 def test_agent_start_cli_with_prompt_and_passthrough(
@@ -214,7 +219,7 @@ def test_agent_start_cli_with_prompt_and_passthrough(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
     claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', '--model', 'opus', 'do it']
-    assert calls == [(claude_cmd, expected, True)]
+    compare(calls, expected=[(claude_cmd, expected, True)])
 
 
 def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -224,7 +229,7 @@ def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) 
     command.run('agent', 'resume', '-g', 'g').check(
         output=f'Resumed agent in {expected}', logging=[('INFO', 'agent resume')]
     )
-    assert calls == [(['claude', '--resume', 'myproject@g@agent'], expected, True)]
+    compare(calls, expected=[(['claude', '--resume', 'myproject@g@agent'], expected, True)])
 
 
 def test_agent_resume_cli_with_passthrough(
@@ -237,7 +242,7 @@ def test_agent_resume_cli_with_passthrough(
         output=f'Resumed agent in {expected}', logging=[('INFO', 'agent resume')]
     )
     claude_cmd = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
-    assert calls == [(claude_cmd, expected, True)]
+    compare(calls, expected=[(claude_cmd, expected, True)])
 
 
 def _transcript(folder: Path, name: str, body: str, mtime: float) -> Path:
@@ -261,7 +266,7 @@ def test_session_summary_reads_newest_transcript_for_cwd(tmpdir: TempDir) -> Non
         '{"type": "assistant", "message": "ok"}\n',
         2000,
     )
-    assert session_summary('/work/proj', 'agent', projects) == 'fix the bug'
+    compare(session_summary('/work/proj', 'agent', projects), expected='fix the bug')
 
 
 def test_session_summary_prefers_title_over_prompt(tmpdir: TempDir) -> None:
@@ -274,7 +279,7 @@ def test_session_summary_prefers_title_over_prompt(tmpdir: TempDir) -> None:
         '{"type": "custom-title", "customTitle": "my title"}\n',
         1000,
     )
-    assert session_summary('/work/proj', 'agent', projects) == 'my title'
+    compare(session_summary('/work/proj', 'agent', projects), expected='my title')
 
 
 def test_session_summary_uses_ai_title_when_no_custom_title(tmpdir: TempDir) -> None:
@@ -286,7 +291,7 @@ def test_session_summary_uses_ai_title_when_no_custom_title(tmpdir: TempDir) -> 
         '{"type": "ai-title", "aiTitle": "ai topic"}\n',
         1000,
     )
-    assert session_summary('/work/proj', 'agent', projects) == 'ai topic'
+    compare(session_summary('/work/proj', 'agent', projects), expected='ai topic')
 
 
 def test_session_summary_skips_title_equal_to_name(tmpdir: TempDir) -> None:
@@ -299,7 +304,7 @@ def test_session_summary_skips_title_equal_to_name(tmpdir: TempDir) -> None:
         '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n',
         1000,
     )
-    assert session_summary('/work/proj', 'proj@goal@agent', projects) == 'fix the bug'
+    compare(session_summary('/work/proj', 'proj@goal@agent', projects), expected='fix the bug')
 
 
 def test_session_summary_takes_latest_of_each_record(tmpdir: TempDir) -> None:
@@ -311,7 +316,7 @@ def test_session_summary_takes_latest_of_each_record(tmpdir: TempDir) -> None:
         '{"type": "custom-title", "customTitle": "new name"}\n',
         1000,
     )
-    assert session_summary('/work/proj', 'agent', projects) == 'new name'
+    compare(session_summary('/work/proj', 'agent', projects), expected='new name')
 
 
 def test_session_summary_skips_typed_record_missing_its_value(tmpdir: TempDir) -> None:
@@ -323,7 +328,7 @@ def test_session_summary_skips_typed_record_missing_its_value(tmpdir: TempDir) -
         '{"type": "last-prompt"}\n{"type": "ai-title", "aiTitle": "ai topic"}\n',
         1000,
     )
-    assert session_summary('/work/proj', 'agent', projects) == 'ai topic'
+    compare(session_summary('/work/proj', 'agent', projects), expected='ai topic')
 
 
 def test_session_summary_when_no_folder(tmpdir: TempDir) -> None:
@@ -350,12 +355,19 @@ def test_agents_enriches_sessions_with_name_cwd_and_summary(
             {'sessionId': 'bare', 'status': 'idle', 'cwd': '/elsewhere'},  # no name, no transcript
         ],
     )
-    assert agents(projects) == [
-        Agent(
-            id='x', name='proj@goal@agent', status='busy', cwd=Path('/work/proj'), summary='do it'
-        ),
-        Agent(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
-    ]
+    compare(
+        agents(projects),
+        expected=[
+            Agent(
+                id='x',
+                name='proj@goal@agent',
+                status='busy',
+                cwd=Path('/work/proj'),
+                summary='do it',
+            ),
+            Agent(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
+        ],
+    )
 
 
 def test_agents_tolerates_sessions_missing_fields(replace: Replacer) -> None:
@@ -365,30 +377,33 @@ def test_agents_tolerates_sessions_missing_fields(replace: Replacer) -> None:
         # status falls back to state, then '?', and a missing cwd yields no summary
         lambda: [{'sessionId': 'lonely', 'state': 'working'}],
     )
-    assert agents() == [
-        Agent(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
-    ]
+    compare(
+        agents(),
+        expected=[Agent(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)],
+    )
 
 
 def test_agent_detail_falls_back_to_tilde_cwd(replace: Replacer) -> None:
     replace.on_class(Path.home, lambda cls: Path('/home/me'))
-    assert Agent('i', 'n', 'idle', Path('/home/me/work'), 'a prompt').detail == 'a prompt'
-    assert Agent('i', 'n', 'idle', Path('/home/me/work'), None).detail == '~/work'
-    assert Agent('i', 'n', 'idle', Path('/other'), None).detail == '/other'
+    compare(Agent('i', 'n', 'idle', Path('/home/me/work'), 'a prompt').detail, expected='a prompt')
+    compare(Agent('i', 'n', 'idle', Path('/home/me/work'), None).detail, expected='~/work')
+    compare(Agent('i', 'n', 'idle', Path('/other'), None).detail, expected='/other')
 
 
 def test_scoped_unpinned_keeps_every_agent_when_otherwise_is_none(tmpdir: TempDir) -> None:
     ws = tmpdir.makedir('lycia')
     inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
     outside = _agent_at(tmpdir.path / 'elsewhere', 'outside')
-    assert scoped([inside, outside], Scope(ws, None, None), otherwise=None) == [inside, outside]
+    compare(
+        scoped([inside, outside], Scope(ws, None, None), otherwise=None), expected=[inside, outside]
+    )
 
 
 def test_scoped_unpinned_bounds_to_otherwise_when_given(tmpdir: TempDir) -> None:
     ws = tmpdir.makedir('lycia')
     inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
     outside = _agent_at(tmpdir.path / 'elsewhere', 'outside')
-    assert scoped([inside, outside], Scope(ws, None, None), otherwise=ws) == [inside]
+    compare(scoped([inside, outside], Scope(ws, None, None), otherwise=ws), expected=[inside])
 
 
 def test_scoped_project_keeps_only_agents_under_the_project(tmpdir: TempDir) -> None:
@@ -396,7 +411,7 @@ def test_scoped_project_keeps_only_agents_under_the_project(tmpdir: TempDir) -> 
     project = _project_obj(ws / 'proj')
     inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
     other = _agent_at(ws / 'q' / 'worktrees' / 'g@agent', 'other')
-    assert scoped([inside, other], Scope(ws, project, None), otherwise=None) == [inside]
+    compare(scoped([inside, other], Scope(ws, project, None), otherwise=None), expected=[inside])
 
 
 def test_scoped_goal_matches_every_actor_worktree_only(tmpdir: TempDir) -> None:
@@ -408,17 +423,20 @@ def test_scoped_goal_matches_every_actor_worktree_only(tmpdir: TempDir) -> None:
     other_goal = _agent_at(worktrees / 'gg@agent', 'other-goal')  # 'gg' must not match 'g'
     in_repo = _agent_at(ws / 'proj' / 'repo', 'repo')  # in the project, not a goal worktree
     listing = [agent_wt, reviewer_sub, other_goal, in_repo]
-    assert scoped(listing, Scope(ws, project, 'g'), otherwise=None) == [agent_wt, reviewer_sub]
+    compare(
+        scoped(listing, Scope(ws, project, 'g'), otherwise=None), expected=[agent_wt, reviewer_sub]
+    )
 
 
 def test_under_and_in_goal(tmpdir: TempDir) -> None:
     root = tmpdir.makedir('r')
-    assert under(root, root) and under(root / 'a' / 'b', root)
-    assert not under(tmpdir.path / 'other', root)
+    compare(under(root, root), expected=True)
+    compare(under(root / 'a' / 'b', root), expected=True)
+    compare(under(tmpdir.path / 'other', root), expected=False)
     worktrees = tmpdir.makedir('wt')
-    assert in_goal(worktrees / 'g@agent', worktrees, 'g')
-    assert not in_goal(worktrees / 'goal@agent', worktrees, 'g')  # boundary: 'g' ≠ 'goal'
-    assert not in_goal(worktrees, worktrees, 'g')  # the worktrees dir itself is not in a goal
+    compare(in_goal(worktrees / 'g@agent', worktrees, 'g'), expected=True)
+    compare(in_goal(worktrees / 'goal@agent', worktrees, 'g'), expected=False)  # 'g' ≠ 'goal'
+    compare(in_goal(worktrees, worktrees, 'g'), expected=False)  # the dir itself is not in a goal
 
 
 def _scoped_cli(tmpdir: TempDir, replace: Replacer) -> Path:

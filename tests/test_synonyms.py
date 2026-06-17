@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, TempDir
+from testfixtures import Command, Replacer, TempDir, compare
 
 from chimera.__main__ import app
 from chimera.commands.agent import agent
@@ -28,7 +28,7 @@ def test_new_dispatches_to_start(tmpdir: TempDir, replace: Replacer, command: Co
     command.run('goal', 'new', 'feature-x').check(
         output=f'Started feature-x in {worktree}', logging=[('INFO', 'goal start')]
     )
-    assert (project / 'worktrees' / 'feature-x@agent').is_dir()
+    assert (project / 'worktrees' / 'feature-x@agent').is_dir() is True
 
 
 def test_cleanup_dispatches_to_finish(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -40,13 +40,13 @@ def test_cleanup_dispatches_to_finish(tmpdir: TempDir, replace: Replacer, comman
     command.run('goal', 'cleanup', 'feature-x').check(
         output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
     )
-    assert not (project / 'worktrees' / 'feature-x@agent').exists()
+    assert (project / 'worktrees' / 'feature-x@agent').exists() is False
 
 
 def test_synonyms_are_hidden_from_help(command: Command) -> None:
     output = command.run('goal', '--help').output.captured  # --help is not a logged action
-    assert 'new' not in output
-    assert 'cleanup' not in output
+    assert ('new' in output) is False
+    assert ('cleanup' in output) is False
 
 
 def test_no_synonym_shadows_a_real_command() -> None:
@@ -57,6 +57,4 @@ def test_no_synonym_shadows_a_real_command() -> None:
         if not synonyms:
             continue
         names = {cmd.name for cmd in instance.registered_commands}
-        assert not (synonyms.keys() & names), (
-            f'synonym shadows a command: {synonyms.keys() & names}'
-        )
+        compare(synonyms.keys() & names, expected=set())  # no synonym shadows a real command

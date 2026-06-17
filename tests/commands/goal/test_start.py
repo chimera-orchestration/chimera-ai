@@ -3,7 +3,7 @@ from pathlib import Path
 
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, TempDir
+from testfixtures import Command, Replacer, TempDir, compare
 
 from chimera.commands.agent import agent
 from chimera.commands.goal import start as goal_start
@@ -35,10 +35,11 @@ def test_start_creates_worktrees_then_launches_the_agent(
         module=goal_start,
     )
     created = start(repo.path, worktrees, 'g', 'proj@g@agent')
-    assert created == worktrees / 'g@agent'
-    assert (worktrees / 'g@agent').is_dir()
-    assert 'g/human' in Git(repo.path).branches()
-    assert calls == [(worktrees / 'g@agent', 'proj@g@agent', None, ())]  # foreground (no prompt)
+    compare(created, expected=worktrees / 'g@agent')
+    assert (worktrees / 'g@agent').is_dir() is True
+    compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    # foreground (no prompt)
+    compare(calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', None, ())])
 
 
 def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer) -> None:
@@ -51,7 +52,7 @@ def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer
         module=goal_start,
     )
     start(repo.path, worktrees, 'g', 'proj@g@agent', prompt='do it')
-    assert calls == [(worktrees / 'g@agent', 'proj@g@agent', 'do it', ())]
+    compare(calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', 'do it', ())])
 
 
 def test_goal_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -67,8 +68,8 @@ def test_goal_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) ->
     command.run('goal', 'start', 'feature-x').check(
         output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
     )
-    assert (project / 'worktrees' / 'feature-x@agent').is_dir()
-    assert calls == [(expected, 'project@feature-x@agent', None, [])]
+    assert (project / 'worktrees' / 'feature-x@agent').is_dir() is True
+    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [])])
 
 
 def test_goal_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -84,7 +85,7 @@ def test_goal_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command:
     command.run('goal', 'start', 'feature-x', 'go build it').check(
         output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
     )
-    assert calls == [(expected, 'project@feature-x@agent', 'go build it', [])]
+    compare(calls, expected=[(expected, 'project@feature-x@agent', 'go build it', [])])
 
 
 def test_goal_start_cli_passes_extra_flags_through(
@@ -102,4 +103,4 @@ def test_goal_start_cli_passes_extra_flags_through(
     command.run('goal', 'start', 'feature-x', '--', '--model', 'opus').check(
         output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
     )
-    assert calls == [(expected, 'project@feature-x@agent', None, ['--model', 'opus'])]
+    compare(calls, expected=[(expected, 'project@feature-x@agent', None, ['--model', 'opus'])])

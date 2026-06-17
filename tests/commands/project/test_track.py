@@ -1,6 +1,6 @@
 import pytest
 import yaml
-from testfixtures import Command, Replacer, TempDir
+from testfixtures import Command, Replacer, TempDir, compare
 
 from chimera.commands.project.track import track
 from chimera.config import NotInWorkspaceError
@@ -12,11 +12,10 @@ def test_track_creates_project_layout(tmpdir: TempDir) -> None:
     workspace = tmpdir.makedir('lycia')
     repo = tmpdir.makedir('myrepo')
     project = track(workspace, repo)
-    assert project == workspace / 'myrepo'
-    for sub in _DIRS:
-        assert (project / sub).is_dir()
+    compare(project, expected=workspace / 'myrepo')
+    compare({sub for sub in _DIRS if (project / sub).is_dir()}, expected=set(_DIRS))
     config = yaml.safe_load((project / 'config.yaml').read_text())
-    assert config == {'kind': 'project', 'repo': str(repo.resolve())}
+    compare(config, expected={'kind': 'project', 'repo': str(repo.resolve())})
 
 
 def test_track_is_idempotent(tmpdir: TempDir) -> None:
@@ -24,10 +23,10 @@ def test_track_is_idempotent(tmpdir: TempDir) -> None:
     repo = tmpdir.makedir('myrepo')
     track(workspace, repo)
     project = track(workspace, repo)
-    assert yaml.safe_load((project / 'config.yaml').read_text()) == {
-        'kind': 'project',
-        'repo': str(repo.resolve()),
-    }
+    compare(
+        yaml.safe_load((project / 'config.yaml').read_text()),
+        expected={'kind': 'project', 'repo': str(repo.resolve())},
+    )
 
 
 def test_track_missing_repo_raises(tmpdir: TempDir) -> None:
@@ -51,11 +50,11 @@ def test_track_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None
     command.run('project', 'add', str(repo)).check(
         output=f'Added {workspace / "myrepo"}', logging=[('INFO', 'project add')]
     )
-    assert (workspace / 'myrepo' / 'config.yaml').is_file()
+    assert (workspace / 'myrepo' / 'config.yaml').is_file() is True
 
 
 def test_track_cli_outside_a_workspace(tmpdir: TempDir, command: Command) -> None:
     repo = tmpdir.makedir('myrepo')
     with pytest.raises(NotInWorkspaceError):
         command.run('project', 'add', str(repo))
-    assert not (tmpdir.path / 'myrepo' / 'config.yaml').is_file()  # nothing written
+    assert (tmpdir.path / 'myrepo' / 'config.yaml').is_file() is False  # nothing written

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, TempDir
+from testfixtures import Command, Replacer, TempDir, compare
 
 from chimera.commands.agent import live_sessions
 from chimera.commands.project.rm import remove
@@ -40,33 +40,31 @@ def test_remove_refuses_a_dir_that_is_not_a_tracked_project(tmpdir: TempDir) -> 
     stray.mkdir()
     with pytest.raises(RuntimeError, match='not a tracked project'):
         remove(workspace, 'stray')
-    assert stray.is_dir()
+    assert stray.is_dir() is True
 
 
 def test_remove_takes_out_a_project_with_no_goals(tmpdir: TempDir) -> None:
     workspace, repo, project = _project(tmpdir)
-    assert remove(workspace, 'myproj') == project
-    assert not project.exists()
-    assert repo.path.is_dir()  # the external tracked repo is left untouched
+    compare(remove(workspace, 'myproj'), expected=project)
+    assert project.exists() is False
+    assert repo.path.is_dir() is True  # the external tracked repo is left untouched
 
 
 def test_remove_refuses_while_goals_exist(tmpdir: TempDir) -> None:
     workspace, repo, project = _project(tmpdir, with_goal=True)
     with pytest.raises(RuntimeError, match='still has goals'):
         remove(workspace, 'myproj')
-    assert (project / 'worktrees' / 'g@agent').is_dir()
-    assert 'g/agent' in Git(repo.path).branches()
+    assert (project / 'worktrees' / 'g@agent').is_dir() is True
+    compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
 def test_remove_force_finishes_goals_then_removes_the_project(tmpdir: TempDir) -> None:
     workspace, repo, project = _project(tmpdir, with_goal=True)
     Repo(project / 'worktrees' / 'g@agent').commit_content('work')  # unmerged
     (project / 'worktrees' / 'g@agent' / 'scratch.txt').write_text('wip')  # uncommitted
-    assert remove(workspace, 'myproj', force=True) == project
-    assert not project.exists()
-    branches = Git(repo.path).branches()
-    assert 'g/agent' not in branches
-    assert 'g/human' not in branches
+    compare(remove(workspace, 'myproj', force=True), expected=project)
+    assert project.exists() is False
+    compare(Git(repo.path).branches(), expected=['main'])
 
 
 def test_remove_force_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: Replacer) -> None:
@@ -78,7 +76,7 @@ def test_remove_force_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: 
     )
     with pytest.raises(RuntimeError, match='agent is live'):
         remove(workspace, 'myproj', force=True)  # not even force nukes a live agent
-    assert (project / 'worktrees' / 'g@agent').is_dir()
+    assert (project / 'worktrees' / 'g@agent').is_dir() is True
 
 
 def test_project_rm_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -87,7 +85,7 @@ def test_project_rm_cli(tmpdir: TempDir, replace: Replacer, command: Command) ->
     command.run('project', 'rm', 'myproj').check(
         output=f'Removed {project}', logging=[('INFO', 'project rm')]
     )
-    assert not project.exists()
+    assert project.exists() is False
 
 
 def test_project_rm_cli_reports_nothing_to_remove(

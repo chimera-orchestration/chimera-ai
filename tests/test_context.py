@@ -3,13 +3,14 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir
+from testfixtures import Replacer, TempDir, compare
 
-from chimera.config import NotInProjectError, NotInWorkspaceError
+from chimera.config import NotInProjectError, NotInWorkspaceError, ProjectConfig
 from chimera.context import (
     CannotIdentifyProjectError,
     GoalRequiredError,
     Project,
+    Scope,
     iter_projects,
     resolve_goal,
     resolve_project,
@@ -32,13 +33,17 @@ def _project(parent: Path, name: str = 'proj', repo: str = '/r') -> Path:
     return project
 
 
+def _resolved(project_dir: Path, repo: str = '/r') -> Project:
+    return Project(project_dir, ProjectConfig(kind='project', repo=Path(repo)))
+
+
 # ---- workspace -------------------------------------------------------------
 
 
 def test_resolve_workspace_prefers_env(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _workspace(tmpdir)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    assert resolve_workspace(tmpdir.path / 'somewhere-else') == ws  # env wins over cwd
+    compare(resolve_workspace(tmpdir.path / 'somewhere-else'), expected=ws)  # env wins over cwd
 
 
 def test_resolve_workspace_env_must_point_at_a_workspace(
@@ -51,7 +56,7 @@ def test_resolve_workspace_env_must_point_at_a_workspace(
 
 def test_resolve_workspace_falls_back_to_walk_up(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
-    assert resolve_workspace(_project(ws)) == ws  # env unset (cleared by conftest)
+    compare(resolve_workspace(_project(ws)), expected=ws)  # env unset (cleared by conftest)
 
 
 def test_resolve_workspace_raises_when_unfound(tmpdir: TempDir) -> None:
@@ -64,18 +69,14 @@ def test_resolve_workspace_raises_when_unfound(tmpdir: TempDir) -> None:
 
 def test_resolve_project_infers_from_cwd(tmpdir: TempDir) -> None:
     project = _project(_workspace(tmpdir))
-    resolved = resolve_project(project)
-    assert resolved.dir == project
-    assert resolved.name == 'proj'
-    assert resolved.repo == Path('/r')
-    assert resolved.worktrees == project / 'worktrees'
+    compare(resolve_project(project), expected=_resolved(project))
 
 
 def test_resolve_project_by_name_overrides_cwd(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
     foo = _project(ws, 'foo')
     bar = _project(ws, 'bar')
-    assert resolve_project(bar, 'foo').dir == foo  # standing in bar, asked for foo
+    compare(resolve_project(bar, 'foo'), expected=_resolved(foo))  # standing in bar, asked for foo
 
 
 def test_resolve_project_by_name_raises_when_absent(tmpdir: TempDir) -> None:
@@ -92,7 +93,7 @@ def test_resolve_project_matches_repo_from_external_checkout(
     repo.commit_content('seed')
     project = _project(ws, 'myproj', repo=str(repo.path))
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))  # cwd is outside lycia, so anchor by env
-    assert resolve_project(repo.path).dir == project
+    compare(resolve_project(repo.path), expected=_resolved(project, str(repo.path)))
 
 
 def test_resolve_project_matches_repo_from_a_linked_worktree(
@@ -105,7 +106,7 @@ def test_resolve_project_matches_repo_from_a_linked_worktree(
     checkout = tmpdir.path / 'review'
     Git(repo.path)('worktree', 'add', '-b', 'review', str(checkout), 'main')  # worktree elsewhere
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    assert resolve_project(checkout).dir == project  # matched via the main repo
+    compare(resolve_project(checkout), expected=_resolved(project, str(repo.path)))  # via main repo
 
 
 def test_resolve_project_raises_when_repo_matches_nothing(
@@ -137,7 +138,7 @@ def test_iter_projects_lists_only_projects_sorted(tmpdir: TempDir) -> None:
     _project(ws, 'beta')
     _project(ws, 'alpha')
     tmpdir.makedir('lycia/stray')  # no config.yaml — ignored
-    assert [p.name for p in iter_projects(ws)] == ['alpha', 'beta']
+    compare([p.name for p in iter_projects(ws)], expected=['alpha', 'beta'])
 
 
 # ---- goal ------------------------------------------------------------------
@@ -153,14 +154,14 @@ def _project_with_goal(tmpdir: TempDir) -> tuple[Project, Repo]:
 
 def test_resolve_goal_explicit_wins(tmpdir: TempDir) -> None:
     project, _repo = _project_with_goal(tmpdir)
-    assert resolve_goal(tmpdir.path, project, 'whatever') == 'whatever'
+    compare(resolve_goal(tmpdir.path, project, 'whatever'), expected='whatever')
 
 
 def test_resolve_goal_infers_from_a_goal_branch(tmpdir: TempDir) -> None:
     project, repo = _project_with_goal(tmpdir)
     checkout = tmpdir.path / 'human'
     Git(repo.path)('worktree', 'add', str(checkout), 'g/human')  # on <goal>/<actor>
-    assert resolve_goal(checkout, project) == 'g'
+    compare(resolve_goal(checkout, project), expected='g')
 
 
 def test_resolve_goal_ignores_a_non_goal_branch(tmpdir: TempDir) -> None:
@@ -199,35 +200,27 @@ def _scoped_project_with_goal(tmpdir: TempDir, replace: Replacer) -> tuple[Proje
 def test_resolve_scope_widens_to_all_projects_at_the_workspace_root(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
     _project(ws, 'a')
-    scope = resolve_scope(ws)
-    assert scope.workspace == ws
-    assert scope.project is None  # couldn't pin one → list them all
-    assert scope.goal is None
+    compare(resolve_scope(ws), expected=Scope(ws, None, None))  # couldn't pin → list them all
 
 
 def test_resolve_scope_pins_the_project_from_within_it(tmpdir: TempDir) -> None:
-    project = _project(_workspace(tmpdir))
-    scope = resolve_scope(project)
-    assert scope.project is not None and scope.project.dir == project
-    assert scope.goal is None  # not on a goal branch
+    ws = _workspace(tmpdir)
+    project = _project(ws)
+    compare(resolve_scope(project), expected=Scope(ws, _resolved(project), None))  # no goal branch
 
 
 def test_resolve_scope_pins_the_goal_from_a_goal_branch(tmpdir: TempDir, replace: Replacer) -> None:
-    project, repo, _ws = _scoped_project_with_goal(tmpdir, replace)
+    project, repo, ws = _scoped_project_with_goal(tmpdir, replace)
     checkout = tmpdir.path / 'human'
     Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
-    scope = resolve_scope(checkout)
-    assert scope.project is not None and scope.project.dir == project.dir
-    assert scope.goal == 'g'
+    compare(resolve_scope(checkout), expected=Scope(ws, project, 'g'))
 
 
 def test_resolve_scope_external_checkout_pins_project_not_goal(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
-    project, repo, _ws = _scoped_project_with_goal(tmpdir, replace)
-    scope = resolve_scope(repo.path)  # the repo is on plain 'main'
-    assert scope.project is not None and scope.project.dir == project.dir
-    assert scope.goal is None
+    project, repo, ws = _scoped_project_with_goal(tmpdir, replace)
+    compare(resolve_scope(repo.path), expected=Scope(ws, project, None))  # repo is on plain 'main'
 
 
 def test_resolve_scope_bad_explicit_project_still_raises(
@@ -240,13 +233,11 @@ def test_resolve_scope_bad_explicit_project_still_raises(
 
 
 def test_resolve_scope_without_infer_ignores_cwd(tmpdir: TempDir, replace: Replacer) -> None:
-    project, repo, ws = _scoped_project_with_goal(tmpdir, replace)
+    _, repo, ws = _scoped_project_with_goal(tmpdir, replace)
     checkout = tmpdir.path / 'human'
     Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
-    scope = resolve_scope(checkout, infer=False)  # standing in a goal worktree
-    assert scope.workspace == ws
-    assert scope.project is None  # cwd is never read — stays workspace-wide
-    assert scope.goal is None
+    # standing in a goal worktree, but cwd is never read — stays workspace-wide
+    compare(resolve_scope(checkout, infer=False), expected=Scope(ws, None, None))
 
 
 def test_resolve_scope_without_infer_honors_explicit_flags(
@@ -255,8 +246,9 @@ def test_resolve_scope_without_infer_honors_explicit_flags(
     ws = _workspace(tmpdir)
     project = _project(ws)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    scope = resolve_scope(tmpdir.path, project=project.name, goal='g', infer=False)
-    assert scope.project is not None and scope.project.dir == project
-    assert scope.goal == 'g'
+    compare(
+        resolve_scope(tmpdir.path, project=project.name, goal='g', infer=False),
+        expected=Scope(ws, _resolved(project), 'g'),
+    )
     with pytest.raises(NotInProjectError):
         resolve_scope(ws, project='ghost', infer=False)

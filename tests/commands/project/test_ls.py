@@ -1,4 +1,4 @@
-from testfixtures import Command, TempDir
+from testfixtures import Command, TempDir, compare
 
 from chimera.commands.project.ls import projects
 
@@ -14,7 +14,7 @@ def _workspace_with_projects(tmpdir: TempDir) -> TempDir:
 
 def test_projects_lists_tracked_projects_sorted(tmpdir: TempDir) -> None:
     _workspace_with_projects(tmpdir)
-    assert projects(tmpdir.path) == ['alpha', 'beta']
+    compare(projects(tmpdir.path), expected=['alpha', 'beta'])
 
 
 def test_project_ls_cli(tmpdir: TempDir, command: Command) -> None:

@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from testfixtures import Command, Replacer, TempDir
+from testfixtures import Command, Replacer, TempDir, compare
 
 from chimera.commands.agent import live_sessions
 
@@ -49,4 +49,4 @@ def test_goal_and_actor_before_the_command(
     command.run('agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start').check(
         output=f'Launched agent in {worktree}', logging=[('INFO', 'agent start')]
     )
-    assert calls == [(['claude', '--name', 'myproject@g@reviewer'], worktree)]
+    compare(calls, expected=[(['claude', '--name', 'myproject@g@reviewer'], worktree)])

@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from testfixtures import TempDir
+from testfixtures import TempDir, compare
 
 from chimera.service_config import (
     DockerServiceConfig,
@@ -37,34 +37,44 @@ services:
 def test_load_docker_service(tmpdir: TempDir) -> None:
     path = tmpdir.write("services-config.yaml", FULL_YAML.encode())
     config = load_services_config(path)
-    assert len(config.services) == 3
-    svc = config.services[0]
-    assert isinstance(svc, DockerServiceConfig)
-    assert svc.name == "cache"
-    assert svc.use == "cache"
-    assert svc.ports == {"redis": 6379}
-    assert svc.image == "redis:7"
-    assert svc.command is None
+    compare(len(config.services), expected=3)
+    compare(
+        config.services[0],
+        expected=DockerServiceConfig(
+            type="docker", name="cache", use="cache", ports={"redis": 6379}, image="redis:7"
+        ),
+    )
 
 
 def test_load_tmux_service(tmpdir: TempDir) -> None:
     path = tmpdir.write("services-config.yaml", FULL_YAML.encode())
     config = load_services_config(path)
-    svc = config.services[1]
-    assert isinstance(svc, TmuxServiceConfig)
-    assert svc.name == "my-agent"
-    assert svc.session == "agent-session"
-    assert svc.command == "bash"
+    compare(
+        config.services[1],
+        expected=TmuxServiceConfig(
+            type="tmux",
+            name="my-agent",
+            use="agent",
+            ports={},
+            session="agent-session",
+            command="bash",
+        ),
+    )
 
 
 def test_load_process_service(tmpdir: TempDir) -> None:
     path = tmpdir.write("services-config.yaml", FULL_YAML.encode())
     config = load_services_config(path)
-    svc = config.services[2]
-    assert isinstance(svc, ProcessServiceConfig)
-    assert svc.name == "my-proc"
-    assert svc.ports == {"http": 8080}
-    assert svc.command == "python worker.py"
+    compare(
+        config.services[2],
+        expected=ProcessServiceConfig(
+            type="process",
+            name="my-proc",
+            use="worker",
+            ports={"http": 8080},
+            command="python worker.py",
+        ),
+    )
 
 
 def test_docker_command_optional(tmpdir: TempDir) -> None:
@@ -77,10 +87,12 @@ services:
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
     config = load_services_config(path)
-    svc = config.services[0]
-    assert isinstance(svc, DockerServiceConfig)
-    assert svc.command is None
-    assert svc.ports == {}
+    compare(
+        config.services[0],
+        expected=DockerServiceConfig(
+            type="docker", name="db", use="cache", image="some-image:latest"
+        ),
+    )
 
 
 def test_docker_command_set(tmpdir: TempDir) -> None:
@@ -94,9 +106,16 @@ services:
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
     config = load_services_config(path)
-    svc = config.services[0]
-    assert isinstance(svc, DockerServiceConfig)
-    assert svc.command == "redis-server --appendonly yes"
+    compare(
+        config.services[0],
+        expected=DockerServiceConfig(
+            type="docker",
+            name="db",
+            use="cache",
+            image="some-image:latest",
+            command="redis-server --appendonly yes",
+        ),
+    )
 
 
 def test_unknown_type_raises(tmpdir: TempDir) -> None:
@@ -130,5 +149,7 @@ def test_services_config_model_validate() -> None:
         ]
     }
     config = ServicesConfig.model_validate(data)
-    assert len(config.services) == 1
-    assert isinstance(config.services[0], ProcessServiceConfig)
+    compare(
+        config.services,
+        expected=[ProcessServiceConfig(type="process", name="x", use="y", command="run.sh")],
+    )

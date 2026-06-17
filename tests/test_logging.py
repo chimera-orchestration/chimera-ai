@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 from loguru import logger
-from testfixtures import Replacer, TempDir
+from testfixtures import Replacer, TempDir, compare
 
 from chimera.commands.init import init
 from chimera.logging import configure, log_action, log_path
@@ -24,23 +24,24 @@ def _records(path: TempDir) -> list[Any]:
 
 
 def test_log_path(tmpdir: TempDir) -> None:
-    assert log_path(tmpdir.path) == tmpdir.path / 'logs' / 'chimera.jsonl'
+    compare(log_path(tmpdir.path), expected=tmpdir.path / 'logs' / 'chimera.jsonl')
 
 
 def test_configure_writes_json(workspace: TempDir) -> None:
     configure()
     log_action('project ls', {'force': True})
     (record,) = _records(workspace)
-    assert record['level']['name'] == 'INFO'
-    assert record['message'] == 'project ls'
-    assert record['extra'] == {'params': {'force': True}}
+    compare(
+        {'level': record['level']['name'], 'message': record['message'], 'extra': record['extra']},
+        expected={'level': 'INFO', 'message': 'project ls', 'extra': {'params': {'force': True}}},
+    )
 
 
 def test_configure_is_idempotent(workspace: TempDir) -> None:
     configure()
     configure()  # a second sink would duplicate every line
     log_action('project ls', {})
-    assert len(_records(workspace)) == 1
+    compare(len(_records(workspace)), expected=1)
 
 
 def test_configure_outside_a_workspace_keeps_the_default(tmpdir: TempDir) -> None:
@@ -51,4 +52,4 @@ def test_configure_outside_a_workspace_keeps_the_default(tmpdir: TempDir) -> Non
         sentinel = {'kept': object()}
         replace(target=core.handlers, container=core, name='handlers', replacement=sentinel)
         configure()
-        assert core.handlers == sentinel
+        compare(core.handlers, expected=sentinel)

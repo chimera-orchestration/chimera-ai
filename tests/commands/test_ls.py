@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from testfixtures import Command, Replacer, TempDir
+from testfixtures import Command, Replacer, TempDir, compare
 
 from chimera import __main__ as chimera_main
 from chimera.commands.agent import Agent, agents
@@ -40,10 +40,13 @@ def test_board_partitions_agents_into_goals_project_loose_and_workspace_loose(
     stray = _agent(ws / 'scratch', 'stray-ws')  # under the workspace, not a project
     outside = _agent(tmpdir.path / 'elsewhere', 'outside')  # filtered out entirely
     result = board(Scope(ws, None, None), [in_goal, in_repo, stray, outside])
-    assert result == Board(
-        workspace='lycia',
-        projects=[ProjectBoard('alpha', [GoalBoard('g', [in_goal])], [in_repo])],
-        loose=[stray],
+    compare(
+        result,
+        expected=Board(
+            workspace='lycia',
+            projects=[ProjectBoard('alpha', [GoalBoard('g', [in_goal])], [in_repo])],
+            loose=[stray],
+        ),
     )
 
 
@@ -54,7 +57,7 @@ def test_board_pinned_goal_shows_only_that_goal(tmpdir: TempDir) -> None:
     a = _agent(ws / 'alpha' / 'worktrees' / 'g@agent', 'a')
     b = _agent(ws / 'alpha' / 'worktrees' / 'other@agent', 'b')
     result = board(Scope(ws, project, 'g'), [a, b])
-    assert result == Board('lycia', [ProjectBoard('alpha', [GoalBoard('g', [a])], [])], [])
+    compare(result, expected=Board('lycia', [ProjectBoard('alpha', [GoalBoard('g', [a])], [])], []))
 
 
 def _cli_workspace(tmpdir: TempDir, replace: Replacer) -> Path:

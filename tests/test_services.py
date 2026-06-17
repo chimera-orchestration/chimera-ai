@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
+from testfixtures import compare
 
 from chimera.services import AnyService, DockerService, ProcessService, TmuxService
 
@@ -20,9 +21,7 @@ def test_tmux_service_roundtrip() -> None:
         session="my-session",
     )
     data = svc.model_dump()
-    restored = adapter.validate_python(data)
-    assert isinstance(restored, TmuxService)
-    assert restored == svc
+    compare(adapter.validate_python(data), expected=svc)
 
 
 def test_docker_service_roundtrip() -> None:
@@ -36,9 +35,7 @@ def test_docker_service_roundtrip() -> None:
         container_name="cache-server",
     )
     data = svc.model_dump()
-    restored = adapter.validate_python(data)
-    assert isinstance(restored, DockerService)
-    assert restored == svc
+    compare(adapter.validate_python(data), expected=svc)
 
 
 def test_process_service_roundtrip() -> None:
@@ -52,9 +49,7 @@ def test_process_service_roundtrip() -> None:
         cmd="python worker.py",
     )
     data = svc.model_dump()
-    restored = adapter.validate_python(data)
-    assert isinstance(restored, ProcessService)
-    assert restored == svc
+    compare(adapter.validate_python(data), expected=svc)
 
 
 def test_discriminator_selects_correct_type() -> None:
@@ -85,9 +80,30 @@ def test_discriminator_selects_correct_type() -> None:
         "cmd": "ls",
     }
 
-    assert isinstance(adapter.validate_python(tmux_data), TmuxService)
-    assert isinstance(adapter.validate_python(docker_data), DockerService)
-    assert isinstance(adapter.validate_python(process_data), ProcessService)
+    compare(
+        adapter.validate_python(tmux_data),
+        expected=TmuxService(
+            type="tmux", name="x", use="y", ports={}, started_at=STARTED, session="s"
+        ),
+    )
+    compare(
+        adapter.validate_python(docker_data),
+        expected=DockerService(
+            type="docker",
+            name="x",
+            use="y",
+            ports={},
+            started_at=STARTED,
+            container_id="abc123def456",
+            container_name="c",
+        ),
+    )
+    compare(
+        adapter.validate_python(process_data),
+        expected=ProcessService(
+            type="process", name="x", use="y", ports={}, started_at=STARTED, pid=1, cmd="ls"
+        ),
+    )
 
 
 def test_unknown_type_raises() -> None:
@@ -120,6 +136,4 @@ def test_json_serialisation_roundtrip() -> None:
         container_name="cache-server",
     )
     json_str = svc.model_dump_json()
-    restored = adapter.validate_json(json_str)
-    assert isinstance(restored, DockerService)
-    assert restored == svc
+    compare(adapter.validate_json(json_str), expected=svc)
