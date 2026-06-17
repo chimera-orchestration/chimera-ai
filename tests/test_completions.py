@@ -24,7 +24,7 @@ def _projects(tmpdir: TempDir, workspace: Path) -> None:
         directory = workspace / project
         (directory / 'worktrees' / f'{goal}@agent').mkdir(parents=True)
         tmpdir.dump(
-            str(directory.relative_to(tmpdir.path) / 'config.yaml'),
+            directory / 'config.yaml',
             {'kind': 'project', 'repo': str(directory)},
         )
 

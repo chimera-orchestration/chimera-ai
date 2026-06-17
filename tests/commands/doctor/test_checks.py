@@ -25,7 +25,7 @@ def _ws(tmpdir: TempDir):
 
 
 def _repo(tmpdir: TempDir, name: str = 'repo') -> Repo:
-    repo = Repo.make(tmpdir.path / name)
+    repo = Repo.make(tmpdir / name)
     repo.commit_content('seed')
     return repo
 
@@ -34,7 +34,7 @@ def _project(tmpdir, ws, repo_path, *, name='proj', kind=None):
     project = ws / name
     data = {} if kind is None else {'kind': kind}
     data['repo'] = str(repo_path)
-    tmpdir.dump(str(project.relative_to(tmpdir.path) / 'config.yaml'), data)
+    tmpdir.dump(project / 'config.yaml', data)
     (project / 'worktrees').mkdir()
     return project
 

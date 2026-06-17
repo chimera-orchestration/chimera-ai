@@ -12,7 +12,7 @@ from chimera.context import Scope, resolve_project
 def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
     project = ws / name
     tmpdir.dump(
-        str(project.relative_to(tmpdir.path) / 'config.yaml'),
+        project / 'config.yaml',
         {'kind': 'project', 'repo': str(project)},
     )
     for goal in goals:
@@ -33,7 +33,7 @@ def test_board_partitions_agents_into_goals_project_loose_and_workspace_loose(
     in_goal = _agent(workspace / 'alpha' / 'worktrees' / 'g@agent', 'alpha@g@agent', 'busy')
     in_repo = _agent(workspace / 'alpha' / 'repo', 'loose-proj')  # under the project, not a goal
     stray = _agent(workspace / 'scratch', 'stray-ws')  # under the workspace, not a project
-    outside = _agent(tmpdir.path / 'elsewhere', 'outside')  # filtered out entirely
+    outside = _agent(tmpdir / 'elsewhere', 'outside')  # filtered out entirely
     result = board(Scope(workspace, None, None), [in_goal, in_repo, stray, outside])
     compare(
         result,

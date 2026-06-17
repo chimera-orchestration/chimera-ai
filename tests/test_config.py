@@ -15,9 +15,7 @@ from chimera.config import (
 
 def _project(tmpdir: TempDir, parent, name: str = 'proj', repo: str = '/some/repo'):
     project = parent / name
-    tmpdir.dump(
-        str(project.relative_to(tmpdir.path) / 'config.yaml'), {'kind': 'project', 'repo': repo}
-    )
+    tmpdir.dump(project / 'config.yaml', {'kind': 'project', 'repo': repo})
     return project
 
 

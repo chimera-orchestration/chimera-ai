@@ -16,7 +16,7 @@ def test_add_tracks_an_existing_local_path(tmpdir: TempDir) -> None:
 
 
 def test_add_clones_a_url_into_the_workspace(tmpdir: TempDir) -> None:
-    origin = Repo.make(tmpdir.path / 'origin')
+    origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed')
     workspace = tmpdir.makedir('lycia')
     compare(add(workspace, f'file://{origin.path}'), expected=workspace / 'origin')
@@ -29,7 +29,7 @@ def test_add_clones_a_url_into_the_workspace(tmpdir: TempDir) -> None:
 
 
 def test_add_strips_git_suffix_from_the_cloned_name(tmpdir: TempDir) -> None:
-    origin = Repo.make(tmpdir.path / 'thing.git')
+    origin = Repo.make(tmpdir / 'thing.git')
     origin.commit_content('seed')
     workspace = tmpdir.makedir('lycia')
     # .git stripped from the project name

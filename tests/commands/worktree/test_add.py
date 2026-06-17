@@ -9,7 +9,7 @@ from chimera.commands.worktree.add import add
 
 
 def _seeded_repo(tmpdir: TempDir) -> Repo:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     return repo
 
@@ -24,7 +24,7 @@ def _branch(repo_path: Path, name: str) -> str:
 
 def test_add_creates_agent_worktree_and_both_branches(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     compare(add(repo.path, worktrees, 'my-goal'), expected=[worktrees / 'my-goal@agent'])
     tmpdir.compare(['my-goal@agent'], path='worktrees', recursive=False)  # human gets no worktree
     compare(Git(repo.path).branches(), expected=['main', 'my-goal/agent', 'my-goal/human'])
@@ -32,7 +32,7 @@ def test_add_creates_agent_worktree_and_both_branches(tmpdir: TempDir) -> None:
 
 def test_add_creates_extra_named_actors(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     created = add(repo.path, worktrees, 'g', actors=('human', 'agent', 'reviewer'))
     compare(created, expected=[worktrees / 'g@agent', worktrees / 'g@reviewer'])
     tmpdir.compare(['g@agent', 'g@reviewer'], path='worktrees', recursive=False)  # not human
@@ -41,7 +41,7 @@ def test_add_creates_extra_named_actors(tmpdir: TempDir) -> None:
 
 def test_add_checks_out_the_agent_branch_in_its_worktree(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     add(repo.path, worktrees, 'g')
     agent = Git(worktrees / 'g@agent')('rev-parse', '--abbrev-ref', 'HEAD').strip()
     compare(agent, expected='g/agent')
@@ -55,46 +55,46 @@ def test_add_branches_from_main_not_checked_out_branch(tmpdir: TempDir) -> None:
     repo('checkout', '-b', 'feature')
     repo.commit_content('feature-work')
     assert (_head(repo.path) == main) is False  # repo is parked on a different commit
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     [created] = add(repo.path, worktrees, 'g')
     compare(_head(created), expected=main)
     compare(_branch(repo.path, 'g/human'), expected=main)
 
 
 def test_add_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
-    origin = Repo.make(tmpdir.path / 'origin')
+    origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir.path / 'repo')
+    local = Git.clone(origin.path, tmpdir / 'repo')
     origin.commit_content('remote-ahead', datetime(2022, 1, 1))
     local('fetch', 'origin')
     expected = local.rev_parse('origin/main', short=False)
     assert (expected == local.rev_parse('main', short=False)) is False
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     [created] = add(local.path, worktrees, 'g')
     compare(_head(created), expected=expected)
     compare(_branch(local.path, 'g/human'), expected=expected)
 
 
 def test_add_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
-    origin = Repo.make(tmpdir.path / 'origin')
+    origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir.path / 'repo')
+    local = Git.clone(origin.path, tmpdir / 'repo')
     Repo(local.path).commit_content('local-ahead', datetime(2022, 1, 1))
     expected = local.rev_parse('main', short=False)
     assert (expected == local.rev_parse('origin/main', short=False)) is False
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     [created] = add(local.path, worktrees, 'g')
     compare(_head(created), expected=expected)
     compare(_branch(local.path, 'g/human'), expected=expected)
 
 
 def test_add_branches_have_no_upstream_tracking(tmpdir: TempDir) -> None:
-    origin = Repo.make(tmpdir.path / 'origin')
+    origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir.path / 'repo')
+    local = Git.clone(origin.path, tmpdir / 'repo')
     origin.commit_content('remote-ahead', datetime(2022, 1, 1))
     local('fetch', 'origin')  # base resolves to origin/main, a remote-tracking branch
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     add(local.path, worktrees, 'g')
     upstreams = {
         ref: local('for-each-ref', '--format=%(upstream)', f'refs/heads/{ref}').strip()
@@ -108,7 +108,7 @@ def test_add_uses_explicit_from_start_point(tmpdir: TempDir) -> None:
     repo('checkout', '-b', 'release')
     release = repo.commit_content('release-work', short=False)
     repo('checkout', 'main')
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     [created] = add(repo.path, worktrees, 'g', frm='release')
     compare(_head(created), expected=release)
     compare(_branch(repo.path, 'g/human'), expected=release)
@@ -118,24 +118,24 @@ def test_add_falls_back_to_head_without_a_main_branch(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     repo('branch', '-m', 'main', 'trunk')  # no main, no origin/main
     head = _head(repo.path)
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     [created] = add(repo.path, worktrees, 'g')
     compare(_head(created), expected=head)
     compare(_branch(repo.path, 'g/human'), expected=head)
 
 
 def test_add_refuses_repo_without_commits(tmpdir: TempDir) -> None:
-    repo = Repo.make(tmpdir.path / 'repo')  # no commit → unborn HEAD
-    worktrees = tmpdir.path / 'worktrees'
+    repo = Repo.make(tmpdir / 'repo')  # no commit → unborn HEAD
+    worktrees = tmpdir / 'worktrees'
     with ShouldRaise(RuntimeError, match='no commits'):  # message embeds `git status` output
         add(repo.path, worktrees, 'g')
     assert worktrees.exists() is False
 
 
 def test_add_refuses_bare_repo_without_commits(tmpdir: TempDir) -> None:
-    bare = tmpdir.path / 'bare.git'
+    bare = tmpdir / 'bare.git'
     Git(tmpdir.path)('init', '--bare', str(bare))  # no work tree, unborn HEAD
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     with ShouldRaise(RuntimeError, match='no commits'):  # bare repo: unborn HEAD
         add(bare, worktrees, 'g')
 

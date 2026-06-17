@@ -17,7 +17,7 @@ def _no_agents(replace: Replacer) -> None:
 
 
 def _project(tmpdir: TempDir, *, with_goal: bool = False) -> tuple[Path, Repo, Path]:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     workspace = tmpdir.makedir('lycia')
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})

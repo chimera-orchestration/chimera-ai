@@ -17,7 +17,7 @@ from chimera.worktrees import (
 
 
 def _seeded_repo(tmpdir: TempDir) -> Repo:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     return repo
 
@@ -38,11 +38,11 @@ def test_worktree_dirs_lists_only_dirs_sorted(tmpdir: TempDir) -> None:
     tmpdir.makedir('b@agent')
     tmpdir.makedir('a@agent')
     tmpdir.write('a-file', b'')  # files are ignored
-    compare(worktree_dirs(tmpdir.path), expected=[tmpdir.path / 'a@agent', tmpdir.path / 'b@agent'])
+    compare(worktree_dirs(tmpdir.path), expected=[tmpdir / 'a@agent', tmpdir / 'b@agent'])
 
 
 def test_worktree_dirs_is_empty_when_root_is_absent(tmpdir: TempDir) -> None:
-    compare(worktree_dirs(tmpdir.path / 'nope'), expected=[])
+    compare(worktree_dirs(tmpdir / 'nope'), expected=[])
 
 
 def test_goals_are_derived_from_agent_worktrees(tmpdir: TempDir) -> None:
@@ -54,7 +54,7 @@ def test_goals_are_derived_from_agent_worktrees(tmpdir: TempDir) -> None:
 def test_registered_worktrees_lists_repo_and_added(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     git = Git(repo.path)
-    wt = tmpdir.path / 'wt'
+    wt = tmpdir / 'wt'
     git('worktree', 'add', '-b', 'side', str(wt), 'main')
     compare(registered_worktrees(git), expected={repo.path.resolve(), wt.resolve()})
 

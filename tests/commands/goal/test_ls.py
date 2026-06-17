@@ -11,7 +11,7 @@ from chimera.context import Scope, resolve_project
 def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
     project = ws / name
     tmpdir.dump(
-        str(project.relative_to(tmpdir.path) / 'config.yaml'),
+        project / 'config.yaml',
         {'kind': 'project', 'repo': str(project)},
     )
     for goal in goals:
@@ -55,7 +55,7 @@ def test_goal_ls_cli_qualifies_names_when_widened(
 def test_goal_ls_cli_reflects_real_worktrees(
     tmpdir: TempDir, workspace_with_env: Path, command: Command
 ) -> None:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     project = workspace_with_env / 'proj'
     tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})

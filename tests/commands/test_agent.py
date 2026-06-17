@@ -70,8 +70,8 @@ def test_agent_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer
 
 
 def test_agent_missing_worktree_raises(tmpdir: TempDir) -> None:
-    with ShouldRaise(FileNotFoundError(tmpdir.path / 'nope')):
-        agent(tmpdir.path / 'nope', 'x')
+    with ShouldRaise(FileNotFoundError(tmpdir / 'nope')):
+        agent(tmpdir / 'nope', 'x')
 
 
 def test_agent_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -> None:
@@ -122,8 +122,8 @@ def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replace
 
 
 def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
-    with ShouldRaise(FileNotFoundError(tmpdir.path / 'nope')):
-        resume(tmpdir.path / 'nope', 'x')
+    with ShouldRaise(FileNotFoundError(tmpdir / 'nope')):
+        resume(tmpdir / 'nope', 'x')
 
 
 def test_live_sessions_queries_claude_by_cwd(tmpdir: TempDir, replace: Replacer) -> None:
@@ -395,7 +395,7 @@ def test_agent_detail_falls_back_to_tilde_cwd(replace: Replacer) -> None:
 def test_scoped_unpinned_keeps_every_agent_when_otherwise_is_none(tmpdir: TempDir) -> None:
     ws = tmpdir.makedir('lycia')
     inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
-    outside = _agent_at(tmpdir.path / 'elsewhere', 'outside')
+    outside = _agent_at(tmpdir / 'elsewhere', 'outside')
     compare(
         scoped([inside, outside], Scope(ws, None, None), otherwise=None), expected=[inside, outside]
     )
@@ -404,7 +404,7 @@ def test_scoped_unpinned_keeps_every_agent_when_otherwise_is_none(tmpdir: TempDi
 def test_scoped_unpinned_bounds_to_otherwise_when_given(tmpdir: TempDir) -> None:
     ws = tmpdir.makedir('lycia')
     inside = _agent_at(ws / 'proj' / 'worktrees' / 'g@agent', 'inside')
-    outside = _agent_at(tmpdir.path / 'elsewhere', 'outside')
+    outside = _agent_at(tmpdir / 'elsewhere', 'outside')
     compare(scoped([inside, outside], Scope(ws, None, None), otherwise=ws), expected=[inside])
 
 
@@ -434,7 +434,7 @@ def test_under_and_in_goal(tmpdir: TempDir) -> None:
     root = tmpdir.makedir('r')
     compare(under(root, root), expected=True)
     compare(under(root / 'a' / 'b', root), expected=True)
-    compare(under(tmpdir.path / 'other', root), expected=False)
+    compare(under(tmpdir / 'other', root), expected=False)
     worktrees = tmpdir.makedir('wt')
     compare(in_goal(worktrees / 'g@agent', worktrees, 'g'), expected=True)
     compare(in_goal(worktrees / 'goal@agent', worktrees, 'g'), expected=False)  # 'g' ≠ 'goal'
@@ -464,7 +464,7 @@ def test_agent_ls_cli_unpinned_lists_every_agent(
             ),
             Agent(id='bbb22222', name='other', status='idle', cwd=worktree, summary='do a thing'),
             Agent(id='ccc', name='ccc', status='idle', cwd=worktree, summary='unnamed'),
-            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir.path / 'outside', summary='x'),
+            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
         ],
         module=chimera_main,
     )
@@ -506,7 +506,7 @@ def test_agent_ls_cli_pinned_to_project_filters_strays(
         agents,
         lambda: [
             Agent(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
-            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir.path / 'outside', summary='x'),
+            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
         ],
         module=chimera_main,
     )

@@ -11,7 +11,7 @@ from chimera.logging import configure, log_action, log_path
 
 @pytest.fixture()
 def workspace(tmpdir: TempDir, replace: Replacer) -> TempDir:
-    replace.in_environ('CHIMERA_WORKSPACE', str(init(tmpdir.path / 'ws')))
+    replace.in_environ('CHIMERA_WORKSPACE', str(init(tmpdir / 'ws')))
     # No typed helper fits an instance attribute; loguru keeps its handlers here.
     core = getattr(logger, '_core')
     replace(target=core.handlers, container=core, name='handlers', replacement={})
@@ -24,7 +24,7 @@ def _records(path: TempDir) -> list[Any]:
 
 
 def test_log_path(tmpdir: TempDir) -> None:
-    compare(log_path(tmpdir.path), expected=tmpdir.path / 'logs' / 'chimera.jsonl')
+    compare(log_path(tmpdir.path), expected=tmpdir / 'logs' / 'chimera.jsonl')
 
 
 def test_configure_writes_json(workspace: TempDir) -> None:

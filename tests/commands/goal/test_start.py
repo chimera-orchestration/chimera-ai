@@ -11,7 +11,7 @@ from chimera.commands.goal.start import start
 
 
 def _seeded_repo(tmpdir: TempDir) -> Repo:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     return repo
 
@@ -27,7 +27,7 @@ def test_start_creates_worktrees_then_launches_the_agent(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
     repo = _seeded_repo(tmpdir)
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     calls: list[object] = []
     replace.in_module(
         agent,
@@ -43,7 +43,7 @@ def test_start_creates_worktrees_then_launches_the_agent(
 
 def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer) -> None:
     repo = _seeded_repo(tmpdir)
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     calls: list[object] = []
     replace.in_module(
         agent,

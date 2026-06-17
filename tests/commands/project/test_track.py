@@ -30,8 +30,8 @@ def test_track_is_idempotent(tmpdir: TempDir) -> None:
 
 def test_track_missing_repo_raises(tmpdir: TempDir) -> None:
     workspace = tmpdir.makedir('lycia')
-    with ShouldRaise(FileNotFoundError((tmpdir.path / 'nope').resolve())):  # track resolves first
-        track(workspace, tmpdir.path / 'nope')
+    with ShouldRaise(FileNotFoundError((tmpdir / 'nope').resolve())):  # track resolves first
+        track(workspace, tmpdir / 'nope')
 
 
 def test_track_repo_not_a_dir_raises(tmpdir: TempDir) -> None:

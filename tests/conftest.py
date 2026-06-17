@@ -32,7 +32,7 @@ def tmpdir() -> Iterator[TempDir]:
 
 @pytest.fixture()
 def workspace(tmpdir: TempDir) -> Path:
-    return init(tmpdir.path / 'lycia')
+    return init(tmpdir / 'lycia')
 
 
 @pytest.fixture()

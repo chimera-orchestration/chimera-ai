@@ -37,5 +37,5 @@ def test_logs_fixture_captures_loguru(logs: LogCapture) -> None:
 
 
 def test_command_logs_the_action(command: Command, tmpdir: TempDir, replace: Replacer) -> None:
-    replace.in_environ('CHIMERA_WORKSPACE', str(init(tmpdir.path / 'ws')))
+    replace.in_environ('CHIMERA_WORKSPACE', str(init(tmpdir / 'ws')))
     command.run('project', 'ls').check(logging=[('INFO', 'project ls')])

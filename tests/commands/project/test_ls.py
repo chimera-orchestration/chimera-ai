@@ -8,7 +8,7 @@ from chimera.commands.project.ls import projects
 def _projects(tmpdir: TempDir, workspace: Path) -> None:
     for name in ('beta', 'alpha'):
         tmpdir.dump(
-            str(workspace.relative_to(tmpdir.path) / name / 'config.yaml'),
+            workspace / name / 'config.yaml',
             {'kind': 'project', 'repo': f'/r/{name}'},
         )
     (workspace / 'not-a-project').mkdir()  # no config.yaml — ignored

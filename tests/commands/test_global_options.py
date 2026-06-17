@@ -10,7 +10,7 @@ def _myproject(tmpdir: TempDir, workspace: Path) -> Path:
     project = workspace / 'myproject'
     (project / 'worktrees' / 'g@agent').mkdir(parents=True)
     tmpdir.dump(
-        str(project.relative_to(tmpdir.path) / 'config.yaml'),
+        project / 'config.yaml',
         {'kind': 'project', 'repo': str(project)},
     )
     return project

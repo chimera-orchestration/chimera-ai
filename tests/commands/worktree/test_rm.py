@@ -18,9 +18,9 @@ def _no_agents(replace: Replacer) -> None:
 
 
 def _goal(tmpdir: TempDir) -> tuple[Repo, Path]:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
-    worktrees = tmpdir.path / 'worktrees'
+    worktrees = tmpdir / 'worktrees'
     add(repo.path, worktrees, 'g')
     return repo, worktrees
 
@@ -31,9 +31,9 @@ def _project(tmpdir: TempDir, repo: Repo) -> Path:
 
 
 def test_remove_is_a_noop_for_a_goal_that_was_never_created(tmpdir: TempDir) -> None:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
-    compare(remove(repo.path, tmpdir.path / 'worktrees', 'ghost'), expected=[])
+    compare(remove(repo.path, tmpdir / 'worktrees', 'ghost'), expected=[])
 
 
 def test_remove_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: Replacer) -> None:
@@ -121,7 +121,7 @@ def test_remove_force_discards_unsaved_work(tmpdir: TempDir) -> None:
 
 
 def test_worktree_rm_cli(tmpdir: TempDir, command: Command) -> None:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     project = _project(tmpdir, repo)
     command.run('worktree', 'add', 'g')
@@ -134,7 +134,7 @@ def test_worktree_rm_cli(tmpdir: TempDir, command: Command) -> None:
 
 
 def test_worktree_rm_cli_reports_nothing_to_remove(tmpdir: TempDir, command: Command) -> None:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     _project(tmpdir, repo)
     command.run('worktree', 'rm', 'ghost').check(
@@ -143,7 +143,7 @@ def test_worktree_rm_cli_reports_nothing_to_remove(tmpdir: TempDir, command: Com
 
 
 def test_goal_finish_cli(tmpdir: TempDir, command: Command) -> None:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     project = _project(tmpdir, repo)
     command.run('worktree', 'add', 'g')

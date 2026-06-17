@@ -9,7 +9,7 @@ from chimera.commands.goal import start as goal_start
 
 
 def _seeded_repo(tmpdir: TempDir) -> Repo:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     return repo
 

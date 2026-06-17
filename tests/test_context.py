@@ -21,9 +21,7 @@ from chimera.commands.worktree.add import add
 
 def _project(tmpdir: TempDir, parent: Path, name: str = 'proj', repo: str = '/r') -> Path:
     project = parent / name
-    tmpdir.dump(
-        str(project.relative_to(tmpdir.path) / 'config.yaml'), {'kind': 'project', 'repo': repo}
-    )
+    tmpdir.dump(project / 'config.yaml', {'kind': 'project', 'repo': repo})
     return project
 
 
@@ -32,7 +30,7 @@ def _resolved(project_dir: Path, repo: str = '/r') -> Project:
 
 
 def _project_with_goal(tmpdir: TempDir, parent: Path) -> tuple[Project, Repo]:
-    repo = Repo.make(tmpdir.path / 'repo')
+    repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
     project_dir = _project(tmpdir, parent, 'proj', repo=str(repo.path))
     add(repo.path, project_dir / 'worktrees', 'g')  # g@agent worktree + g/human branch
@@ -42,7 +40,7 @@ def _project_with_goal(tmpdir: TempDir, parent: Path) -> tuple[Project, Repo]:
 class TestResolveWorkspace:
     def test_prefers_env(self, tmpdir: TempDir, workspace_with_env: Path) -> None:
         # env wins over cwd
-        compare(resolve_workspace(tmpdir.path / 'somewhere-else'), expected=workspace_with_env)
+        compare(resolve_workspace(tmpdir / 'somewhere-else'), expected=workspace_with_env)
 
     def test_env_must_point_at_a_workspace(self, tmpdir: TempDir, replace: Replacer) -> None:
         nope = tmpdir.makedir('not-a-workspace')
@@ -76,7 +74,7 @@ class TestResolveProject:
     def test_matches_repo_from_external_checkout(
         self, tmpdir: TempDir, workspace_with_env: Path
     ) -> None:
-        repo = Repo.make(tmpdir.path / 'external')  # lives outside the workspace
+        repo = Repo.make(tmpdir / 'external')  # lives outside the workspace
         repo.commit_content('seed')
         project = _project(tmpdir, workspace_with_env, 'myproj', repo=str(repo.path))
         # cwd is outside lycia, so anchor by env
@@ -85,17 +83,17 @@ class TestResolveProject:
     def test_matches_repo_from_a_linked_worktree(
         self, tmpdir: TempDir, workspace_with_env: Path
     ) -> None:
-        repo = Repo.make(tmpdir.path / 'external')
+        repo = Repo.make(tmpdir / 'external')
         repo.commit_content('seed')
         project = _project(tmpdir, workspace_with_env, 'myproj', repo=str(repo.path))
-        checkout = tmpdir.path / 'review'
+        checkout = tmpdir / 'review'
         Git(repo.path)('worktree', 'add', '-b', 'review', str(checkout), 'main')  # elsewhere
         compare(resolve_project(checkout), expected=_resolved(project, str(repo.path)))  # via repo
 
     def test_raises_when_repo_matches_nothing(
         self, tmpdir: TempDir, workspace_with_env: Path
     ) -> None:
-        stranger = Repo.make(tmpdir.path / 'stranger')  # not registered as a project
+        stranger = Repo.make(tmpdir / 'stranger')  # not registered as a project
         stranger.commit_content('seed')
         with ShouldRaise(CannotIdentifyProjectError(stranger.path)):
             resolve_project(stranger.path)
@@ -126,7 +124,7 @@ class TestResolveGoal:
 
     def test_infers_from_a_goal_branch(self, tmpdir: TempDir) -> None:
         project, repo = _project_with_goal(tmpdir, tmpdir.path)
-        checkout = tmpdir.path / 'human'
+        checkout = tmpdir / 'human'
         Git(repo.path)('worktree', 'add', str(checkout), 'g/human')  # on <goal>/<actor>
         compare(resolve_goal(checkout, project), expected='g')
 
@@ -137,7 +135,7 @@ class TestResolveGoal:
 
     def test_ignores_a_branch_that_is_not_a_real_goal(self, tmpdir: TempDir) -> None:
         project, repo = _project_with_goal(tmpdir, tmpdir.path)
-        checkout = tmpdir.path / 'review'
+        checkout = tmpdir / 'review'
         Git(repo.path)('worktree', 'add', '-b', 'ghost/human', str(checkout), 'main')
         with ShouldRaise(GoalRequiredError(checkout)):  # shaped right, but 'ghost' is not a goal
             resolve_goal(checkout, project)
@@ -166,7 +164,7 @@ class TestResolveScope:
         self, tmpdir: TempDir, workspace_with_env: Path
     ) -> None:
         project, repo = _project_with_goal(tmpdir, workspace_with_env)
-        checkout = tmpdir.path / 'human'
+        checkout = tmpdir / 'human'
         Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
         compare(resolve_scope(checkout), expected=Scope(workspace_with_env, project, 'g'))
 
@@ -183,7 +181,7 @@ class TestResolveScope:
 
     def test_without_infer_ignores_cwd(self, tmpdir: TempDir, workspace_with_env: Path) -> None:
         _, repo = _project_with_goal(tmpdir, workspace_with_env)
-        checkout = tmpdir.path / 'human'
+        checkout = tmpdir / 'human'
         Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
         # standing in a goal worktree, but cwd is never read — stays workspace-wide
         compare(
