@@ -77,9 +77,10 @@ the workspace. Two rules:
   `<project>@<goal>@<actor>` triple):
   - `ch project ls` — always the workspace.
   - `ch goal ls` — the pinned project's goals (bare names), else every project's (qualified).
-  - `ch agent ls` — agents under the pinned goal's worktrees, else the project, else **every**
-    agent on the machine (the flat global list; the workspace tree is `ch ls`'s job); `-p/-g`
-    filter explicitly.
+  - `ch agent ls` — agents under the pinned goal's worktrees (only when cwd is *in* one, or `-g`
+    is given), else the project, else **every** agent on the machine (the flat global list; the
+    workspace tree is `ch ls`'s job); `-p/-g` filter explicitly. A `scope:` banner heads the
+    output naming what it's bounded to (`<project>@<goal>`, `<project>`, or `all agents`).
   - `ch ls` — the workspace-wide dashboard (project → goal → agent tree), the same wherever you
     run it; `-p` focuses on one project, `-g` on one goal (by name, across projects). Agents not
     under any goal/project surface as `loose` so a running agent is never hidden.

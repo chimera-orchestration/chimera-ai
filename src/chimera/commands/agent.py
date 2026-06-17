@@ -53,6 +53,23 @@ def _describe(session: dict[str, object], projects: Path | None) -> Agent:
     )
 
 
+def scope_line(scope: Scope) -> str:
+    """The banner shown above ``agent ls`` — what the list below is bounded to.
+
+    ``scope: <project>@<goal>`` when both are pinned (mirroring the ``<project>@<goal>@<actor>``
+    agent names in the rows), ``scope: <project>`` for a whole project, ``scope: all agents``
+    for the unbounded global list. The stable ``scope:`` key stays greppable for agents while
+    reading naturally for humans.
+    """
+    if scope.project is not None and scope.goal is not None:
+        target = f'{scope.project.name}{SEP}{scope.goal}'
+    elif scope.project is not None:
+        target = scope.project.name
+    else:
+        target = 'all agents'
+    return f'scope: {target}'
+
+
 def scoped(listing: list[Agent], scope: Scope, *, otherwise: Path | None) -> list[Agent]:
     """The agents in scope: under the goal's worktrees, the project, else ``otherwise``.
 

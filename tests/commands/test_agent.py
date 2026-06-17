@@ -15,6 +15,7 @@ from chimera.commands.agent import (
     in_goal,
     live_sessions,
     resume,
+    scope_line,
     scoped,
     session_summary,
     under,
@@ -430,6 +431,14 @@ def test_scoped_goal_matches_every_actor_worktree_only(tmpdir: TempDir) -> None:
     )
 
 
+def test_scope_line_reports_the_pinned_target(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    project = _project_obj(ws / 'proj')
+    compare(scope_line(Scope(ws, project, 'g')), expected='scope: proj@g')
+    compare(scope_line(Scope(ws, project, None)), expected='scope: proj')
+    compare(scope_line(Scope(ws, None, None)), expected='scope: all agents')
+
+
 def test_under_and_in_goal(tmpdir: TempDir) -> None:
     root = tmpdir.makedir('r')
     compare(under(root, root), expected=True)
@@ -471,6 +480,7 @@ def test_agent_ls_cli_unpinned_lists_every_agent(
     command.run('agent', 'ls').check(  # unpinned → every agent, even the outside stray
         output='\n'.join(
             [
+                'scope: all agents',
                 'aaa11111  proj@g@agent  busy  fix it',
                 'bbb22222  other         idle  do a thing',
                 'ccc                     idle  unnamed',  # name blanked: it merely echoes the id
@@ -493,7 +503,8 @@ def test_agent_ls_cli_trims_long_detail(
         module=chimera_main,
     )
     command.run('agent', 'ls').check(
-        output='aaa  named  busy  ' + 'x' * 79 + '…', logging=[('INFO', 'agent ls')]
+        output='scope: all agents\naaa  named  busy  ' + 'x' * 79 + '…',
+        logging=[('INFO', 'agent ls')],
     )
 
 
@@ -511,7 +522,7 @@ def test_agent_ls_cli_pinned_to_project_filters_strays(
         module=chimera_main,
     )
     command.run('agent', 'ls', '-p', 'proj').check(
-        output='aaa  proj@g@agent  busy  fix it', logging=[('INFO', 'agent ls')]
+        output='scope: proj\naaa  proj@g@agent  busy  fix it', logging=[('INFO', 'agent ls')]
     )
 
 
@@ -520,4 +531,6 @@ def test_agent_ls_cli_when_nothing_running(
 ) -> None:
     _scoped_cli(tmpdir, replace)
     replace.in_module(agents, list, module=chimera_main)
-    command.run('agent', 'ls').check(output='No agents running', logging=[('INFO', 'agent ls')])
+    command.run('agent', 'ls').check(
+        output='scope: all agents\nNo agents running', logging=[('INFO', 'agent ls')]
+    )

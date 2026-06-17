@@ -13,7 +13,7 @@ from chimera.commands.agent import Agent
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import agents
 from chimera.commands.agent import resume as _resume
-from chimera.commands.agent import scoped
+from chimera.commands.agent import scope_line, scoped
 from chimera.commands.doctor import CHECKS, Finding, resolve_root
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.adopt import adopt as _goal_adopt
@@ -518,7 +518,9 @@ def agent_resume(
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')
 def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
-    listing = scoped(agents(), _scope(ctx, project, goal), otherwise=None)
+    scope = _scope(ctx, project, goal)
+    typer.echo(scope_line(scope))
+    listing = scoped(agents(), scope, otherwise=None)
     if not listing:
         typer.echo('No agents running')
         return
