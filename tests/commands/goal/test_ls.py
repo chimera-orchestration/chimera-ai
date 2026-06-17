@@ -2,16 +2,10 @@ import os
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, TempDir, compare
+from testfixtures import Command, TempDir, compare
 
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.context import Scope, resolve_project
-
-
-def _workspace(tmpdir: TempDir) -> Path:
-    ws = tmpdir.makedir('lycia')
-    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
-    return ws
 
 
 def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
@@ -25,52 +19,46 @@ def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
     return project
 
 
-def test_goals_in_scope_lists_every_project_when_widened(tmpdir: TempDir) -> None:
-    ws = _workspace(tmpdir)
-    _project(tmpdir, ws, 'alpha', 'y', 'x')
-    _project(tmpdir, ws, 'beta', 'z')
+def test_goals_in_scope_lists_every_project_when_widened(tmpdir: TempDir, workspace: Path) -> None:
+    _project(tmpdir, workspace, 'alpha', 'y', 'x')
+    _project(tmpdir, workspace, 'beta', 'z')
     compare(
-        goals_in_scope(Scope(ws, None, None)),
+        goals_in_scope(Scope(workspace, None, None)),
         expected=[('alpha', 'x'), ('alpha', 'y'), ('beta', 'z')],
     )
 
 
-def test_goals_in_scope_single_project_when_pinned(tmpdir: TempDir) -> None:
-    ws = _workspace(tmpdir)
-    project = resolve_project(_project(tmpdir, ws, 'alpha', 'y', 'x'))
-    _project(tmpdir, ws, 'beta', 'z')  # a second project that must not appear
-    compare(goals_in_scope(Scope(ws, project, None)), expected=[('alpha', 'x'), ('alpha', 'y')])
+def test_goals_in_scope_single_project_when_pinned(tmpdir: TempDir, workspace: Path) -> None:
+    project = resolve_project(_project(tmpdir, workspace, 'alpha', 'y', 'x'))
+    _project(tmpdir, workspace, 'beta', 'z')  # a second project that must not appear
+    compare(
+        goals_in_scope(Scope(workspace, project, None)), expected=[('alpha', 'x'), ('alpha', 'y')]
+    )
 
 
 def test_goal_ls_cli_prints_bare_names_inside_a_project(
-    tmpdir: TempDir, replace: Replacer, command: Command
+    tmpdir: TempDir, workspace_with_env: Path, command: Command
 ) -> None:
-    ws = _workspace(tmpdir)
-    project = _project(tmpdir, ws, 'alpha', 'y', 'x')
-    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    project = _project(tmpdir, workspace_with_env, 'alpha', 'y', 'x')
     os.chdir(project)  # standing in the project → bare goal names
     command.run('goal', 'ls').check(output='x\ny', logging=[('INFO', 'goal ls')])
 
 
 def test_goal_ls_cli_qualifies_names_when_widened(
-    tmpdir: TempDir, replace: Replacer, command: Command
+    tmpdir: TempDir, workspace_with_env: Path, command: Command
 ) -> None:
-    ws = _workspace(tmpdir)
-    _project(tmpdir, ws, 'alpha', 'x')
-    _project(tmpdir, ws, 'beta', 'z')
-    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    _project(tmpdir, workspace_with_env, 'alpha', 'x')
+    _project(tmpdir, workspace_with_env, 'beta', 'z')
     command.run('goal', 'ls').check(output='alpha  x\nbeta  z', logging=[('INFO', 'goal ls')])
 
 
 def test_goal_ls_cli_reflects_real_worktrees(
-    tmpdir: TempDir, replace: Replacer, command: Command
+    tmpdir: TempDir, workspace_with_env: Path, command: Command
 ) -> None:
-    ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
-    project = ws / 'proj'
+    project = workspace_with_env / 'proj'
     tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
-    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     os.chdir(project)  # worktree add + goal ls both infer the project from cwd
     command.run('worktree', 'add', 'alpha')
     command.run('worktree', 'add', 'beta')

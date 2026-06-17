@@ -1,4 +1,5 @@
 from collections.abc import Iterator, Sequence
+from pathlib import Path
 
 import pytest
 from testfixtures import Command, LogCapture, Replacer, TempDir, not_there
@@ -7,6 +8,7 @@ from testfixtures.loguru import LoguruSource
 from testfixtures.mock import Mock, call
 
 from chimera.__main__ import app
+from chimera.commands.init import init
 from chimera.logging import configure
 
 
@@ -26,6 +28,17 @@ def _clear_workspace_env(replace: Replacer) -> None:
 def tmpdir() -> Iterator[TempDir]:
     with TempDir(cwd=True) as d:
         yield d
+
+
+@pytest.fixture()
+def workspace(tmpdir: TempDir) -> Path:
+    return init(tmpdir.path / 'lycia')
+
+
+@pytest.fixture()
+def workspace_with_env(workspace: Path, replace: Replacer) -> Path:
+    replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
+    return workspace
 
 
 @pytest.fixture()
