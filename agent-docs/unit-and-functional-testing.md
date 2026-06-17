@@ -2,6 +2,18 @@
 - collect tests for a component in `test_{component}.py`
 - commands: test the pure function for logic, the CLI for wiring — see @agent-docs/commands.md
 
+## Assertions
+
+`assert a is b` (identity/singletons only: `is None`, `is True`, `is obj`) is the **only**
+permitted `assert`. Every other check uses `compare` from testfixtures:
+- `compare(actual, expected=<>)` — name the `expected=` side so failures read correctly.
+- **Compare whole objects, once.** One `compare` of the full object beats several asserts on
+  its attributes — compare the Finding, not `finding.fixable` then `finding.message`.
+- Equality, membership, contents — all `compare`, never `assert ==` or `assert in`.
+- Only when an exact whole-object compare is genuinely impossible, narrow with `like(Cls, attr=…)`
+  (a typed partial `Comparison`) — never fall back to a bare `assert`.
+- `pytest.raises`/`ShouldRaise` are context managers, not asserts — this rule leaves them alone.
+
 ## Mocking
 
 Use `testfixtures.Replacer` — never `monkeypatch.setattr`, never a dotted-path string target.
