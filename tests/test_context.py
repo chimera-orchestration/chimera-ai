@@ -11,6 +11,7 @@ from chimera.context import (
     Project,
     Scope,
     UnknownProjectError,
+    goal_from_worktree,
     iter_projects,
     resolve_goal,
     resolve_project,
@@ -151,6 +152,35 @@ class TestResolveGoal:
             resolve_goal(bare, project)
 
 
+class TestGoalFromWorktree:
+    def test_pins_the_goal_of_the_containing_worktree(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
+        compare(goal_from_worktree(project.worktrees / 'g@agent', project), expected='g')
+        compare(goal_from_worktree(project.worktrees / 'g@agent' / 'src', project), expected='g')
+
+    def test_is_none_outside_the_worktrees_dir(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
+        assert goal_from_worktree(project.dir, project) is None  # the project root
+        assert goal_from_worktree(project.worktrees, project) is None  # the worktrees dir itself
+        assert goal_from_worktree(tmpdir.path, project) is None  # nowhere near it
+
+    def test_is_none_for_a_non_worktree_dir(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
+        loose = project.worktrees / 'loose'
+        loose.mkdir()  # not a <goal>@<actor> dir at all
+        assert goal_from_worktree(loose, project) is None
+
+    def test_is_none_when_the_goal_has_no_agent_worktree(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
+        reviewer = project.worktrees / 'x@reviewer'
+        reviewer.mkdir()  # an actor dir, but no x@agent → 'x' isn't a goal
+        assert goal_from_worktree(reviewer, project) is None
+
+
 class TestResolveScope:
     def test_widens_to_all_projects_at_the_workspace_root(
         self, tmpdir: TempDir, workspace: Path
@@ -164,13 +194,24 @@ class TestResolveScope:
         # no goal branch
         compare(resolve_scope(project), expected=Scope(workspace, _resolved(project), None))
 
-    def test_pins_the_goal_from_a_goal_branch(
+    def test_pins_the_goal_from_inside_a_managed_worktree(
         self, tmpdir: TempDir, git_repo: Repo, workspace_with_env: Path
     ) -> None:
         project = _project_with_goal(tmpdir, workspace_with_env, git_repo)
-        checkout = tmpdir / 'human'
+        # standing in the goal's worktree
+        compare(
+            resolve_scope(project.worktrees / 'g@agent'),
+            expected=Scope(workspace_with_env, project, 'g'),
+        )
+
+    def test_goal_branch_outside_the_worktree_pins_project_not_goal(
+        self, tmpdir: TempDir, git_repo: Repo, workspace_with_env: Path
+    ) -> None:
+        project = _project_with_goal(tmpdir, workspace_with_env, git_repo)
+        checkout = tmpdir / 'human'  # on g/human, but not under worktrees/
         Git(git_repo.path)('worktree', 'add', str(checkout), 'g/human')
-        compare(resolve_scope(checkout), expected=Scope(workspace_with_env, project, 'g'))
+        # the branch alone never pins a goal — only the directory does
+        compare(resolve_scope(checkout), expected=Scope(workspace_with_env, project, None))
 
     def test_external_checkout_pins_project_not_goal(
         self, tmpdir: TempDir, git_repo: Repo, workspace_with_env: Path

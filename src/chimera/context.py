@@ -13,7 +13,7 @@ from chimera.config import (
     find_workspace,
     load_config,
 )
-from chimera.worktrees import goals
+from chimera.worktrees import SEP, goals
 
 
 class CannotIdentifyProjectError(UserError):
@@ -124,6 +124,25 @@ def resolve_goal(cwd: Path, project: Project, explicit: str | None = None) -> st
     raise GoalRequiredError(cwd)
 
 
+def goal_from_worktree(cwd: Path, project: Project) -> str | None:
+    """The goal whose managed worktree (``worktrees/<goal>@<actor>``) physically holds cwd.
+
+    Unlike :func:`resolve_goal`, this trusts only the directory you stand in — never the
+    branch. A human checkout that merely sits on a ``<goal>/<actor>`` branch somewhere else
+    pins no goal, so a read-only lister widens to the whole project rather than hiding its
+    other agents. ``None`` when cwd isn't inside one of the project's worktrees.
+    """
+    worktrees = project.worktrees.resolve()
+    cwd = cwd.resolve()
+    if cwd != worktrees and worktrees not in cwd.parents:
+        return None
+    head = cwd.relative_to(worktrees).parts
+    if not head or SEP not in head[0]:
+        return None
+    goal = head[0].split(SEP, 1)[0]
+    return goal if goal in goals(project.worktrees) else None
+
+
 def resolve_scope(
     cwd: Path, *, project: str | None = None, goal: str | None = None, infer: bool = True
 ) -> Scope:
@@ -131,9 +150,12 @@ def resolve_scope(
 
     With ``infer`` (the default, for ``goal ls``/``agent ls``) the narrowest axis is pinned
     from cwd/flags, and *inference* failure widens rather than raises —
-    ``CannotIdentifyProjectError`` → all projects, ``GoalRequiredError`` → all goals.
-    Without it (the ``ch ls`` dashboard) only an explicit ``--project``/``--goal`` narrows;
-    cwd is never read, so the view stays workspace-wide wherever you stand.
+    ``CannotIdentifyProjectError`` → all projects. The goal is pinned only by an explicit
+    ``--goal`` or by physically standing in a managed worktree (see
+    :func:`goal_from_worktree`); a checkout that merely shares a goal's branch widens to the
+    project. Without ``infer`` (the ``ch ls`` dashboard) only an explicit
+    ``--project``/``--goal`` narrows; cwd is never read, so the view stays workspace-wide
+    wherever you stand.
 
     A bad explicit ``--project`` always raises ``UnknownProjectError`` (naming a ghost is an
     error, not a reason to widen), as does genuinely not being in a workspace.
@@ -148,10 +170,7 @@ def resolve_scope(
         resolved = None
     pinned_goal: str | None = None
     if resolved is not None:
-        try:
-            pinned_goal = resolve_goal(cwd, resolved, goal)
-        except GoalRequiredError:
-            pinned_goal = None
+        pinned_goal = goal if goal is not None else goal_from_worktree(cwd, resolved)
     return Scope(workspace, resolved, pinned_goal)
 
 

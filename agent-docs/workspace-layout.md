@@ -62,9 +62,13 @@ action resolvers), but enumeration always reads the workspace's managed dirs and
 the workspace. Two rules:
 
 - **Listing widens; actions stay exact.** A read-only lister that can't pin a single project
-  broadens to all of them (`CannotIdentifyProjectError` → `project=None`), and likewise for goals
-  (`GoalRequiredError` → `goal=None`). A bad explicit `--project` still raises (naming a ghost is
-  an error). Requires a resolvable workspace — `$CHIMERA_WORKSPACE` from an external checkout.
+  broadens to all of them (`CannotIdentifyProjectError` → `project=None`). The goal is pinned for
+  listing only by an explicit `-g` or by *physically standing in* a managed worktree
+  (`resolve_scope` uses `goal_from_worktree`, not the branch): a human checkout that merely shares
+  a goal's `<goal>/<actor>` branch widens to the project, so its other agents stay visible. (The
+  *actions* still infer the goal from the branch via `resolve_goal` — you're working that goal.)
+  A bad explicit `--project` still raises (naming a ghost is an error). Requires a resolvable
+  workspace — `$CHIMERA_WORKSPACE` from an external checkout.
 - **The bare dashboard is global; the `X ls` commands are local.** `ch ls` is the overview — its
   job is to show what you *can't* already see from where you stand, so it never narrows by cwd
   (`resolve_scope(..., infer=False)`); only an explicit `-p/-g` focuses it. The scoped listers
