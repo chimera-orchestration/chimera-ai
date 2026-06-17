@@ -21,14 +21,15 @@ from chimera.commands.worktree.add import add
 
 def _workspace(tmpdir: TempDir, name: str = 'lycia') -> Path:
     ws = tmpdir.makedir(name)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump(f'{name}/config.yaml', {'kind': 'workspace'})
     return ws
 
 
-def _project(parent: Path, name: str = 'proj', repo: str = '/r') -> Path:
+def _project(tmpdir: TempDir, parent: Path, name: str = 'proj', repo: str = '/r') -> Path:
     project = parent / name
-    project.mkdir()
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo}\n')
+    tmpdir.dump(
+        str(project.relative_to(tmpdir.path) / 'config.yaml'), {'kind': 'project', 'repo': repo}
+    )
     return project
 
 
@@ -56,7 +57,7 @@ def test_resolve_workspace_env_must_point_at_a_workspace(
 
 def test_resolve_workspace_falls_back_to_walk_up(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
-    compare(resolve_workspace(_project(ws)), expected=ws)  # env unset (cleared by conftest)
+    compare(resolve_workspace(_project(tmpdir, ws)), expected=ws)  # env unset (cleared by conftest)
 
 
 def test_resolve_workspace_raises_when_unfound(tmpdir: TempDir) -> None:
@@ -68,14 +69,14 @@ def test_resolve_workspace_raises_when_unfound(tmpdir: TempDir) -> None:
 
 
 def test_resolve_project_infers_from_cwd(tmpdir: TempDir) -> None:
-    project = _project(_workspace(tmpdir))
+    project = _project(tmpdir, _workspace(tmpdir))
     compare(resolve_project(project), expected=_resolved(project))
 
 
 def test_resolve_project_by_name_overrides_cwd(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
-    foo = _project(ws, 'foo')
-    bar = _project(ws, 'bar')
+    foo = _project(tmpdir, ws, 'foo')
+    bar = _project(tmpdir, ws, 'bar')
     compare(resolve_project(bar, 'foo'), expected=_resolved(foo))  # standing in bar, asked for foo
 
 
@@ -91,7 +92,7 @@ def test_resolve_project_matches_repo_from_external_checkout(
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'external')  # lives outside the workspace
     repo.commit_content('seed')
-    project = _project(ws, 'myproj', repo=str(repo.path))
+    project = _project(tmpdir, ws, 'myproj', repo=str(repo.path))
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))  # cwd is outside lycia, so anchor by env
     compare(resolve_project(repo.path), expected=_resolved(project, str(repo.path)))
 
@@ -102,7 +103,7 @@ def test_resolve_project_matches_repo_from_a_linked_worktree(
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'external')
     repo.commit_content('seed')
-    project = _project(ws, 'myproj', repo=str(repo.path))
+    project = _project(tmpdir, ws, 'myproj', repo=str(repo.path))
     checkout = tmpdir.path / 'review'
     Git(repo.path)('worktree', 'add', '-b', 'review', str(checkout), 'main')  # worktree elsewhere
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
@@ -136,8 +137,8 @@ def test_resolve_project_raises_outside_any_git_repo(tmpdir: TempDir, replace: R
 
 def test_iter_projects_lists_only_projects_sorted(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
-    _project(ws, 'beta')
-    _project(ws, 'alpha')
+    _project(tmpdir, ws, 'beta')
+    _project(tmpdir, ws, 'alpha')
     tmpdir.makedir('lycia/stray')  # no config.yaml — ignored
     compare([p.name for p in iter_projects(ws)], expected=['alpha', 'beta'])
 
@@ -148,7 +149,7 @@ def test_iter_projects_lists_only_projects_sorted(tmpdir: TempDir) -> None:
 def _project_with_goal(tmpdir: TempDir) -> tuple[Project, Repo]:
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
-    project_dir = _project(tmpdir.path, 'proj', repo=str(repo.path))
+    project_dir = _project(tmpdir, tmpdir.path, 'proj', repo=str(repo.path))
     add(repo.path, project_dir / 'worktrees', 'g')  # g@agent worktree + g/human branch
     return resolve_project(project_dir), repo
 
@@ -193,7 +194,7 @@ def _scoped_project_with_goal(tmpdir: TempDir, replace: Replacer) -> tuple[Proje
     ws = _workspace(tmpdir)
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
-    project_dir = _project(ws, 'proj', repo=str(repo.path))
+    project_dir = _project(tmpdir, ws, 'proj', repo=str(repo.path))
     add(repo.path, project_dir / 'worktrees', 'g')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     return resolve_project(project_dir), repo, ws
@@ -201,13 +202,13 @@ def _scoped_project_with_goal(tmpdir: TempDir, replace: Replacer) -> tuple[Proje
 
 def test_resolve_scope_widens_to_all_projects_at_the_workspace_root(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
-    _project(ws, 'a')
+    _project(tmpdir, ws, 'a')
     compare(resolve_scope(ws), expected=Scope(ws, None, None))  # couldn't pin → list them all
 
 
 def test_resolve_scope_pins_the_project_from_within_it(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
-    project = _project(ws)
+    project = _project(tmpdir, ws)
     compare(resolve_scope(project), expected=Scope(ws, _resolved(project), None))  # no goal branch
 
 
@@ -246,7 +247,7 @@ def test_resolve_scope_without_infer_honors_explicit_flags(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
     ws = _workspace(tmpdir)
-    project = _project(ws)
+    project = _project(tmpdir, ws)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     compare(
         resolve_scope(tmpdir.path, project=project.name, goal='g', infer=False),

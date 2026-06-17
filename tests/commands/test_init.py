@@ -6,9 +6,10 @@ from chimera.commands.init import init
 def test_init_creates_workspace(tmpdir: TempDir) -> None:
     path = tmpdir.path / 'myworkspace'
     compare(init(path), expected=path)
-    assert (path / '.git').is_dir() is True
-    assert (path / 'processes').is_dir() is True
-    compare((path / 'config.yaml').read_text(), expected='kind: workspace\n')
+    tmpdir.compare(
+        ['.git', '.gitignore', 'config.yaml', 'processes'], path='myworkspace', recursive=False
+    )
+    compare(tmpdir.read_text('myworkspace/config.yaml'), expected='kind: workspace\n')
 
 
 def test_init_gitignores_repos_and_worktrees(tmpdir: TempDir) -> None:

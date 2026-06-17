@@ -26,7 +26,7 @@ def _goal(tmpdir: TempDir) -> tuple[Repo, Path]:
 
 
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
-    (tmpdir.path / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     return tmpdir.path
 
 
@@ -61,7 +61,7 @@ def test_remove_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: Replac
         )
     ):
         remove(repo.path, worktrees, 'g')
-    assert (worktrees / 'g@agent').is_dir() is True  # nothing removed
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
@@ -73,14 +73,14 @@ def test_remove_force_bypasses_the_liveness_check(tmpdir: TempDir, replace: Repl
         module=worktree_rm,
     )
     remove(repo.path, worktrees, 'g', force=True)
-    assert (worktrees / 'g@agent').exists() is False
+    tmpdir.compare(path='worktrees', expected=())
     compare(Git(repo.path).branches(), expected=['main'])
 
 
 def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir) -> None:
     repo, worktrees = _goal(tmpdir)
     compare(remove(repo.path, worktrees, 'g'), expected=[worktrees / 'g@agent'])  # only the agent
-    assert (worktrees / 'g@agent').exists() is False
+    tmpdir.compare(path='worktrees', expected=())
     compare(Git(repo.path).branches(), expected=['main'])
 
 
@@ -94,7 +94,7 @@ def test_remove_refuses_uncommitted_changes(tmpdir: TempDir) -> None:
         )
     ):
         remove(repo.path, worktrees, 'g')
-    assert (worktrees / 'g@agent').is_dir() is True
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
@@ -107,7 +107,7 @@ def test_remove_refuses_unmerged_branch(tmpdir: TempDir) -> None:
         )
     ):
         remove(repo.path, worktrees, 'g')
-    assert (worktrees / 'g@agent').is_dir() is True
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
@@ -116,7 +116,7 @@ def test_remove_force_discards_unsaved_work(tmpdir: TempDir) -> None:
     Repo(worktrees / 'g@agent').commit_content('work')  # unmerged
     (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')  # uncommitted
     remove(repo.path, worktrees, 'g', force=True)
-    assert (worktrees / 'g@agent').exists() is False
+    tmpdir.compare(path='worktrees', expected=())
     compare(Git(repo.path).branches(), expected=['main'])
 
 
@@ -129,7 +129,7 @@ def test_worktree_rm_cli(tmpdir: TempDir, command: Command) -> None:
     command.run('worktree', 'rm', 'g').check(
         output=f'Removed {worktree}', logging=[('INFO', 'worktree rm')]
     )
-    assert (project / 'worktrees' / 'g@agent').exists() is False
+    tmpdir.compare(path='worktrees', expected=())
     compare(Git(repo.path).branches(), expected=['main'])
 
 
@@ -152,5 +152,5 @@ def test_goal_finish_cli(tmpdir: TempDir, command: Command) -> None:
     command.run('goal', 'finish', 'g').check(
         output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
     )
-    assert (project / 'worktrees' / 'g@agent').exists() is False
+    tmpdir.compare(path='worktrees', expected=())
     compare(Git(repo.path).branches(), expected=['main'])

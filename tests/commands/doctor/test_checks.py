@@ -30,12 +30,11 @@ def _repo(tmpdir: TempDir, name: str = 'repo') -> Repo:
     return repo
 
 
-def _project(ws, repo_path, *, name='proj', kind=None):
+def _project(tmpdir, ws, repo_path, *, name='proj', kind=None):
     project = ws / name
-    project.mkdir()
     data = {} if kind is None else {'kind': kind}
     data['repo'] = str(repo_path)
-    (project / 'config.yaml').write_text(yaml.safe_dump(data, sort_keys=False))
+    tmpdir.dump(str(project.relative_to(tmpdir.path) / 'config.yaml'), data)
     (project / 'worktrees').mkdir()
     return project
 
@@ -93,7 +92,7 @@ def test_workspace_config_missing_fixed(tmpdir: TempDir) -> None:
 
 def test_workspace_config_legacy_keeps_other_keys(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('name: lycia\n')
+    tmpdir.dump('lycia/config.yaml', {'name': 'lycia'})
     compare(
         _run(WorkspaceConfigCheck(), ws, fix=True),
         expected=[
@@ -105,13 +104,13 @@ def test_workspace_config_legacy_keeps_other_keys(tmpdir: TempDir) -> None:
 
 def test_workspace_config_already_current_is_silent(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     compare(_run(WorkspaceConfigCheck(), ws), expected=[])
 
 
 def test_workspace_config_wrong_kind_not_fixable(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: project\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'project'})
     compare(
         _run(WorkspaceConfigCheck(), ws, fix=True),
         expected=[
@@ -128,7 +127,7 @@ def test_workspace_config_wrong_kind_not_fixable(tmpdir: TempDir) -> None:
 
 def test_workspace_config_with_repo_is_not_stamped(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('repo: /some/repo\n')  # a project config, not a root
+    tmpdir.dump('lycia/config.yaml', {'repo': '/some/repo'})  # a project config, not a root
     compare(
         _run(WorkspaceConfigCheck(), ws, fix=True),
         expected=[
@@ -174,7 +173,7 @@ def test_workspace_env_pointing_elsewhere_reported(tmpdir: TempDir, replace: Rep
 def test_project_config_legacy_upgraded(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     compare(
         _run(ProjectConfigCheck(), ws, fix=True),
         expected=[
@@ -187,14 +186,14 @@ def test_project_config_legacy_upgraded(tmpdir: TempDir) -> None:
 def test_project_config_already_current_is_silent(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    _project(ws, repo.path, kind='project')
+    _project(tmpdir, ws, repo.path, kind='project')
     compare(_run(ProjectConfigCheck(), ws), expected=[])
 
 
 def test_project_config_wrong_kind_with_repo_fixed(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path, kind='workspace')  # repo: proves it's a project
+    project = _project(tmpdir, ws, repo.path, kind='workspace')  # repo: proves it's a project
     compare(
         _run(ProjectConfigCheck(), ws, fix=True),
         expected=[
@@ -212,8 +211,7 @@ def test_project_config_wrong_kind_with_repo_fixed(tmpdir: TempDir) -> None:
 def test_project_config_unexpected_kind_without_repo_not_fixable(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     project = ws / 'weird'
-    project.mkdir()
-    (project / 'config.yaml').write_text('kind: bogus\n')  # no repo to disambiguate
+    tmpdir.dump('lycia/weird/config.yaml', {'kind': 'bogus'})  # no repo to disambiguate
     compare(
         _run(ProjectConfigCheck(), ws, fix=True),
         expected=[
@@ -227,8 +225,7 @@ def test_project_config_unexpected_kind_without_repo_not_fixable(tmpdir: TempDir
 def test_project_config_no_kind_no_repo_not_fixable(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     project = ws / 'weird'
-    project.mkdir()
-    (project / 'config.yaml').write_text('something: else\n')
+    tmpdir.dump('lycia/weird/config.yaml', {'something': 'else'})
     compare(
         _run(ProjectConfigCheck(), ws),
         expected=[
@@ -245,32 +242,32 @@ def test_project_config_no_kind_no_repo_not_fixable(tmpdir: TempDir) -> None:
 def test_human_worktree_clean_removed_branch_survives(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = _human_worktree(repo, project, 'g1')
     compare(
         _run(StaleHumanWorktreeCheck(), ws, fix=True),
         expected=[Finding('human-worktrees', f'stale human worktree {worktree}', True, True)],
     )
-    assert worktree.exists() is False
+    tmpdir.compare(path='lycia/proj/worktrees', expected=())
     compare(Git(repo.path).branches(), expected=['g1/human', 'main'])
 
 
 def test_human_worktree_clean_report_only_leaves_it(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = _human_worktree(repo, project, 'g1')
     compare(
         _run(StaleHumanWorktreeCheck(), ws),
         expected=[Finding('human-worktrees', f'stale human worktree {worktree}', False, True)],
     )
-    assert worktree.is_dir() is True
+    tmpdir.compare(['g1-human'], path='lycia/proj/worktrees', recursive=False)
 
 
 def test_human_worktree_dirty_left_in_place(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = _human_worktree(repo, project, 'g2', dirty=True)
     compare(
         _run(StaleHumanWorktreeCheck(), ws, fix=True),
@@ -283,13 +280,13 @@ def test_human_worktree_dirty_left_in_place(tmpdir: TempDir) -> None:
             )
         ],
     )
-    assert worktree.is_dir() is True
+    tmpdir.compare(['g2-human'], path='lycia/proj/worktrees', recursive=False)
 
 
 def test_human_worktree_unmerged_left_in_place(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = _human_worktree(repo, project, 'g3', ahead=True)
     compare(
         _run(StaleHumanWorktreeCheck(), ws, fix=True),
@@ -299,21 +296,19 @@ def test_human_worktree_unmerged_left_in_place(tmpdir: TempDir) -> None:
             )
         ],
     )
-    assert worktree.is_dir() is True
+    tmpdir.compare(['g3-human'], path='lycia/proj/worktrees', recursive=False)
 
 
 def test_human_worktree_skips_project_without_a_live_repo(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    project = ws / 'ref'
-    project.mkdir()
-    (project / 'config.yaml').write_text('kind: project\n')  # no repo
+    tmpdir.dump('lycia/ref/config.yaml', {'kind': 'project'})  # no repo
     compare(_run(StaleHumanWorktreeCheck(), ws), expected=[])
 
 
 def test_human_worktree_ignores_unregistered_dir(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     (project / 'worktrees' / 'leftover-human').mkdir()  # looks human, not a worktree
     compare(_run(StaleHumanWorktreeCheck(), ws, fix=True), expected=[])
 
@@ -332,7 +327,7 @@ def _legacy_worktree(repo, project, goal, actor='agent', *, dirty=False):
 def test_legacy_separator_migrated(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     _legacy_worktree(repo, project, 'my-goal')
     compare(
         _run(LegacyWorktreeSeparatorCheck(), ws, fix=True),
@@ -343,15 +338,14 @@ def test_legacy_separator_migrated(tmpdir: TempDir) -> None:
         ],
     )
     canonical = (project / 'worktrees' / 'my-goal@agent').resolve()
-    assert canonical.is_dir() is True
-    assert (project / 'worktrees' / 'my-goal-agent').exists() is False
+    tmpdir.compare(['my-goal@agent'], path='lycia/proj/worktrees', recursive=False)  # renamed
     compare(registered_worktrees(Git(repo.path)), expected={repo.path.resolve(), canonical})
 
 
 def test_legacy_separator_report_only_leaves_it(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     _legacy_worktree(repo, project, 'my-goal')
     compare(
         _run(LegacyWorktreeSeparatorCheck(), ws),
@@ -361,13 +355,13 @@ def test_legacy_separator_report_only_leaves_it(tmpdir: TempDir) -> None:
             )
         ],
     )
-    assert (project / 'worktrees' / 'my-goal-agent').is_dir() is True
+    tmpdir.compare(['my-goal-agent'], path='lycia/proj/worktrees', recursive=False)  # left as-is
 
 
 def test_legacy_separator_preserves_uncommitted_work(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     _legacy_worktree(repo, project, 'my-goal', dirty=True)
     _run(LegacyWorktreeSeparatorCheck(), ws, fix=True)
     compare((project / 'worktrees' / 'my-goal@agent' / 'scratch.txt').read_text(), expected='wip')
@@ -376,7 +370,7 @@ def test_legacy_separator_preserves_uncommitted_work(tmpdir: TempDir) -> None:
 def test_legacy_separator_migrates_non_human_actors(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     _legacy_worktree(repo, project, 'g', actor='reviewer')
     compare(
         _run(LegacyWorktreeSeparatorCheck(), ws, fix=True),
@@ -384,13 +378,13 @@ def test_legacy_separator_migrates_non_human_actors(tmpdir: TempDir) -> None:
             Finding('worktree-separator', 'legacy worktree g-reviewer → g@reviewer', True, True)
         ],
     )
-    assert (project / 'worktrees' / 'g@reviewer').is_dir() is True
+    tmpdir.compare(['g@reviewer'], path='lycia/proj/worktrees', recursive=False)
 
 
 def test_legacy_separator_ignores_human_worktrees(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     _human_worktree(repo, project, 'g')  # the human-worktrees check owns these
     compare(_run(LegacyWorktreeSeparatorCheck(), ws), expected=[])
 
@@ -398,7 +392,7 @@ def test_legacy_separator_ignores_human_worktrees(tmpdir: TempDir) -> None:
 def test_legacy_separator_skips_already_canonical(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = project / 'worktrees' / 'g@agent'
     Git(repo.path)('worktree', 'add', '-b', 'g/agent', str(worktree), 'main')
     compare(_run(LegacyWorktreeSeparatorCheck(), ws, fix=True), expected=[])
@@ -406,7 +400,7 @@ def test_legacy_separator_skips_already_canonical(tmpdir: TempDir) -> None:
 
 def test_legacy_separator_skips_project_without_a_live_repo(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    project = _project(ws, ws / 'proj' / 'repo')  # repo path doesn't exist
+    project = _project(tmpdir, ws, ws / 'proj' / 'repo')  # repo path doesn't exist
     (project / 'worktrees' / 'g-agent').mkdir()
     compare(_run(LegacyWorktreeSeparatorCheck(), ws), expected=[])
 
@@ -414,7 +408,7 @@ def test_legacy_separator_skips_project_without_a_live_repo(tmpdir: TempDir) -> 
 def test_legacy_separator_ignores_non_goal_actor_branch(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = project / 'worktrees' / 'sidequest'
     Git(repo.path)('worktree', 'add', '-b', 'sidequest', str(worktree), 'main')  # no <goal>/<actor>
     compare(_run(LegacyWorktreeSeparatorCheck(), ws, fix=True), expected=[])
@@ -423,7 +417,7 @@ def test_legacy_separator_ignores_non_goal_actor_branch(tmpdir: TempDir) -> None
 def test_legacy_separator_skips_stale_registration(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = _legacy_worktree(repo, project, 'g')
     shutil.rmtree(worktree)  # registered but the dir is gone — can't read its branch
     compare(_run(LegacyWorktreeSeparatorCheck(), ws), expected=[])
@@ -435,7 +429,7 @@ def test_legacy_separator_skips_stale_registration(tmpdir: TempDir) -> None:
 def test_orphaned_registration_pruned(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = project / 'worktrees' / 'gone@agent'
     Git(repo.path)('worktree', 'add', '-b', 'gone/agent', str(worktree), 'main')
     shutil.rmtree(worktree)  # registration is now stale
@@ -456,7 +450,7 @@ def test_orphaned_registration_pruned(tmpdir: TempDir) -> None:
 def test_orphaned_registration_report_only_keeps_it(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     worktree = project / 'worktrees' / 'gone@agent'
     Git(repo.path)('worktree', 'add', '-b', 'gone/agent', str(worktree), 'main')
     shutil.rmtree(worktree)
@@ -479,7 +473,7 @@ def test_orphaned_registration_report_only_keeps_it(tmpdir: TempDir) -> None:
 def test_orphaned_leftover_dir_reported(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    project = _project(ws, repo.path)
+    project = _project(tmpdir, ws, repo.path)
     (project / 'worktrees' / 'random').mkdir()  # never a git worktree
     child = project / 'worktrees' / 'random'
     compare(
@@ -493,15 +487,13 @@ def test_orphaned_leftover_dir_reported(tmpdir: TempDir) -> None:
 def test_orphaned_none_when_clean(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
     repo = _repo(tmpdir)
-    _project(ws, repo.path)
+    _project(tmpdir, ws, repo.path)
     compare(_run(OrphanedWorktreeCheck(), ws), expected=[])
 
 
 def test_orphaned_skips_project_without_a_live_repo(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    project = ws / 'ref'
-    project.mkdir()
-    (project / 'config.yaml').write_text('kind: project\n')
+    tmpdir.dump('lycia/ref/config.yaml', {'kind': 'project'})
     compare(_run(OrphanedWorktreeCheck(), ws), expected=[])
 
 

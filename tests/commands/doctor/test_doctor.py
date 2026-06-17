@@ -2,7 +2,6 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-import yaml
 from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare, not_there
 
 from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
@@ -37,16 +36,16 @@ def _ws(tmpdir: TempDir):
     return ws
 
 
-def _project(ws, *, name='proj', config='repo: /some/repo\n'):
-    project = ws / name
-    project.mkdir()
-    (project / 'config.yaml').write_text(config)
-    return project
+def _project(tmpdir, ws, *, name='proj', config=None):
+    tmpdir.dump(
+        f'lycia/{name}/config.yaml', config if config is not None else {'repo': '/some/repo'}
+    )
+    return ws / name
 
 
 def test_find_workspace_root_at_a_marked_root(tmpdir: TempDir) -> None:
     root = tmpdir.makedir('ws')
-    (root / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     compare(find_workspace_root(root), expected=root)
 
 
@@ -57,15 +56,15 @@ def test_find_workspace_root_by_legacy_evidence(tmpdir: TempDir) -> None:
 
 def test_find_workspace_root_navigates_up_from_a_project(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
-    project = _project(ws)
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    project = _project(tmpdir, ws)
     compare(find_workspace_root(project), expected=ws)
 
 
 def test_find_workspace_root_skips_a_project_even_when_mislabeled(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
-    project = _project(ws, config='kind: workspace\nrepo: /some/repo\n')  # corrupted
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    project = _project(tmpdir, ws, config={'kind': 'workspace', 'repo': '/some/repo'})  # corrupted
     compare(find_workspace_root(project), expected=ws)  # repo: marks it a project, walk past it
 
 
@@ -76,7 +75,7 @@ def test_find_workspace_root_raises_when_none(tmpdir: TempDir) -> None:
 
 def test_resolve_root_prefers_explicit_path(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     elsewhere = tmpdir.makedir('elsewhere')
     compare(resolve_root(ws, cwd=elsewhere, env=str(elsewhere)), expected=ws.resolve())
 
@@ -89,7 +88,7 @@ def test_resolve_root_trusts_env_over_walking_up(tmpdir: TempDir) -> None:
 
 def test_resolve_root_walks_up_without_env(tmpdir: TempDir) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     compare(resolve_root(None, cwd=ws, env=None), expected=ws.resolve())
 
 
@@ -103,7 +102,7 @@ def test_doctor_aggregates_findings_and_passes_fix_through(tmpdir: TempDir) -> N
 
 def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor').check(  # cwd is the tmpdir, not ws, so the note appears
         output=f'note: resolved workspace root: {ws.resolve()}\nAll checks passed!',
@@ -115,7 +114,7 @@ def test_doctor_cli_verbose_lists_every_check(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor', '--verbose').check(
         output='\n'.join(
@@ -139,7 +138,7 @@ def test_doctor_cli_flags_unset_workspace_env(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', not_there)
     os.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
     command.run('doctor').check(
@@ -174,12 +173,12 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
         output=f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing',
         logging=[('INFO', 'doctor')],
     )
-    compare(yaml.safe_load((ws / 'config.yaml').read_text()), expected={'kind': 'workspace'})
+    compare(tmpdir.parse('lycia/config.yaml'), expected={'kind': 'workspace'})
 
 
 def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Command) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: nonsense\n')  # not auto-fixable
+    tmpdir.dump('lycia/config.yaml', {'kind': 'nonsense'})  # not auto-fixable
     command.run('doctor', str(ws), '--fix').check(
         output='\n'.join(
             [
@@ -197,8 +196,8 @@ def test_doctor_cli_navigates_from_a_project(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     ws = _ws(tmpdir)
-    (ws / 'config.yaml').write_text('kind: workspace\n')
-    project = _project(ws, name='chimera')  # legacy repo:-only config
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    _project(tmpdir, ws, name='chimera')  # legacy repo:-only config
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor', '--fix').check(  # cwd is the tmpdir, not ws, so the note appears
         output='\n'.join(
@@ -209,5 +208,5 @@ def test_doctor_cli_navigates_from_a_project(
         ),
         logging=[('INFO', 'doctor')],
     )
-    config = yaml.safe_load((project / 'config.yaml').read_text())
+    config = tmpdir.parse('lycia/chimera/config.yaml')
     compare(config, expected={'kind': 'project', 'repo': '/some/repo'})  # fixed, not corrupted

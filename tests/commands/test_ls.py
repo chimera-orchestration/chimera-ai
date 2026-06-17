@@ -11,14 +11,16 @@ from chimera.context import Scope, resolve_project
 
 def _workspace(tmpdir: TempDir) -> Path:
     ws = tmpdir.makedir('lycia')
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     return ws
 
 
-def _project(ws: Path, name: str, *goals: str) -> Path:
+def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
     project = ws / name
-    project.mkdir()
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
+    tmpdir.dump(
+        str(project.relative_to(tmpdir.path) / 'config.yaml'),
+        {'kind': 'project', 'repo': str(project)},
+    )
     for goal in goals:
         (project / 'worktrees' / f'{goal}@agent').mkdir(parents=True)
     return project
@@ -34,7 +36,7 @@ def test_board_partitions_agents_into_goals_project_loose_and_workspace_loose(
     tmpdir: TempDir,
 ) -> None:
     ws = _workspace(tmpdir)
-    _project(ws, 'alpha', 'g')
+    _project(tmpdir, ws, 'alpha', 'g')
     in_goal = _agent(ws / 'alpha' / 'worktrees' / 'g@agent', 'alpha@g@agent', 'busy')
     in_repo = _agent(ws / 'alpha' / 'repo', 'loose-proj')  # under the project, not a goal
     stray = _agent(ws / 'scratch', 'stray-ws')  # under the workspace, not a project
@@ -52,7 +54,7 @@ def test_board_partitions_agents_into_goals_project_loose_and_workspace_loose(
 
 def test_board_pinned_goal_shows_only_that_goal(tmpdir: TempDir) -> None:
     ws = _workspace(tmpdir)
-    _project(ws, 'alpha', 'g', 'other')
+    _project(tmpdir, ws, 'alpha', 'g', 'other')
     project = resolve_project(ws / 'alpha')
     a = _agent(ws / 'alpha' / 'worktrees' / 'g@agent', 'a')
     b = _agent(ws / 'alpha' / 'worktrees' / 'other@agent', 'b')
@@ -68,7 +70,7 @@ def _cli_workspace(tmpdir: TempDir, replace: Replacer) -> Path:
 
 def test_ls_cli_renders_the_tree(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _cli_workspace(tmpdir, replace)
-    _project(ws, 'alpha', 'g')
+    _project(tmpdir, ws, 'alpha', 'g')
     worktree = ws / 'alpha' / 'worktrees' / 'g@agent'
     replace.in_module(
         agents,
@@ -90,7 +92,7 @@ def test_ls_cli_renders_the_tree(tmpdir: TempDir, replace: Replacer, command: Co
 
 def test_ls_cli_renders_loose_agents(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _cli_workspace(tmpdir, replace)
-    _project(ws, 'alpha')  # no goals; a session in repo/ is project-loose
+    _project(tmpdir, ws, 'alpha')  # no goals; a session in repo/ is project-loose
     stray = ws / 'scratch'  # under the workspace but no project → board-loose
     replace.in_module(
         agents,
@@ -117,8 +119,8 @@ def test_ls_cli_stays_global_from_inside_a_project(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     ws = _cli_workspace(tmpdir, replace)
-    _project(ws, 'alpha', 'g')
-    _project(ws, 'beta')
+    _project(tmpdir, ws, 'alpha', 'g')
+    _project(tmpdir, ws, 'beta')
     os.chdir(ws / 'alpha')  # standing in a project must not narrow the dashboard
     replace.in_module(agents, list, module=chimera_main)
     command.run('ls').check(
@@ -139,8 +141,8 @@ def test_ls_cli_marks_empty_goals_and_projects(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     ws = _cli_workspace(tmpdir, replace)
-    _project(ws, 'alpha', 'g')
-    _project(ws, 'beta')
+    _project(tmpdir, ws, 'alpha', 'g')
+    _project(tmpdir, ws, 'beta')
     replace.in_module(agents, list, module=chimera_main)
     command.run('ls').check(
         output='\n'.join(

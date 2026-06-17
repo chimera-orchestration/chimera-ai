@@ -61,6 +61,22 @@ def tmpdir() -> Iterator[TempDir]: ...
 - `TempDirectory` is the old deprecated API with str/bytes interface — do NOT use it
 - dep: `testfixtures @ git+https://github.com/simplistix/testfixtures` (main branch)
 
+*Writing structured files* — `d.dump(relpath, obj)` serialises by extension (`.yaml`/`.json`/
+`.toml`), creating parent dirs; never hand-format YAML/JSON. `d.parse(relpath)` reads it back.
+Plain text stays `d.write(relpath, text)`.
+```python
+d.dump('proj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})  # → kind: project\nrepo: …
+```
+
+*Checking directory structure* — assert on-disk layout with `d.compare(...)`, which checks the
+**whole** listing (so it also proves nothing extra was written) and scopes with `path=`:
+```python
+d.compare(['feature-x@agent'], path='worktrees', recursive=False)  # exactly one worktree, no human
+d.compare(path='worktrees', expected=())                           # …emptied after goal finish
+```
+Drop to a single `path.exists()`/`path.is_dir() is True/False` only when it's significantly
+shorter than the equivalent `compare` (e.g. one path among an otherwise-noisy tree like a repo).
+
 **giterator.testing.Repo** (`from giterator.testing import Repo`)
 - `Repo.make(path)` — creates an initialized git repo at path
 - `repo.commit_content('prefix', datetime(...))` — writes file and commits, returns short hash

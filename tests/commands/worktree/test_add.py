@@ -26,8 +26,7 @@ def test_add_creates_agent_worktree_and_both_branches(tmpdir: TempDir) -> None:
     repo = _seeded_repo(tmpdir)
     worktrees = tmpdir.path / 'worktrees'
     compare(add(repo.path, worktrees, 'my-goal'), expected=[worktrees / 'my-goal@agent'])
-    assert (worktrees / 'my-goal@agent').is_dir() is True
-    assert (worktrees / 'my-goal@human').exists() is False  # human branch has no worktree
+    tmpdir.compare(['my-goal@agent'], path='worktrees', recursive=False)  # human gets no worktree
     compare(Git(repo.path).branches(), expected=['main', 'my-goal/agent', 'my-goal/human'])
 
 
@@ -36,7 +35,7 @@ def test_add_creates_extra_named_actors(tmpdir: TempDir) -> None:
     worktrees = tmpdir.path / 'worktrees'
     created = add(repo.path, worktrees, 'g', actors=('human', 'agent', 'reviewer'))
     compare(created, expected=[worktrees / 'g@agent', worktrees / 'g@reviewer'])
-    assert (worktrees / 'g@reviewer').is_dir() is True
+    tmpdir.compare(['g@agent', 'g@reviewer'], path='worktrees', recursive=False)  # not human
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'g/reviewer', 'main'])
 
 
@@ -144,13 +143,12 @@ def test_add_refuses_bare_repo_without_commits(tmpdir: TempDir) -> None:
 def test_worktree_add_cli(tmpdir: TempDir, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     project = tmpdir.path
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
     command.run('worktree', 'add', 'feature-x').check(
         output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
     )
-    assert (project / 'worktrees' / 'feature-x@agent').is_dir() is True
-    assert (project / 'worktrees' / 'feature-x@human').exists() is False
+    tmpdir.compare(['feature-x@agent'], path='worktrees', recursive=False)  # human gets no worktree
     compare(Git(repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
 
 
@@ -160,7 +158,7 @@ def test_worktree_add_cli_from_option(tmpdir: TempDir, command: Command) -> None
     release = repo.commit_content('release-work', short=False)
     repo('checkout', 'main')
     project = tmpdir.path
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
     command.run('worktree', 'add', 'feature-x', '--from', 'release').check(
         output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
@@ -171,7 +169,7 @@ def test_worktree_add_cli_from_option(tmpdir: TempDir, command: Command) -> None
 def test_worktree_ls_cli(tmpdir: TempDir, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
     project = tmpdir.path
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     command.run('worktree', 'add', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('worktree', 'ls').check(output=str(worktree), logging=[('INFO', 'worktree ls')])

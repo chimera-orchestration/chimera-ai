@@ -20,10 +20,9 @@ def _project(tmpdir: TempDir, *, with_goal: bool = False) -> tuple[Path, Repo, P
     repo = Repo.make(tmpdir.path / 'repo')
     repo.commit_content('seed')
     workspace = tmpdir.makedir('lycia')
-    (workspace / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     project = workspace / 'myproj'
-    project.mkdir()
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
+    tmpdir.dump('lycia/myproj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     if with_goal:
         add(repo.path, project / 'worktrees', 'g')
     return workspace, repo, project
@@ -51,12 +50,12 @@ def test_remove_takes_out_a_project_with_no_goals(tmpdir: TempDir) -> None:
 
 
 def test_remove_refuses_while_goals_exist(tmpdir: TempDir) -> None:
-    workspace, repo, project = _project(tmpdir, with_goal=True)
+    workspace, repo, _ = _project(tmpdir, with_goal=True)
     with ShouldRaise(
         RuntimeError('myproj still has goals (g); run `ch goal finish` on each or use --force')
     ):
         remove(workspace, 'myproj')
-    assert (project / 'worktrees' / 'g@agent').is_dir() is True
+    tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
@@ -84,7 +83,7 @@ def test_remove_force_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: 
         )
     ):
         remove(workspace, 'myproj', force=True)  # not even force nukes a live agent
-    assert (project / 'worktrees' / 'g@agent').is_dir() is True
+    tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)
 
 
 def test_project_rm_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -100,7 +99,7 @@ def test_project_rm_cli_reports_nothing_to_remove(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     workspace = tmpdir.makedir('lycia')
-    (workspace / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
     command.run('project', 'rm', 'ghost').check(
         output='No project named ghost to remove', logging=[('INFO', 'project rm')]

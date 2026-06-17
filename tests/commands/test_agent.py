@@ -158,7 +158,7 @@ def test_all_sessions_queries_claude_unscoped(replace: Replacer) -> None:
 
 def _project_with_worktree(tmpdir: TempDir) -> Path:
     project = tmpdir.makedir('myproject')
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
+    tmpdir.dump('myproject/config.yaml', {'kind': 'project', 'repo': str(project)})
     (project / 'worktrees' / 'g@agent').mkdir(parents=True)
     os.chdir(project)  # the CLI infers the project (and its name) from cwd
     return project
@@ -444,10 +444,10 @@ def test_under_and_in_goal(tmpdir: TempDir) -> None:
 
 def _scoped_cli(tmpdir: TempDir, replace: Replacer) -> Path:
     ws = tmpdir.makedir('lycia')
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     project = ws / 'proj'
     (project / 'worktrees' / 'g@agent').mkdir(parents=True)
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     return project
 

@@ -8,10 +8,10 @@ from chimera.commands.agent import live_sessions
 
 def _workspace(tmpdir: TempDir, replace: Replacer) -> Path:
     ws = tmpdir.makedir('lycia')
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     project = ws / 'myproject'
     (project / 'worktrees' / 'g@agent').mkdir(parents=True)
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {project}\n')
+    tmpdir.dump('lycia/myproject/config.yaml', {'kind': 'project', 'repo': str(project)})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     return ws
 

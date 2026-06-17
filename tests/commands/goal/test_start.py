@@ -18,7 +18,7 @@ def _seeded_repo(tmpdir: TempDir) -> Repo:
 
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
     project = tmpdir.makedir('project')
-    (project / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
+    tmpdir.dump('project/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     os.chdir(project)  # the CLI infers the project (and its name) from cwd
     return project
 
@@ -36,7 +36,7 @@ def test_start_creates_worktrees_then_launches_the_agent(
     )
     created = start(repo.path, worktrees, 'g', 'proj@g@agent')
     compare(created, expected=worktrees / 'g@agent')
-    assert (worktrees / 'g@agent').is_dir() is True
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
     compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
     # foreground (no prompt)
     compare(calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', None, ())])
@@ -57,7 +57,7 @@ def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer
 
 def test_goal_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     repo = _seeded_repo(tmpdir)
-    project = _project(tmpdir, repo)
+    _project(tmpdir, repo)
     calls: list[object] = []  # stub the agent so real git runs but no claude launches
     replace.in_module(
         agent,
@@ -68,7 +68,7 @@ def test_goal_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) ->
     command.run('goal', 'start', 'feature-x').check(
         output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
     )
-    assert (project / 'worktrees' / 'feature-x@agent').is_dir() is True
+    tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(calls, expected=[(expected, 'project@feature-x@agent', None, [])])
 
 

@@ -15,7 +15,7 @@ def _seeded_repo(tmpdir: TempDir) -> Repo:
 
 
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
-    (tmpdir.path / 'config.yaml').write_text(f'kind: project\nrepo: {repo.path}\n')
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     return tmpdir.path
 
 
@@ -28,7 +28,7 @@ def test_new_dispatches_to_start(tmpdir: TempDir, replace: Replacer, command: Co
     command.run('goal', 'new', 'feature-x').check(
         output=f'Started feature-x in {worktree}', logging=[('INFO', 'goal start')]
     )
-    assert (project / 'worktrees' / 'feature-x@agent').is_dir() is True
+    tmpdir.compare(['feature-x@agent'], path='worktrees', recursive=False)
 
 
 def test_cleanup_dispatches_to_finish(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -40,7 +40,7 @@ def test_cleanup_dispatches_to_finish(tmpdir: TempDir, replace: Replacer, comman
     command.run('goal', 'cleanup', 'feature-x').check(
         output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
     )
-    assert (project / 'worktrees' / 'feature-x@agent').exists() is False
+    tmpdir.compare(path='worktrees', expected=())
 
 
 def test_synonyms_are_hidden_from_help(command: Command) -> None:

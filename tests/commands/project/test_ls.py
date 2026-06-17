@@ -4,10 +4,9 @@ from chimera.commands.project.ls import projects
 
 
 def _workspace_with_projects(tmpdir: TempDir) -> TempDir:
-    (tmpdir.path / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('config.yaml', {'kind': 'workspace'})
     for name in ('beta', 'alpha'):
-        project = tmpdir.makedir(name)
-        (project / 'config.yaml').write_text(f'kind: project\nrepo: /r/{name}\n')
+        tmpdir.dump(f'{name}/config.yaml', {'kind': 'project', 'repo': f'/r/{name}'})
     tmpdir.makedir('not-a-project')  # no config.yaml — ignored
     return tmpdir
 

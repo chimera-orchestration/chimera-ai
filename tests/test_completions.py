@@ -21,11 +21,11 @@ def _complete(args: list[str], incomplete: str = '') -> list[str]:
 
 def _workspace(tmpdir: TempDir, replace: Replacer) -> Path:
     ws = tmpdir.makedir('lycia')
-    (ws / 'config.yaml').write_text('kind: workspace\n')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     for project, goal in (('alpha', 'fix-login'), ('beta', 'fix-search')):
         directory = ws / project
         (directory / 'worktrees' / f'{goal}@agent').mkdir(parents=True)
-        (directory / 'config.yaml').write_text(f'kind: project\nrepo: {directory}\n')
+        tmpdir.dump(f'lycia/{project}/config.yaml', {'kind': 'project', 'repo': str(directory)})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     return ws
 
