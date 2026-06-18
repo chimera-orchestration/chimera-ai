@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from giterator import Git
+from loguru import logger
 
 from chimera.commands.agent import agent
 from chimera.worktrees import AGENT, HUMAN, branch, registered_worktrees, worktree_path
@@ -22,12 +23,34 @@ def adopt(
     behaving like ``goal start``. Idempotent: the restructure is skipped once both actor
     branches exist, and the worktree is reused when it is already checked out. Returns the
     agent worktree.
+
+    Because the restructure rewrites refs, the goal's branches and the commits they point
+    at are logged *before* any change is made (so a half-completed run leaves a record to
+    recover from) and again once the worktree is in place (what we ended up with).
     """
     git = Git(repo)
+    logger.bind(goal=goal, refs=goal_refs(git, goal)).info('goal adopt: before')
     restructure(git, goal)
     agent_worktree = ensure_worktree(git, worktrees_root, goal)
+    logger.bind(goal=goal, refs=goal_refs(git, goal), worktree=str(agent_worktree)).info(
+        'goal adopt: after'
+    )
     agent(agent_worktree, name, prompt, extra)
     return agent_worktree
+
+
+def goal_refs(git: Git, goal: str) -> dict[str, str]:
+    """The goal's branches that currently exist, each mapped to the commit it points at.
+
+    Covers the branch being adopted (``<goal>``) and both actor branches, so the same
+    snapshot describes the state before adoption (the bare branch) and after (the pair).
+    """
+    branches = set(git.branches())
+    return {
+        ref: git.rev_parse(ref, short=False)
+        for ref in (goal, branch(goal, HUMAN), branch(goal, AGENT))
+        if ref in branches
+    }
 
 
 def restructure(git: Git, goal: str) -> None:

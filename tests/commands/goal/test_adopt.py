@@ -3,7 +3,8 @@ from pathlib import Path
 
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
+from testfixtures import Command, LogCapture, Replacer, ShouldRaise, TempDir, compare
+from testfixtures.loguru import LoguruSource
 
 from chimera.commands.agent import agent
 from chimera.commands.goal import adopt as goal_adopt
@@ -117,6 +118,44 @@ def test_adopt_refuses_when_no_branch_to_adopt(
         adopt(git_repo.path, tmpdir / 'worktrees', 'ghost', 'proj@ghost@agent')
 
 
+def test_adopt_logs_the_refs_before_and_after(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    git_repo('checkout', '-b', 'feature')
+    tip = git_repo.commit_content('feature-work', short=False)
+    git_repo('checkout', 'main')
+    worktrees = tmpdir / 'worktrees'
+    _stub_agent(replace)
+    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent')
+    log.check(
+        # before any change: the bare branch and the commit it points at
+        ('goal adopt: before', {'goal': 'feature', 'refs': {'feature': tip}}),
+        # after: the actor branches that replaced it, plus the worktree we created
+        (
+            'goal adopt: after',
+            {
+                'goal': 'feature',
+                'refs': {'feature/human': tip, 'feature/agent': tip},
+                'worktree': str(worktrees / 'feature@agent'),
+            },
+        ),
+    )
+
+
+def test_adopt_logs_the_existing_refs_before_refusing(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _stub_agent(replace)
+    with (
+        LogCapture(LoguruSource(('message', 'extra'))) as log,
+        ShouldRaise(RuntimeError("no branch 'ghost' to adopt")),
+    ):
+        adopt(git_repo.path, tmpdir / 'worktrees', 'ghost', 'proj@ghost@agent')
+    # the before record lands even though nothing was adopted — no refs to record
+    log.check(('goal adopt: before', {'goal': 'ghost', 'refs': {}}))
+
+
 def test_adopt_restructures_a_branch_checked_out_elsewhere(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
@@ -136,7 +175,12 @@ def test_goal_adopt_cli(
     calls = _stub_agent(replace)
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'adopt', 'feature-x').check(
-        output=f'Adopted feature-x in {expected}', logging=[('INFO', 'goal adopt')]
+        output=f'Adopted feature-x in {expected}',
+        logging=[
+            ('INFO', 'goal adopt'),
+            ('INFO', 'goal adopt: before'),
+            ('INFO', 'goal adopt: after'),
+        ],
     )
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
@@ -151,6 +195,11 @@ def test_goal_adopt_cli_passes_extra_flags_through(
     calls = _stub_agent(replace)
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'adopt', 'feature-x', '--', '--model', 'opus').check(
-        output=f'Adopted feature-x in {expected}', logging=[('INFO', 'goal adopt')]
+        output=f'Adopted feature-x in {expected}',
+        logging=[
+            ('INFO', 'goal adopt'),
+            ('INFO', 'goal adopt: before'),
+            ('INFO', 'goal adopt: after'),
+        ],
     )
     compare(calls, expected=[(expected, 'project@feature-x@agent', None, ['--model', 'opus'])])
