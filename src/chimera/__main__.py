@@ -15,6 +15,7 @@ from chimera.commands.agent import resume as _resume
 from chimera.commands.agent import scoped
 from chimera.commands.doctor import CHECKS, Finding, resolve_root
 from chimera.commands.doctor import doctor as _doctor
+from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.init import init as _init
@@ -363,6 +364,20 @@ def goal_start(
         p.repo, p.worktrees, goal, session_name(p.name, goal, AGENT), prompt, frm, _passthrough(ctx)
     )
     typer.echo(f'Started {goal} in {worktree}')
+
+
+@goal_app.command('adopt', cls=PassthroughCommand)
+def goal_adopt(
+    ctx: typer.Context,
+    goal: Annotated[str, typer.Argument(help='Existing branch to adopt as a goal')],
+    prompt: PromptArg = None,
+    project: ProjectOpt = None,
+) -> None:
+    p = _project(ctx, project)
+    worktree = _goal_adopt(
+        p.repo, p.worktrees, goal, session_name(p.name, goal, AGENT), prompt, _passthrough(ctx)
+    )
+    typer.echo(f'Adopted {goal} in {worktree}')
 
 
 @goal_app.command('finish', cls=LoggingCommand)
