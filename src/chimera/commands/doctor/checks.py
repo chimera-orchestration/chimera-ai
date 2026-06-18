@@ -12,6 +12,7 @@ from chimera.commands.doctor.core import (
     read_raw,
     write_config,
 )
+from chimera.commands.init import TEMPLATE
 from chimera.worktrees import HUMAN, is_dirty, is_merged, registered_worktrees, worktree_path
 
 
@@ -46,6 +47,31 @@ class WorkspaceConfigCheck:
             write_config(workspace, {'kind': 'workspace', **(raw or {})})
         missing = 'missing' if raw is None else 'missing kind: workspace'
         yield Finding(self.name, f'{workspace}/config.yaml {missing}', fix, True)
+
+
+def _gitignore_entries(path: Path) -> list[str]:
+    """Non-blank, stripped lines of a .gitignore, [] if it's absent."""
+    if not path.exists():
+        return []
+    return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+
+
+class GitignoreCheck:
+    """The workspace .gitignore carries every entry the current template ships."""
+
+    name = 'gitignore'
+
+    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+        gitignore = workspace / '.gitignore'
+        have = _gitignore_entries(gitignore)
+        missing = [e for e in _gitignore_entries(TEMPLATE / '.gitignore') if e not in have]
+        if missing and fix:
+            text = gitignore.read_text() if gitignore.exists() else ''
+            if text and not text.endswith('\n'):
+                text += '\n'
+            gitignore.write_text(text + ''.join(f'{e}\n' for e in missing))
+        for entry in missing:
+            yield Finding(self.name, f'{gitignore} missing {entry!r}', fix, True)
 
 
 class ProjectConfigCheck:
@@ -243,6 +269,7 @@ class ShellCompletionCheck:
 
 CHECKS: tuple[Check, ...] = (
     WorkspaceConfigCheck(),
+    GitignoreCheck(),
     ProjectConfigCheck(),
     StaleHumanWorktreeCheck(),
     LegacyWorktreeSeparatorCheck(),

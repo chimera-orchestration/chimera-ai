@@ -89,6 +89,9 @@ It's a registry of independent checks (`chimera.commands.doctor`,
 add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates
   pre-marker workspaces and legacy `repo:`-only project configs)
+- **gitignore** — the workspace `.gitignore` carries every entry the current template ships
+  (`logs/`, `*/repo/`, …); `--fix` appends any missing ones, preserving existing/custom lines.
+  Reconciles workspaces created before a template entry was added
 - **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **worktree-separator** — rename legacy dash-joined `{goal}-{actor}` worktree dirs to `{goal}@{actor}`

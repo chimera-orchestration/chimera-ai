@@ -6,6 +6,7 @@ from giterator.testing import Repo
 from testfixtures import Replacer, TempDir, compare, not_there
 
 from chimera.commands.doctor.checks import (
+    GitignoreCheck,
     LegacyWorktreeSeparatorCheck,
     OrphanedWorktreeCheck,
     ProjectConfigCheck,
@@ -15,12 +16,14 @@ from chimera.commands.doctor.checks import (
     WorkspaceEnvCheck,
 )
 from chimera.commands.doctor.core import Check, Finding
+from chimera.commands.init import TEMPLATE
 from chimera.worktrees import registered_worktrees
 
 
 def _ws(tmpdir: TempDir):
     ws = tmpdir.makedir('lycia')
     (ws / 'processes').mkdir()
+    shutil.copy(TEMPLATE / '.gitignore', ws / '.gitignore')  # a healthy workspace
     return ws
 
 
@@ -133,6 +136,61 @@ class TestWorkspaceConfig:
             ],
         )
         compare(_config(ws), expected={'repo': '/some/repo'})  # never gets kind: workspace
+
+
+class TestGitignore:
+    def test_current_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(GitignoreCheck(), _ws(tmpdir)), expected=[])
+
+    def test_missing_entry_reported(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / '.gitignore').write_text('*.lock\nservices-running.jsonl\n*/repo/\n*/worktrees/\n')
+        compare(
+            _run(GitignoreCheck(), ws),
+            expected=[Finding('gitignore', f"{ws / '.gitignore'} missing 'logs/'", False, True)],
+        )
+
+    def test_missing_entry_appended_after_an_unterminated_final_line(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / '.gitignore').write_text('*.lock\nservices-running.jsonl\n*/repo/\n*/worktrees/')
+        compare(
+            _run(GitignoreCheck(), ws, fix=True),
+            expected=[Finding('gitignore', f"{ws / '.gitignore'} missing 'logs/'", True, True)],
+        )
+        compare(
+            (ws / '.gitignore').read_text(),
+            expected='*.lock\nservices-running.jsonl\n*/repo/\n*/worktrees/\nlogs/\n',
+        )
+
+    def test_keeps_unrelated_custom_entries(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / '.gitignore').write_text('.DS_Store\n')  # the user's own, none of ours
+        _run(GitignoreCheck(), ws, fix=True)
+        compare(
+            (ws / '.gitignore').read_text(),
+            expected='.DS_Store\n*.lock\nservices-running.jsonl\nlogs/\n*/repo/\n*/worktrees/\n',
+        )
+
+    def test_absent_file_created(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / '.gitignore').unlink()
+        compare(
+            _run(GitignoreCheck(), ws, fix=True),
+            expected=[
+                Finding('gitignore', f'{ws / ".gitignore"} missing {entry!r}', True, True)
+                for entry in (
+                    '*.lock',
+                    'services-running.jsonl',
+                    'logs/',
+                    '*/repo/',
+                    '*/worktrees/',
+                )
+            ],
+        )
+        compare(
+            (ws / '.gitignore').read_text(),
+            expected='*.lock\nservices-running.jsonl\nlogs/\n*/repo/\n*/worktrees/\n',
+        )
 
 
 class TestWorkspaceEnv:

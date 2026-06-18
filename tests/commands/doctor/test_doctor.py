@@ -1,4 +1,5 @@
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare, not_t
 
 from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
 from chimera.commands.doctor.core import Finding
+from chimera.commands.init import TEMPLATE
 from chimera.config import NotInWorkspaceError
 
 
@@ -33,6 +35,7 @@ class _FakeCheck:
 def _ws(tmpdir: TempDir):
     ws = tmpdir.makedir('lycia')
     (ws / 'processes').mkdir()
+    shutil.copy(TEMPLATE / '.gitignore', ws / '.gitignore')  # a healthy workspace
     return ws
 
 
@@ -123,6 +126,7 @@ def test_doctor_cli_verbose_lists_every_check(
             [
                 f'note: resolved workspace root: {ws.resolve()}',
                 '[workspace-config] (ok)',
+                '[gitignore] (ok)',
                 '[project-config] (ok)',
                 '[human-worktrees] (ok)',
                 '[worktree-separator] (ok)',
