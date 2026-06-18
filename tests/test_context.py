@@ -29,12 +29,10 @@ def _resolved(project_dir: Path, repo: str = '/r') -> Project:
     return Project(project_dir, ProjectConfig(kind='project', repo=Path(repo)))
 
 
-def _project_with_goal(tmpdir: TempDir, parent: Path) -> tuple[Project, Repo]:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
+def _project_with_goal(tmpdir: TempDir, parent: Path, repo: Repo) -> Project:
     project_dir = _project(tmpdir, parent, 'proj', repo=str(repo.path))
     add(repo.path, project_dir / 'worktrees', 'g')  # g@agent worktree + g/human branch
-    return resolve_project(project_dir), repo
+    return resolve_project(project_dir)
 
 
 class TestResolveWorkspace:
@@ -118,30 +116,34 @@ class TestIterProjects:
 
 
 class TestResolveGoal:
-    def test_explicit_wins(self, tmpdir: TempDir) -> None:
-        project, _repo = _project_with_goal(tmpdir, tmpdir.path)
+    def test_explicit_wins(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
         compare(resolve_goal(tmpdir.path, project, 'whatever'), expected='whatever')
 
-    def test_infers_from_a_goal_branch(self, tmpdir: TempDir) -> None:
-        project, repo = _project_with_goal(tmpdir, tmpdir.path)
+    def test_infers_from_a_goal_branch(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
         checkout = tmpdir / 'human'
-        Git(repo.path)('worktree', 'add', str(checkout), 'g/human')  # on <goal>/<actor>
+        Git(git_repo.path)('worktree', 'add', str(checkout), 'g/human')  # on <goal>/<actor>
         compare(resolve_goal(checkout, project), expected='g')
 
-    def test_ignores_a_non_goal_branch(self, tmpdir: TempDir) -> None:
-        project, repo = _project_with_goal(tmpdir, tmpdir.path)  # repo itself is on plain 'main'
-        with ShouldRaise(GoalRequiredError(repo.path)):
-            resolve_goal(repo.path, project)
+    def test_ignores_a_non_goal_branch(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        project = _project_with_goal(
+            tmpdir, tmpdir.path, git_repo
+        )  # repo itself is on plain 'main'
+        with ShouldRaise(GoalRequiredError(git_repo.path)):
+            resolve_goal(git_repo.path, project)
 
-    def test_ignores_a_branch_that_is_not_a_real_goal(self, tmpdir: TempDir) -> None:
-        project, repo = _project_with_goal(tmpdir, tmpdir.path)
+    def test_ignores_a_branch_that_is_not_a_real_goal(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
         checkout = tmpdir / 'review'
-        Git(repo.path)('worktree', 'add', '-b', 'ghost/human', str(checkout), 'main')
+        Git(git_repo.path)('worktree', 'add', '-b', 'ghost/human', str(checkout), 'main')
         with ShouldRaise(GoalRequiredError(checkout)):  # shaped right, but 'ghost' is not a goal
             resolve_goal(checkout, project)
 
-    def test_requires_one_outside_a_repo(self, tmpdir: TempDir) -> None:
-        project, _repo = _project_with_goal(tmpdir, tmpdir.path)
+    def test_requires_one_outside_a_repo(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
         bare = tmpdir.makedir('bare')
         with ShouldRaise(GoalRequiredError(bare)):
             resolve_goal(bare, project)
@@ -161,28 +163,30 @@ class TestResolveScope:
         compare(resolve_scope(project), expected=Scope(workspace, _resolved(project), None))
 
     def test_pins_the_goal_from_a_goal_branch(
-        self, tmpdir: TempDir, workspace_with_env: Path
+        self, tmpdir: TempDir, git_repo: Repo, workspace_with_env: Path
     ) -> None:
-        project, repo = _project_with_goal(tmpdir, workspace_with_env)
+        project = _project_with_goal(tmpdir, workspace_with_env, git_repo)
         checkout = tmpdir / 'human'
-        Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
+        Git(git_repo.path)('worktree', 'add', str(checkout), 'g/human')
         compare(resolve_scope(checkout), expected=Scope(workspace_with_env, project, 'g'))
 
     def test_external_checkout_pins_project_not_goal(
-        self, tmpdir: TempDir, workspace_with_env: Path
+        self, tmpdir: TempDir, git_repo: Repo, workspace_with_env: Path
     ) -> None:
-        project, repo = _project_with_goal(tmpdir, workspace_with_env)
+        project = _project_with_goal(tmpdir, workspace_with_env, git_repo)
         # repo is on plain 'main'
-        compare(resolve_scope(repo.path), expected=Scope(workspace_with_env, project, None))
+        compare(resolve_scope(git_repo.path), expected=Scope(workspace_with_env, project, None))
 
     def test_bad_explicit_project_still_raises(self, workspace_with_env: Path) -> None:
         with ShouldRaise(NotInProjectError(workspace_with_env / 'ghost')):
             resolve_scope(workspace_with_env, project='ghost')
 
-    def test_without_infer_ignores_cwd(self, tmpdir: TempDir, workspace_with_env: Path) -> None:
-        _, repo = _project_with_goal(tmpdir, workspace_with_env)
+    def test_without_infer_ignores_cwd(
+        self, tmpdir: TempDir, git_repo: Repo, workspace_with_env: Path
+    ) -> None:
+        _project_with_goal(tmpdir, workspace_with_env, git_repo)
         checkout = tmpdir / 'human'
-        Git(repo.path)('worktree', 'add', str(checkout), 'g/human')
+        Git(git_repo.path)('worktree', 'add', str(checkout), 'g/human')
         # standing in a goal worktree, but cwd is never read — stays workspace-wide
         compare(
             resolve_scope(checkout, infer=False), expected=Scope(workspace_with_env, None, None)

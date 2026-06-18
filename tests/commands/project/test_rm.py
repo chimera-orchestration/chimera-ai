@@ -16,16 +16,14 @@ def _no_agents(replace: Replacer) -> None:
     replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
 
 
-def _project(tmpdir: TempDir, *, with_goal: bool = False) -> tuple[Path, Repo, Path]:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
+def _project(tmpdir: TempDir, repo: Repo, *, with_goal: bool = False) -> tuple[Path, Path]:
     workspace = tmpdir.makedir('lycia')
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     project = workspace / 'myproj'
     tmpdir.dump('lycia/myproj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     if with_goal:
         add(repo.path, project / 'worktrees', 'g')
-    return workspace, repo, project
+    return workspace, project
 
 
 def test_remove_is_a_noop_when_the_project_is_absent(tmpdir: TempDir) -> None:
@@ -42,34 +40,38 @@ def test_remove_refuses_a_dir_that_is_not_a_tracked_project(tmpdir: TempDir) -> 
     assert stray.is_dir() is True
 
 
-def test_remove_takes_out_a_project_with_no_goals(tmpdir: TempDir) -> None:
-    workspace, repo, project = _project(tmpdir)
+def test_remove_takes_out_a_project_with_no_goals(tmpdir: TempDir, git_repo: Repo) -> None:
+    workspace, project = _project(tmpdir, git_repo)
     compare(remove(workspace, 'myproj'), expected=project)
     assert project.exists() is False
-    assert repo.path.is_dir() is True  # the external tracked repo is left untouched
+    assert git_repo.path.is_dir() is True  # the external tracked repo is left untouched
 
 
-def test_remove_refuses_while_goals_exist(tmpdir: TempDir) -> None:
-    workspace, repo, _ = _project(tmpdir, with_goal=True)
+def test_remove_refuses_while_goals_exist(tmpdir: TempDir, git_repo: Repo) -> None:
+    workspace, _ = _project(tmpdir, git_repo, with_goal=True)
     with ShouldRaise(
         RuntimeError('myproj still has goals (g); run `ch goal finish` on each or use --force')
     ):
         remove(workspace, 'myproj')
     tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)
-    compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
-def test_remove_force_finishes_goals_then_removes_the_project(tmpdir: TempDir) -> None:
-    workspace, repo, project = _project(tmpdir, with_goal=True)
+def test_remove_force_finishes_goals_then_removes_the_project(
+    tmpdir: TempDir, git_repo: Repo
+) -> None:
+    workspace, project = _project(tmpdir, git_repo, with_goal=True)
     Repo(project / 'worktrees' / 'g@agent').commit_content('work')  # unmerged
     (project / 'worktrees' / 'g@agent' / 'scratch.txt').write_text('wip')  # uncommitted
     compare(remove(workspace, 'myproj', force=True), expected=project)
     assert project.exists() is False
-    compare(Git(repo.path).branches(), expected=['main'])
+    compare(Git(git_repo.path).branches(), expected=['main'])
 
 
-def test_remove_force_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: Replacer) -> None:
-    workspace, repo, project = _project(tmpdir, with_goal=True)
+def test_remove_force_aborts_when_an_agent_is_running(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    workspace, project = _project(tmpdir, git_repo, with_goal=True)
     replace.in_module(
         live_sessions,
         lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
@@ -86,8 +88,10 @@ def test_remove_force_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: 
     tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)
 
 
-def test_project_rm_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
-    workspace, repo, project = _project(tmpdir)
+def test_project_rm_cli(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    workspace, project = _project(tmpdir, git_repo)
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
     command.run('project', 'rm', 'myproj').check(
         output=f'Removed {project}', logging=[('INFO', 'project rm')]

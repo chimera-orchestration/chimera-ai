@@ -2,6 +2,7 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import pytest
+from giterator.testing import Repo
 from testfixtures import Command, LogCapture, Replacer, TempDir, not_there
 from testfixtures.command import AbstractRun
 from testfixtures.loguru import LoguruSource
@@ -33,6 +34,13 @@ def tmpdir() -> Iterator[TempDir]:
 @pytest.fixture()
 def workspace(tmpdir: TempDir) -> Path:
     return init(tmpdir / 'lycia')
+
+
+@pytest.fixture()
+def git_repo(tmpdir: TempDir) -> Repo:
+    repo = Repo.make(tmpdir / 'repo')
+    repo.commit_content('seed')
+    return repo
 
 
 @pytest.fixture()

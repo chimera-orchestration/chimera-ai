@@ -53,12 +53,10 @@ def test_goal_ls_cli_qualifies_names_when_widened(
 
 
 def test_goal_ls_cli_reflects_real_worktrees(
-    tmpdir: TempDir, workspace_with_env: Path, command: Command
+    tmpdir: TempDir, git_repo: Repo, workspace_with_env: Path, command: Command
 ) -> None:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
     project = workspace_with_env / 'proj'
-    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
     os.chdir(project)  # worktree add + goal ls both infer the project from cwd
     command.run('worktree', 'add', 'alpha')
     command.run('worktree', 'add', 'beta')

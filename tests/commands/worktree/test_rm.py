@@ -17,12 +17,10 @@ def _no_agents(replace: Replacer) -> None:
     replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
 
 
-def _goal(tmpdir: TempDir) -> tuple[Repo, Path]:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
+def _goal(tmpdir: TempDir, repo: Repo) -> Path:
     worktrees = tmpdir / 'worktrees'
     add(repo.path, worktrees, 'g')
-    return repo, worktrees
+    return worktrees
 
 
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
@@ -30,14 +28,16 @@ def _project(tmpdir: TempDir, repo: Repo) -> Path:
     return tmpdir.path
 
 
-def test_remove_is_a_noop_for_a_goal_that_was_never_created(tmpdir: TempDir) -> None:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
-    compare(remove(repo.path, tmpdir / 'worktrees', 'ghost'), expected=[])
+def test_remove_is_a_noop_for_a_goal_that_was_never_created(
+    tmpdir: TempDir, git_repo: Repo
+) -> None:
+    compare(remove(git_repo.path, tmpdir / 'worktrees', 'ghost'), expected=[])
 
 
-def test_remove_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: Replacer) -> None:
-    repo, worktrees = _goal(tmpdir)
+def test_remove_aborts_when_an_agent_is_running(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
     replace.in_module(
         live_sessions,
         lambda worktree: [
@@ -60,32 +60,36 @@ def test_remove_aborts_when_an_agent_is_running(tmpdir: TempDir, replace: Replac
             'find its terminal or kill the pid, then re-run'
         )
     ):
-        remove(repo.path, worktrees, 'g')
+        remove(git_repo.path, worktrees, 'g')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
-    compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
-def test_remove_force_bypasses_the_liveness_check(tmpdir: TempDir, replace: Replacer) -> None:
-    repo, worktrees = _goal(tmpdir)
+def test_remove_force_bypasses_the_liveness_check(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
     replace.in_module(
         live_sessions,
         lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
         module=worktree_rm,
     )
-    remove(repo.path, worktrees, 'g', force=True)
+    remove(git_repo.path, worktrees, 'g', force=True)
     tmpdir.compare(path='worktrees', expected=())
-    compare(Git(repo.path).branches(), expected=['main'])
+    compare(Git(git_repo.path).branches(), expected=['main'])
 
 
-def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir) -> None:
-    repo, worktrees = _goal(tmpdir)
-    compare(remove(repo.path, worktrees, 'g'), expected=[worktrees / 'g@agent'])  # only the agent
+def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    compare(
+        remove(git_repo.path, worktrees, 'g'), expected=[worktrees / 'g@agent']
+    )  # only the agent
     tmpdir.compare(path='worktrees', expected=())
-    compare(Git(repo.path).branches(), expected=['main'])
+    compare(Git(git_repo.path).branches(), expected=['main'])
 
 
-def test_remove_refuses_uncommitted_changes(tmpdir: TempDir) -> None:
-    repo, worktrees = _goal(tmpdir)
+def test_remove_refuses_uncommitted_changes(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
     (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')
     with ShouldRaise(
         RuntimeError(
@@ -93,59 +97,55 @@ def test_remove_refuses_uncommitted_changes(tmpdir: TempDir) -> None:
             f'  {worktrees / "g@agent"} has uncommitted or untracked changes'
         )
     ):
-        remove(repo.path, worktrees, 'g')
+        remove(git_repo.path, worktrees, 'g')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
-    compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
-def test_remove_refuses_unmerged_branch(tmpdir: TempDir) -> None:
-    repo, worktrees = _goal(tmpdir)
+def test_remove_refuses_unmerged_branch(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('work')  # branch now ahead of main
     with ShouldRaise(
         RuntimeError(
             'refusing to clean up (use --force to discard):\n  branch g/agent has unmerged commits'
         )
     ):
-        remove(repo.path, worktrees, 'g')
+        remove(git_repo.path, worktrees, 'g')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
-    compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
-def test_remove_force_discards_unsaved_work(tmpdir: TempDir) -> None:
-    repo, worktrees = _goal(tmpdir)
+def test_remove_force_discards_unsaved_work(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('work')  # unmerged
     (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')  # uncommitted
-    remove(repo.path, worktrees, 'g', force=True)
+    remove(git_repo.path, worktrees, 'g', force=True)
     tmpdir.compare(path='worktrees', expected=())
-    compare(Git(repo.path).branches(), expected=['main'])
+    compare(Git(git_repo.path).branches(), expected=['main'])
 
 
-def test_worktree_rm_cli(tmpdir: TempDir, command: Command) -> None:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
-    project = _project(tmpdir, repo)
+def test_worktree_rm_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    project = _project(tmpdir, git_repo)
     command.run('worktree', 'add', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('worktree', 'rm', 'g').check(
         output=f'Removed {worktree}', logging=[('INFO', 'worktree rm')]
     )
     tmpdir.compare(path='worktrees', expected=())
-    compare(Git(repo.path).branches(), expected=['main'])
+    compare(Git(git_repo.path).branches(), expected=['main'])
 
 
-def test_worktree_rm_cli_reports_nothing_to_remove(tmpdir: TempDir, command: Command) -> None:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
-    _project(tmpdir, repo)
+def test_worktree_rm_cli_reports_nothing_to_remove(
+    tmpdir: TempDir, git_repo: Repo, command: Command
+) -> None:
+    _project(tmpdir, git_repo)
     command.run('worktree', 'rm', 'ghost').check(
         output='Nothing to remove for ghost', logging=[('INFO', 'worktree rm')]
     )
 
 
-def test_goal_finish_cli(tmpdir: TempDir, command: Command) -> None:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
-    project = _project(tmpdir, repo)
+def test_goal_finish_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    project = _project(tmpdir, git_repo)
     command.run('worktree', 'add', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     # finish is the lifecycle name for rm
@@ -153,4 +153,4 @@ def test_goal_finish_cli(tmpdir: TempDir, command: Command) -> None:
         output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
     )
     tmpdir.compare(path='worktrees', expected=())
-    compare(Git(repo.path).branches(), expected=['main'])
+    compare(Git(git_repo.path).branches(), expected=['main'])

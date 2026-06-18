@@ -10,12 +10,6 @@ from chimera.commands.goal import start as goal_start
 from chimera.commands.goal.start import start
 
 
-def _seeded_repo(tmpdir: TempDir) -> Repo:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
-    return repo
-
-
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
     project = tmpdir.makedir('project')
     tmpdir.dump('project/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
@@ -24,9 +18,8 @@ def _project(tmpdir: TempDir, repo: Repo) -> Path:
 
 
 def test_start_creates_worktrees_then_launches_the_agent(
-    tmpdir: TempDir, replace: Replacer
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
-    repo = _seeded_repo(tmpdir)
     worktrees = tmpdir / 'worktrees'
     calls: list[object] = []
     replace.in_module(
@@ -34,15 +27,16 @@ def test_start_creates_worktrees_then_launches_the_agent(
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
         module=goal_start,
     )
-    compare(start(repo.path, worktrees, 'g', 'proj@g@agent'), expected=worktrees / 'g@agent')
+    compare(start(git_repo.path, worktrees, 'g', 'proj@g@agent'), expected=worktrees / 'g@agent')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
-    compare(Git(repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
     # foreground (no prompt)
     compare(calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', None, ())])
 
 
-def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer) -> None:
-    repo = _seeded_repo(tmpdir)
+def test_start_passes_the_prompt_to_the_agent(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
     worktrees = tmpdir / 'worktrees'
     calls: list[object] = []
     replace.in_module(
@@ -50,13 +44,14 @@ def test_start_passes_the_prompt_to_the_agent(tmpdir: TempDir, replace: Replacer
         lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
         module=goal_start,
     )
-    start(repo.path, worktrees, 'g', 'proj@g@agent', prompt='do it')
+    start(git_repo.path, worktrees, 'g', 'proj@g@agent', prompt='do it')
     compare(calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', 'do it', ())])
 
 
-def test_goal_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
-    repo = _seeded_repo(tmpdir)
-    _project(tmpdir, repo)
+def test_goal_start_cli(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    _project(tmpdir, git_repo)
     calls: list[object] = []  # stub the agent so real git runs but no claude launches
     replace.in_module(
         agent,
@@ -71,9 +66,10 @@ def test_goal_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) ->
     compare(calls, expected=[(expected, 'project@feature-x@agent', None, [])])
 
 
-def test_goal_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
-    repo = _seeded_repo(tmpdir)
-    _project(tmpdir, repo)
+def test_goal_start_cli_with_prompt(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    _project(tmpdir, git_repo)
     calls: list[object] = []
     replace.in_module(
         agent,
@@ -88,10 +84,9 @@ def test_goal_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command:
 
 
 def test_goal_start_cli_passes_extra_flags_through(
-    tmpdir: TempDir, replace: Replacer, command: Command
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
 ) -> None:
-    repo = _seeded_repo(tmpdir)
-    _project(tmpdir, repo)
+    _project(tmpdir, git_repo)
     calls: list[object] = []
     replace.in_module(
         agent,

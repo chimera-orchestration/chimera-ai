@@ -16,12 +16,6 @@ from chimera.worktrees import (
 )
 
 
-def _seeded_repo(tmpdir: TempDir) -> Repo:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
-    return repo
-
-
 def test_branch_names_the_actor_under_the_goal() -> None:
     compare(branch('my-goal', 'agent'), expected='my-goal/agent')
 
@@ -51,32 +45,28 @@ def test_goals_are_derived_from_agent_worktrees(tmpdir: TempDir) -> None:
     compare(goals(tmpdir.path), expected={'g1', 'g2'})
 
 
-def test_registered_worktrees_lists_repo_and_added(tmpdir: TempDir) -> None:
-    repo = _seeded_repo(tmpdir)
-    git = Git(repo.path)
+def test_registered_worktrees_lists_repo_and_added(tmpdir: TempDir, git_repo: Repo) -> None:
+    git = Git(git_repo.path)
     wt = tmpdir / 'wt'
     git('worktree', 'add', '-b', 'side', str(wt), 'main')
-    compare(registered_worktrees(git), expected={repo.path.resolve(), wt.resolve()})
+    compare(registered_worktrees(git), expected={git_repo.path.resolve(), wt.resolve()})
 
 
-def test_is_merged_true_for_ancestor(tmpdir: TempDir) -> None:
-    repo = _seeded_repo(tmpdir)
-    git = Git(repo.path)
+def test_is_merged_true_for_ancestor(git_repo: Repo) -> None:
+    git = Git(git_repo.path)
     git('branch', 'feature', 'HEAD')  # points at HEAD → an ancestor of it
     assert is_merged(git, 'feature') is True
 
 
-def test_is_merged_false_for_branch_ahead(tmpdir: TempDir) -> None:
-    repo = _seeded_repo(tmpdir)
-    git = Git(repo.path)
+def test_is_merged_false_for_branch_ahead(git_repo: Repo) -> None:
+    git = Git(git_repo.path)
     git('checkout', '-q', '-b', 'feature')
-    repo.commit_content('ahead')  # feature now ahead of main
+    git_repo.commit_content('ahead')  # feature now ahead of main
     git('checkout', '-q', 'main')
     assert is_merged(git, 'feature') is False
 
 
-def test_is_dirty(tmpdir: TempDir) -> None:
-    repo = _seeded_repo(tmpdir)
-    assert is_dirty(repo.path) is False
-    (repo.path / 'scratch.txt').write_text('wip')
-    assert is_dirty(repo.path) is True
+def test_is_dirty(git_repo: Repo) -> None:
+    assert is_dirty(git_repo.path) is False
+    (git_repo.path / 'scratch.txt').write_text('wip')
+    assert is_dirty(git_repo.path) is True

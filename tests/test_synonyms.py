@@ -8,20 +8,15 @@ from chimera.commands.agent import agent
 from chimera.commands.goal import start as goal_start
 
 
-def _seeded_repo(tmpdir: TempDir) -> Repo:
-    repo = Repo.make(tmpdir / 'repo')
-    repo.commit_content('seed')
-    return repo
-
-
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
     tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     return tmpdir.path
 
 
-def test_new_dispatches_to_start(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
-    repo = _seeded_repo(tmpdir)
-    project = _project(tmpdir, repo)
+def test_new_dispatches_to_start(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    project = _project(tmpdir, git_repo)
     replace.in_module(agent, lambda *a, **k: None, module=goal_start)
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
     # the synonym dispatches to the canonical command, which is what gets logged
@@ -31,9 +26,10 @@ def test_new_dispatches_to_start(tmpdir: TempDir, replace: Replacer, command: Co
     tmpdir.compare(['feature-x@agent'], path='worktrees', recursive=False)
 
 
-def test_cleanup_dispatches_to_finish(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
-    repo = _seeded_repo(tmpdir)
-    project = _project(tmpdir, repo)
+def test_cleanup_dispatches_to_finish(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    project = _project(tmpdir, git_repo)
     replace.in_module(agent, lambda *a, **k: None, module=goal_start)
     command.run('goal', 'start', 'feature-x')
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
