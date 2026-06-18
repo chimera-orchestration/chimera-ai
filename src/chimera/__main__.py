@@ -23,6 +23,7 @@ from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.ls import projects as _projects
 from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
+from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
 from chimera.completions import complete_actor, complete_goal, complete_project
 from chimera.context import (
@@ -33,7 +34,7 @@ from chimera.context import (
     resolve_scope,
     resolve_workspace,
 )
-from chimera.worktrees import ACTORS, AGENT, session_name, worktree_dirs, worktree_path
+from chimera.worktrees import ACTORS, AGENT, session_name, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -337,7 +338,7 @@ def worktree_rm(
 
 @worktree_app.command('ls', cls=LoggingCommand)
 def worktree_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
-    for worktree in worktree_dirs(_project(ctx, project).worktrees):
+    for worktree in _worktree_ls(_project(ctx, project).worktrees):
         typer.echo(worktree)
 
 
