@@ -5,5 +5,6 @@
 
    workspace.rst
    completion.rst
+   logging.rst
    changes.rst
    license.rst

@@ -27,7 +27,7 @@ isn't built yet — the vocabulary stands regardless; what's implemented is the 
 When implementing chimera, the following principles must be adhered to:
 
 - **Everything must be a CLI** – Every action is a CLI command thinly wrapping a pure, importable function. Compose from pure functions; put logic tests at the function layer and still cover the CLI itself. More in @agent-docs/commands.md.
-- **Every CLI action must be logged** – Every action must be logged to the log file.
+- **Every CLI action must be logged** – Every action must be logged to the log file; mutating a git ref must log its before/after shas first. More in @agent-docs/logging.md.
 - **Every CLI action must self documenting** – `--help` and `ch {action} help` must both work & be identical and provide terse, optimised for agents. More in @agent-docs/documentation.md.
 - **Document everything** - Read @agent-docs/documentation.md when you need to.
 - **Independence** - Every part of the system must work independently and on its own to aid debugging and flexible usage.
@@ -73,6 +73,7 @@ Topics docs live in agent-docs/{topic}.md, if you are working on/with {topic}, r
 - @agent-docs/unit-and-functional-testing.md
 - @agent-docs/documentation.md
 - @agent-docs/git-commits.md
+- @agent-docs/logging.md
 - @agent-docs/workspace-layout.md
 
 If you are working on a topic and learn something new, add to the topic.
