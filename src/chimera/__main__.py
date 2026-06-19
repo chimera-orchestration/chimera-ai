@@ -28,6 +28,7 @@ from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
 from chimera.completions import complete_actor, complete_goal, complete_project
+from chimera.help import command_index, render_json, render_text
 from chimera.context import (
     Project,
     Scope,
@@ -213,12 +214,26 @@ def _scope(
 app = typer.Typer(callback=_context, help='Chimera — AI agent orchestration.')
 
 
-@app.command(cls=LoggingCommand)
+@app.command(cls=LoggingCommand, help='Create a Chimera workspace at PATH.')
 def init(path: Annotated[Path, typer.Argument()]) -> None:
     typer.echo(f'Initialized workspace at {_init(path)}')
 
 
-@app.command(cls=LoggingCommand)
+@app.command(
+    'help', cls=LoggingCommand, help='List every command in one chunk (derived from the live tree).'
+)
+def help_(
+    ctx: typer.Context,
+    verbose: Annotated[
+        bool, typer.Option('--verbose', '-v', help="Also show each command's options and synonyms")
+    ] = False,
+    as_json: Annotated[bool, typer.Option('--json', help='Emit the index as JSON')] = False,
+) -> None:
+    entries = command_index(ctx.find_root().command)
+    typer.echo(render_json(entries) if as_json else render_text(entries, verbose=verbose))
+
+
+@app.command(cls=LoggingCommand, help='Check and (with --fix) repair workspace health.')
 def doctor(
     path: Annotated[Path | None, typer.Argument()] = None,
     fix: Annotated[
@@ -255,7 +270,9 @@ def _tag(finding: Finding) -> str:
     return 'would fix — run with --fix' if finding.fixable else 'needs attention'
 
 
-@app.command('ls', cls=LoggingCommand)
+@app.command(
+    'ls', cls=LoggingCommand, help='Show the workspace dashboard (projects → goals → agents).'
+)
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     _render_board(board(_scope(ctx, project, goal, infer=False), agents()))
 
@@ -302,14 +319,18 @@ project_app = typer.Typer(help='Manage projects.')
 app.add_typer(project_app, name='project')
 
 
-@project_app.command('add', cls=LoggingCommand)
+@project_app.command(
+    'add', cls=LoggingCommand, help='Track a project — clone a git URL or register a local path.'
+)
 def project_add(
     source: Annotated[str, typer.Argument(help='Git URL to clone, or local path to track')],
 ) -> None:
     typer.echo(f'Added {_project_add(resolve_workspace(Path.cwd()), source)}')
 
 
-@project_app.command('rm', cls=LoggingCommand)
+@project_app.command(
+    'rm', cls=LoggingCommand, help='Remove a tracked project (refuses while it has goals).'
+)
 def project_rm(
     name: Annotated[str, typer.Argument(autocompletion=complete_project)], force: ForceOpt = False
 ) -> None:
@@ -317,7 +338,7 @@ def project_rm(
     typer.echo(f'Removed {removed}' if removed else f'No project named {name} to remove')
 
 
-@project_app.command('ls', cls=LoggingCommand)
+@project_app.command('ls', cls=LoggingCommand, help='List tracked projects.')
 def project_ls() -> None:
     for name in _projects(resolve_workspace(Path.cwd())):
         typer.echo(name)
@@ -327,7 +348,9 @@ worktree_app = typer.Typer(callback=_context, help="Manage a goal's worktrees an
 app.add_typer(worktree_app, name='worktree')
 
 
-@worktree_app.command('add', cls=LoggingCommand)
+@worktree_app.command(
+    'add', cls=LoggingCommand, help="Create each actor's branch and the agent worktree for a goal."
+)
 def worktree_add(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
@@ -346,7 +369,7 @@ def worktree_add(
         typer.echo(f'Created {created}')
 
 
-@worktree_app.command('rm', cls=LoggingCommand)
+@worktree_app.command('rm', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")
 def worktree_rm(
     ctx: typer.Context,
     goal: ExistingGoalArg,
@@ -358,7 +381,7 @@ def worktree_rm(
     _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline), goal)
 
 
-@worktree_app.command('ls', cls=LoggingCommand)
+@worktree_app.command('ls', cls=LoggingCommand, help="List a project's worktrees.")
 def worktree_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
     for worktree in _worktree_ls(_project(ctx, project).worktrees):
         typer.echo(worktree)
@@ -372,7 +395,11 @@ goal_app = typer.Typer(
 app.add_typer(goal_app, name='goal')
 
 
-@goal_app.command('start', cls=PassthroughCommand)
+@goal_app.command(
+    'start',
+    cls=PassthroughCommand,
+    help="Branch, create the worktree, and launch the goal's agent.",
+)
 def goal_start(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
@@ -395,7 +422,11 @@ def goal_start(
     typer.echo(f'Started {goal} in {worktree}')
 
 
-@goal_app.command('adopt', cls=PassthroughCommand)
+@goal_app.command(
+    'adopt',
+    cls=PassthroughCommand,
+    help='Bring an existing branch under goal management and launch its agent.',
+)
 def goal_adopt(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument(help='Existing branch to adopt as a goal')],
@@ -409,7 +440,7 @@ def goal_adopt(
     typer.echo(f'Adopted {goal} in {worktree}')
 
 
-@goal_app.command('finish', cls=LoggingCommand)
+@goal_app.command('finish', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")
 def goal_finish(
     ctx: typer.Context,
     goal: ExistingGoalArg,
@@ -421,7 +452,7 @@ def goal_finish(
     _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline), goal)
 
 
-@goal_app.command('ls', cls=LoggingCommand)
+@goal_app.command('ls', cls=LoggingCommand, help='List goals.')
 def goal_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
     scope = _scope(ctx, project, None)
     for proj, goal in goals_in_scope(scope):
@@ -432,7 +463,9 @@ agent_app = typer.Typer(callback=_context, help='Launch and list agents.')
 app.add_typer(agent_app, name='agent')
 
 
-@agent_app.command('start', cls=PassthroughCommand)
+@agent_app.command(
+    'start', cls=PassthroughCommand, help='Launch an agent session in a goal worktree.'
+)
 def agent_start(
     ctx: typer.Context,
     prompt: PromptArg = None,
@@ -449,7 +482,7 @@ def agent_start(
     typer.echo(f'Launched agent in {worktree}')
 
 
-@agent_app.command('resume', cls=PassthroughCommand)
+@agent_app.command('resume', cls=PassthroughCommand, help="Reattach to an agent's session.")
 def agent_resume(
     ctx: typer.Context,
     prompt: PromptArg = None,
@@ -466,7 +499,7 @@ def agent_resume(
     typer.echo(f'Resumed agent in {worktree}')
 
 
-@agent_app.command('ls', cls=LoggingCommand)
+@agent_app.command('ls', cls=LoggingCommand, help='List running agents.')
 def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     listing = scoped(agents(), _scope(ctx, project, goal), otherwise=None)
     if not listing:

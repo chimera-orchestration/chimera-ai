@@ -51,6 +51,19 @@ Rules:
   completion
 - args naming something *new* (e.g. `goal start`) get no completer
 
+## Self-documentation
+
+Every command — group *and* leaf — sets its summary via explicit `help=` (groups use
+`typer.Typer(help=…)`, leaves `@app.command(help=…)`); never a wrapper docstring (groups
+can't carry one, so docstrings would split the convention). One `help=` string is the
+single source: `--help`, `ch X help`, and `ch help` all derive from it.
+
+`ch help` is the whole tree in one chunk — flat, plain text, terse, agent-optimised. It's
+**derived** by walking the live command objects (`chimera/help.py`), never a hand-kept
+list, so it can't drift. Default lists canonical leaf commands + summaries; `-v` adds each
+command's options and synonyms; `--json` emits the structured index. A leaf with no `help=`
+shows blank — a test (`test_every_command_has_a_summary`) fails on it.
+
 ## Testing
 
 - Put logic depth in pure-function tests — assert on return values / raised exceptions.
