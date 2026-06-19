@@ -7,7 +7,9 @@ from chimera.commands.agent import live_sessions
 from chimera.worktrees import (
     ACTORS,
     AGENT,
+    base_ref,
     branch,
+    fetch_origin,
     is_dirty,
     is_merged,
     registered_worktrees,
@@ -15,12 +17,16 @@ from chimera.worktrees import (
 )
 
 
-def remove(repo: Path, worktrees_root: Path, goal: str, force: bool = False) -> list[Path]:
+def remove(
+    repo: Path, worktrees_root: Path, goal: str, force: bool = False, fetch: bool = True
+) -> list[Path]:
     """Remove the goal's worktrees and branches; refuse on unsaved work unless force.
 
     Only touches worktrees/branches that actually exist, so re-running — or removing
     a goal that was never fully created — is a safe no-op. Refuses if a claude agent
-    is live in the agent worktree, unless force. Returns removed worktrees.
+    is live in the agent worktree, unless force. ``fetch`` (the default) refreshes
+    ``origin`` first so a branch merged upstream is recognised as merged. Returns
+    removed worktrees.
     """
     git = Git(repo)
     if not force:
@@ -29,6 +35,8 @@ def remove(repo: Path, worktrees_root: Path, goal: str, force: bool = False) -> 
     branches = set(git.branches())
     worktrees = {actor: worktree_path(worktrees_root, goal, actor) for actor in ACTORS}
     if not force:
+        if fetch:
+            fetch_origin(git)
         _refuse_if_unsafe(git, goal, worktrees, registered, branches)
     removed: list[Path] = []
     for actor, worktree in worktrees.items():
@@ -36,7 +44,9 @@ def remove(repo: Path, worktrees_root: Path, goal: str, force: bool = False) -> 
             git('worktree', 'remove', *(('--force',) if force else ()), str(worktree))
             removed.append(worktree)
         if (ref := branch(goal, actor)) in branches:
-            git('branch', '-D' if force else '-d', ref)
+            # -D not -d: _refuse_if_unsafe is the authority on what's safe to drop (it sees
+            # squash/rebase merges that git's ancestry-only -d would wrongly call unmerged).
+            git('branch', '-D', ref)
     return removed
 
 
@@ -63,11 +73,13 @@ def _describe(session: dict[str, object]) -> str:
 def _refuse_if_unsafe(
     git: Git, goal: str, worktrees: dict[str, Path], registered: set[Path], branches: set[str]
 ) -> None:
+    base = base_ref(git)
     problems: list[str] = []
     for actor, worktree in worktrees.items():
         if worktree.resolve() in registered and is_dirty(worktree):
             problems.append(f'{worktree} has uncommitted or untracked changes')
-        if (ref := branch(goal, actor)) in branches and not is_merged(git, ref):
+        ref = branch(goal, actor)
+        if ref in branches and not (base is not None and is_merged(git, ref, base)):
             problems.append(f'branch {ref} has unmerged commits')
     if problems:
         joined = '\n  '.join(problems)

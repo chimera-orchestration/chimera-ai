@@ -62,18 +62,43 @@ def test_registered_worktrees_lists_repo_and_added(tmpdir: TempDir, git_repo: Re
     compare(registered_worktrees(git), expected={git_repo.path.resolve(), wt.resolve()})
 
 
-def test_is_merged_true_for_ancestor(git_repo: Repo) -> None:
-    git = Git(git_repo.path)
-    git('branch', 'feature', 'HEAD')  # points at HEAD → an ancestor of it
-    assert is_merged(git, 'feature') is True
+def _branched_then_advanced(repo: Repo) -> Repo:
+    """A repo where ``feature`` has two commits and ``main`` moved on independently."""
+    repo.commit_content('seed')
+    repo('checkout', '-q', '-b', 'feature')
+    repo.commit_content('b')
+    repo.commit_content('c')
+    repo('checkout', '-q', 'main')
+    repo.commit_content('other-work')  # unrelated path, so the trees genuinely differ
+    return repo
 
 
-def test_is_merged_false_for_branch_ahead(git_repo: Repo) -> None:
-    git = Git(git_repo.path)
-    git('checkout', '-q', '-b', 'feature')
-    git_repo.commit_content('ahead')  # feature now ahead of main
-    git('checkout', '-q', 'main')
-    assert is_merged(git, 'feature') is False
+class TestIsMerged:
+    def test_ancestor_of_base(self, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        git('branch', 'feature', 'HEAD')  # points at main → reachable from it
+        assert is_merged(git, 'feature', 'main') is True
+
+    def test_branch_ahead_is_unmerged(self, tmpdir: TempDir) -> None:
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        assert is_merged(Git(repo.path), 'feature', 'main') is False
+
+    def test_regular_merge(self, tmpdir: TempDir) -> None:
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        repo('merge', '-q', '--no-ff', 'feature', '-m', 'merge')
+        assert is_merged(Git(repo.path), 'feature', 'main') is True
+
+    def test_squash_merge_of_several_commits(self, tmpdir: TempDir) -> None:
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')  # one commit carrying the whole branch diff
+        assert is_merged(Git(repo.path), 'feature', 'main') is True
+
+    def test_rebase_merge(self, tmpdir: TempDir) -> None:
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        git = Git(repo.path)
+        git('cherry-pick', *git('rev-list', '--reverse', 'main..feature').split())
+        assert is_merged(git, 'feature', 'main') is True
 
 
 def test_is_dirty(git_repo: Repo) -> None:

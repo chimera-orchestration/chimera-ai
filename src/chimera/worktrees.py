@@ -1,4 +1,5 @@
 from pathlib import Path
+from subprocess import PIPE, run
 
 from giterator import Git, GitError
 
@@ -53,13 +54,34 @@ def registered_worktrees(git: Git) -> set[Path]:
     }
 
 
-def is_merged(git: Git, ref: str) -> bool:
-    """Whether ref is an ancestor of the repo's current HEAD (nothing unmerged)."""
+def _patch_ids(diffs: str) -> set[str]:
+    """The set of patch-ids in a (possibly multi-commit) diff, one per commit it contains."""
+    if not diffs.strip():
+        return set()
+    out = run(('git', 'patch-id', '--stable'), input=diffs, stdout=PIPE, text=True).stdout
+    return {line.split()[0] for line in out.splitlines() if line.strip()}
+
+
+def is_merged(git: Git, ref: str, base: str) -> bool:
+    """Whether ref's work is already contained in base — nothing is lost by deleting it.
+
+    Ancestry alone misses squash- and rebase-merges (the original commits never land on base),
+    so we fall back to patch equivalence: ref is merged when ref is reachable from base (a
+    fast-forward or a real merge commit), or every commit unique to ref has an equivalent patch
+    already on base (rebase-merge, or a single squashed commit), or ref's whole combined diff
+    matches one commit on base (a squash-merge of several commits).
+    """
     try:
-        git('merge-base', '--is-ancestor', ref, 'HEAD')
+        git('merge-base', '--is-ancestor', ref, base)
         return True
     except GitError:
-        return False
+        pass
+    mb = git('merge-base', base, ref).strip()
+    base_ids = _patch_ids(git('log', '-p', '--no-color', f'{mb}..{base}'))
+    ref_ids = _patch_ids(git('log', '-p', '--no-color', f'{mb}..{ref}'))
+    if ref_ids and ref_ids <= base_ids:
+        return True
+    return next(iter(_patch_ids(git('diff', mb, ref))), '') in base_ids
 
 
 def is_dirty(worktree: Path) -> bool:

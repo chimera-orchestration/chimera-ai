@@ -336,10 +336,11 @@ def worktree_rm(
     ctx: typer.Context,
     goal: ExistingGoalArg,
     force: ForceOpt = False,
+    offline: OfflineOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
-    _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force), goal)
+    _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline), goal)
 
 
 @worktree_app.command('ls', cls=LoggingCommand)
@@ -398,10 +399,11 @@ def goal_finish(
     ctx: typer.Context,
     goal: ExistingGoalArg,
     force: ForceOpt = False,
+    offline: OfflineOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
-    _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force), goal)
+    _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline), goal)
 
 
 @goal_app.command('ls', cls=LoggingCommand)

@@ -124,6 +124,46 @@ def test_remove_force_discards_unsaved_work(tmpdir: TempDir, git_repo: Repo) -> 
     compare(Git(git_repo.path).branches(), expected=['main'])
 
 
+def test_remove_allows_a_squash_merged_branch(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('work')  # g/agent ahead of main
+    git = Git(git_repo.path)
+    git('merge', '-q', '--squash', 'g/agent')
+    git('commit', '-qm', 'squash g')  # main now carries g/agent's diff under a new commit
+    remove(git_repo.path, worktrees, 'g')  # recognised as merged → no --force needed
+    tmpdir.compare(path='worktrees', expected=())
+    compare(git.branches(), expected=['main'])
+
+
+def test_remove_recognises_an_upstream_merge_only_after_fetch(tmpdir: TempDir) -> None:
+    origin = Repo.make(tmpdir / 'origin')
+    origin.commit_content('seed', datetime(2020, 1, 1))
+    local = Git.clone(origin.path, tmpdir / 'repo')
+    worktrees = tmpdir / 'worktrees'
+    add(local.path, worktrees, 'g', fetch=False)
+    Repo(worktrees / 'g@agent').commit_content('work', datetime(2022, 1, 1))  # newer than seed
+    # the PR merges on origin: push the work to a side branch, then merge it into origin's main.
+    # local's origin/main tracking ref stays stale until a fetch — pushing to main would update it.
+    local('push', '-q', 'origin', 'g/agent:refs/heads/incoming')
+    origin('merge', '-q', 'incoming')  # origin's main now carries g/agent
+    with ShouldRaise(RuntimeError, match='branch g/agent has unmerged commits'):
+        remove(local.path, worktrees, 'g', fetch=False)  # stale refs don't see the merge
+    remove(local.path, worktrees, 'g')  # fetch refreshes origin/main → merged
+    tmpdir.compare(path='worktrees', expected=())
+    compare(Git(local.path).branches(), expected=['main'])
+
+
+def test_remove_uses_the_repos_default_branch(tmpdir: TempDir) -> None:
+    repo = Repo.make(tmpdir / 'repo')
+    repo.commit_content('seed')
+    repo('branch', '-m', 'main', 'master')  # master-style default
+    worktrees = tmpdir / 'worktrees'
+    add(repo.path, worktrees, 'g')  # branches off master; nothing added → merged
+    remove(repo.path, worktrees, 'g')
+    tmpdir.compare(path='worktrees', expected=())
+    compare(Git(repo.path).branches(), expected=['master'])
+
+
 def test_worktree_rm_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     project = _project(tmpdir, git_repo)
     command.run('worktree', 'add', 'g')
@@ -142,6 +182,17 @@ def test_worktree_rm_cli_reports_nothing_to_remove(
     command.run('worktree', 'rm', 'ghost').check(
         output='Nothing to remove for ghost', logging=[('INFO', 'worktree rm')]
     )
+
+
+def test_goal_finish_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    project = _project(tmpdir, git_repo)
+    command.run('worktree', 'add', 'g')
+    worktree = (project / 'worktrees' / 'g@agent').resolve()
+    command.run('goal', 'finish', 'g', '--offline').check(
+        output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
+    )
+    tmpdir.compare(path='worktrees', expected=())
+    compare(Git(git_repo.path).branches(), expected=['main'])
 
 
 def test_goal_finish_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:

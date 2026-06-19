@@ -13,7 +13,14 @@ from chimera.commands.doctor.core import (
     write_config,
 )
 from chimera.commands.init import TEMPLATE
-from chimera.worktrees import HUMAN, is_dirty, is_merged, registered_worktrees, worktree_path
+from chimera.worktrees import (
+    HUMAN,
+    base_ref,
+    is_dirty,
+    is_merged,
+    registered_worktrees,
+    worktree_path,
+)
 
 
 class WorkspaceConfigCheck:
@@ -123,12 +130,15 @@ class StaleHumanWorktreeCheck:
             git = Git(repo)
             registered = registered_worktrees(git)
             branches = set(git.branches())
+            base = base_ref(git)
             for worktree in sorted(worktrees_dir.glob('*-human')):
                 if not worktree.is_dir() or worktree.resolve() not in registered:
                     continue  # a leftover dir, not a real worktree — orphan check covers it
                 branch = f'{worktree.name.removesuffix("-human")}/human'
                 dirty = is_dirty(worktree)
-                unmerged = branch in branches and not is_merged(git, branch)
+                unmerged = branch in branches and not (
+                    base is not None and is_merged(git, branch, base)
+                )
                 if dirty or unmerged:
                     reason = 'uncommitted changes' if dirty else 'unmerged commits'
                     yield Finding(
