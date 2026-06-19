@@ -29,11 +29,15 @@ A group may accept synonyms for a command (e.g. `goal new` → `goal start`,
 - **only the canonical name is logged** — a synonym must dispatch to the canonical
   command, never run as a command of its own.
 
-`alias_group({...})` (in `__main__.py`) gives both: pass it as the group's `cls=`.
-It resolves the synonym in `get_command`, so the real (canonical) command runs and
-the synonym stays out of the command list. Add one by extending the dict. A synonym
-must not collide with a real command name (a test enforces this; the canonical
-command would win anyway).
+Synonyms *do* tab-complete, though, so a half-typed one (`goal clea<TAB>` →
+`cleanup`) can be finished — completion is the one place they surface.
+
+`alias_group({...})` (in `__main__.py`) gives all three: pass it as the group's `cls=`.
+It resolves the synonym in `get_command` (so the real command runs) and leaves
+`list_commands` canonical (so `--help`/logging never see synonyms), while
+`shell_complete` adds the synonyms back as completion candidates. Add one by
+extending the dict. A synonym must not collide with a real command name (a test
+enforces this; the canonical command would win anyway).
 
 ## Shell completion
 

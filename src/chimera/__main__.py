@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 from typer._click.core import Command, Context
+from typer._click.shell_completion import CompletionItem
 from typer.core import TyperCommand, TyperGroup
 
 from chimera import logging
@@ -113,7 +114,8 @@ def alias_group(aliases: dict[str, str]) -> type[TyperGroup]:
 
     A synonym dispatches to the real command but never shows in --help, and the
     command that runs is always the canonical one — so only the canonical name is
-    logged. Add synonyms by extending the dict: alias_group({'new': 'start'}).
+    logged. It does tab-complete, though, so a typed synonym can be finished.
+    Add synonyms by extending the dict: alias_group({'new': 'start'}).
     See agent-docs/commands.md.
     """
 
@@ -122,6 +124,19 @@ def alias_group(aliases: dict[str, str]) -> type[TyperGroup]:
 
         def get_command(self, ctx: Context, cmd_name: str) -> Command | None:
             return super().get_command(ctx, aliases.get(cmd_name, cmd_name))
+
+        def shell_complete(self, ctx: Context, incomplete: str) -> list[CompletionItem]:
+            # list_commands stays canonical (so --help/logging don't see synonyms);
+            # completion alone offers them, each carrying its target's help.
+            completions = super().shell_complete(ctx, incomplete)
+            completions.extend(
+                CompletionItem(synonym, help=command.get_short_help_str())
+                for synonym, canonical in aliases.items()
+                if synonym.startswith(incomplete)
+                and (command := self.get_command(ctx, canonical)) is not None
+                and not command.hidden
+            )
+            return completions
 
     return AliasGroup
 
