@@ -63,7 +63,11 @@ ActorOpt = Annotated[
 # A positional naming a goal that already exists (finish/rm); new-goal args stay plain.
 ExistingGoalArg = Annotated[str, typer.Argument(autocompletion=complete_goal)]
 FromOpt = Annotated[
-    str | None, typer.Option('--from', help='Start ref (default: newest of main/origin/main)')
+    str | None,
+    typer.Option('--from', help='Start ref (default: newest of <default>/origin/<default>)'),
+]
+OfflineOpt = Annotated[
+    bool, typer.Option('--offline', help="Don't fetch origin first; use the refs already present")
 ]
 PromptArg = Annotated[
     str | None,
@@ -317,11 +321,12 @@ def worktree_add(
         typer.Argument(help='Actors (default: human, agent)', autocompletion=complete_actor),
     ] = None,
     frm: FromOpt = None,
+    offline: OfflineOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
     for created in _worktree_add(
-        p.repo, p.worktrees, goal, tuple(actors) if actors else ACTORS, frm
+        p.repo, p.worktrees, goal, tuple(actors) if actors else ACTORS, frm, fetch=not offline
     ):
         typer.echo(f'Created {created}')
 
@@ -357,11 +362,19 @@ def goal_start(
     goal: Annotated[str, typer.Argument()],
     prompt: PromptArg = None,
     frm: FromOpt = None,
+    offline: OfflineOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
     worktree = _goal_start(
-        p.repo, p.worktrees, goal, session_name(p.name, goal, AGENT), prompt, frm, _passthrough(ctx)
+        p.repo,
+        p.worktrees,
+        goal,
+        session_name(p.name, goal, AGENT),
+        prompt,
+        frm,
+        _passthrough(ctx),
+        fetch=not offline,
     )
     typer.echo(f'Started {goal} in {worktree}')
 

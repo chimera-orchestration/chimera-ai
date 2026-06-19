@@ -83,6 +83,23 @@ def test_goal_start_cli_with_prompt(
     compare(calls, expected=[(expected, 'project@feature-x@agent', 'go build it', [])])
 
 
+def test_goal_start_cli_offline(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    _project(tmpdir, git_repo)
+    calls: list[object] = []
+    replace.in_module(
+        agent,
+        lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
+        module=goal_start,
+    )
+    expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
+    command.run('goal', 'start', 'feature-x', '--offline').check(
+        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+    )
+    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [])])
+
+
 def test_goal_start_cli_passes_extra_flags_through(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
 ) -> None:

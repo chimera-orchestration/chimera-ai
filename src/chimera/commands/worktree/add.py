@@ -2,7 +2,7 @@ from pathlib import Path
 
 from giterator import Git, GitError
 
-from chimera.worktrees import ACTORS, HUMAN, branch, worktree_path
+from chimera.worktrees import ACTORS, HUMAN, base_ref, branch, fetch_origin, worktree_path
 
 
 def add(
@@ -11,6 +11,7 @@ def add(
     goal: str,
     actors: tuple[str, ...] = ACTORS,
     frm: str | None = None,
+    fetch: bool = True,
 ) -> list[Path]:
     """Create branch ``<goal>/<actor>`` per actor and a worktree for each non-human actor.
 
@@ -18,13 +19,16 @@ def add(
     gets a worktree at ``<goal>@<actor>`` on its branch. Branches and worktrees are
     created with no upstream tracking. Returns the created worktree paths.
 
-    ``frm`` is the start point for the new branches. When omitted, it defaults to
-    the most recently committed of local ``main`` and ``origin/main`` (not whatever
-    the repo currently has checked out), falling back to ``HEAD`` if neither exists.
+    ``frm`` is the start point for the new branches. When omitted, it defaults to the
+    most recently committed of the repo's default branch and its ``origin/`` tracking ref
+    (not whatever the repo currently has checked out), falling back to ``HEAD`` if neither
+    exists. ``fetch`` (the default) refreshes ``origin`` first so that base is current.
     """
     git = Git(repo)
     _require_commit(git, repo)
-    base = frm or _base_ref(git) or 'HEAD'
+    if fetch:
+        fetch_origin(git)
+    base = frm or base_ref(git) or 'HEAD'
     worktrees_root.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
     for actor in actors:
@@ -35,24 +39,6 @@ def add(
             git('worktree', 'add', '--no-track', '-b', branch(goal, actor), str(worktree), base)
             created.append(worktree)
     return created
-
-
-def _base_ref(git: Git) -> str | None:
-    """Return the most recently committed of local ``main`` and ``origin/main``.
-
-    Ties (e.g. both pointing at the same commit) favour local ``main``.
-    Returns ``None`` if neither ref exists.
-    """
-    newest: str | None = None
-    newest_committed = -1
-    for ref in ('main', 'origin/main'):
-        try:
-            committed = int(git('log', '-1', '--format=%ct', ref).strip())
-        except GitError:
-            continue
-        if committed > newest_committed:
-            newest, newest_committed = ref, committed
-    return newest
 
 
 def _require_commit(git: Git, repo: Path) -> None:

@@ -65,3 +65,56 @@ def is_merged(git: Git, ref: str) -> bool:
 def is_dirty(worktree: Path) -> bool:
     """Whether the worktree has uncommitted or untracked changes."""
     return bool(Git(worktree)('status', '--porcelain').strip())
+
+
+def _ref_exists(git: Git, ref: str) -> bool:
+    try:
+        git('rev-parse', '--verify', '--quiet', ref)
+        return True
+    except GitError:
+        return False
+
+
+def default_branch(git: Git) -> str:
+    """The repo's default branch name (e.g. ``main`` or ``master``).
+
+    Prefers the remote's published default (``origin/HEAD``, set by clone); else the first of
+    ``main``/``master`` existing as a local or remote-tracking ref; else falls back to ``main``.
+    """
+    try:
+        return (
+            git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD')
+            .strip()
+            .removeprefix('origin/')
+        )
+    except GitError:
+        pass
+    for name in ('main', 'master'):
+        if _ref_exists(git, name) or _ref_exists(git, f'origin/{name}'):
+            return name
+    return 'main'
+
+
+def base_ref(git: Git) -> str | None:
+    """Start point for new branches: newest-committed of local ``<default>`` and ``origin/<default>``.
+
+    ``<default>`` is the repo's :func:`default_branch`. Ties (e.g. both at the same commit)
+    favour local. Returns ``None`` if neither ref exists.
+    """
+    default = default_branch(git)
+    newest: str | None = None
+    newest_committed = -1
+    for ref in (default, f'origin/{default}'):
+        try:
+            committed = int(git('log', '-1', '--format=%ct', ref).strip())
+        except GitError:
+            continue
+        if committed > newest_committed:
+            newest, newest_committed = ref, committed
+    return newest
+
+
+def fetch_origin(git: Git) -> None:
+    """Fetch ``origin`` with prune so remote-tracking refs are current. No-op without an origin."""
+    if 'origin' in git('remote').split():
+        git('fetch', '--prune', 'origin')

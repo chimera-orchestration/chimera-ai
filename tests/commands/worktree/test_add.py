@@ -103,6 +103,34 @@ def test_add_uses_explicit_from_start_point(tmpdir: TempDir, git_repo: Repo) -> 
     compare(_branch(git_repo.path, 'g/human'), expected=release)
 
 
+def test_add_branches_from_a_master_style_default(tmpdir: TempDir, git_repo: Repo) -> None:
+    git_repo('branch', '-m', 'main', 'master')  # master-style default branch
+    master = _head(git_repo.path)
+    git_repo('checkout', '-b', 'feature')
+    git_repo.commit_content('feature-work')  # park the repo elsewhere
+    [created] = add(git_repo.path, tmpdir / 'worktrees', 'g')
+    compare(_head(created), expected=master)  # the default branch, not the checked-out feature
+    compare(_branch(git_repo.path, 'g/human'), expected=master)
+
+
+def test_add_offline_uses_already_present_refs(tmpdir: TempDir) -> None:
+    origin = Repo.make(tmpdir / 'origin')
+    origin.commit_content('seed', datetime(2020, 1, 1))
+    local = Git.clone(origin.path, tmpdir / 'repo')
+    origin.commit_content('remote-ahead', datetime(2022, 1, 1))  # never fetched into local
+    [created] = add(local.path, tmpdir / 'worktrees', 'g', fetch=False)
+    compare(_head(created), expected=local.rev_parse('main', short=False))  # stale local main
+
+
+def test_add_fetches_origin_by_default(tmpdir: TempDir) -> None:
+    origin = Repo.make(tmpdir / 'origin')
+    origin.commit_content('seed', datetime(2020, 1, 1))
+    local = Git.clone(origin.path, tmpdir / 'repo')
+    origin.commit_content('remote-ahead', datetime(2022, 1, 1))  # not yet in local
+    [created] = add(local.path, tmpdir / 'worktrees', 'g')  # fetch=True picks it up
+    compare(_head(created), expected=_head(origin.path))
+
+
 def test_add_falls_back_to_head_without_a_main_branch(tmpdir: TempDir, git_repo: Repo) -> None:
     git_repo('branch', '-m', 'main', 'trunk')  # no main, no origin/main
     head = _head(git_repo.path)
@@ -150,6 +178,16 @@ def test_worktree_add_cli_from_option(tmpdir: TempDir, git_repo: Repo, command: 
         output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
     )
     compare(_head(project / 'worktrees' / 'feature-x@agent'), expected=release)
+
+
+def test_worktree_add_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    project = tmpdir.path
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
+    command.run('worktree', 'add', 'feature-x', '--offline').check(
+        output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
+    )
+    compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
 
 
 def test_worktree_ls_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:

@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 from giterator import Git
@@ -5,7 +6,10 @@ from giterator.testing import Repo
 from testfixtures import TempDir, compare
 
 from chimera.worktrees import (
+    base_ref,
     branch,
+    default_branch,
+    fetch_origin,
     goals,
     is_dirty,
     is_merged,
@@ -14,6 +18,12 @@ from chimera.worktrees import (
     worktree_dirs,
     worktree_path,
 )
+
+
+def _renamed(repo: Repo, to: str) -> Repo:
+    repo.commit_content('seed')
+    repo('branch', '-m', 'main', to)
+    return repo
 
 
 def test_branch_names_the_actor_under_the_goal() -> None:
@@ -70,3 +80,57 @@ def test_is_dirty(git_repo: Repo) -> None:
     assert is_dirty(git_repo.path) is False
     (git_repo.path / 'scratch.txt').write_text('wip')
     assert is_dirty(git_repo.path) is True
+
+
+class TestDefaultBranch:
+    def test_main(self, git_repo: Repo) -> None:
+        compare(default_branch(Git(git_repo.path)), expected='main')
+
+    def test_master_style(self, tmpdir: TempDir) -> None:
+        repo = _renamed(Repo.make(tmpdir / 'm'), 'master')
+        compare(default_branch(Git(repo.path)), expected='master')
+
+    def test_resolves_via_origin_head(self, tmpdir: TempDir) -> None:
+        source = _renamed(Repo.make(tmpdir / 'src'), 'trunk')  # neither main nor master
+        compare(default_branch(Git.clone(source.path, tmpdir / 'clone')), expected='trunk')
+
+    def test_falls_back_to_main(self, tmpdir: TempDir) -> None:
+        repo = _renamed(Repo.make(tmpdir / 'x'), 'trunk')  # no main/master, no origin
+        compare(default_branch(Git(repo.path)), expected='main')
+
+
+class TestBaseRef:
+    def test_ties_favour_local(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        compare(base_ref(Git.clone(git_repo.path, tmpdir / 'clone')), expected='main')
+
+    def test_prefers_origin_when_newer(self, tmpdir: TempDir) -> None:
+        origin = Repo.make(tmpdir / 'origin')
+        origin.commit_content('seed', datetime(2020, 1, 1))
+        clone = Git.clone(origin.path, tmpdir / 'clone')
+        origin.commit_content('remote-ahead', datetime(2022, 1, 1))
+        clone('fetch', 'origin')
+        compare(base_ref(clone), expected='origin/main')
+
+    def test_uses_the_default_branch(self, tmpdir: TempDir) -> None:
+        repo = _renamed(Repo.make(tmpdir / 'm'), 'master')
+        compare(base_ref(Git(repo.path)), expected='master')
+
+    def test_none_when_neither_ref_exists(self, tmpdir: TempDir) -> None:
+        repo = _renamed(Repo.make(tmpdir / 'x'), 'trunk')  # default resolves to main, but absent
+        compare(base_ref(Git(repo.path)), expected=None)
+
+
+class TestFetchOrigin:
+    def test_no_op_without_an_origin(self, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        fetch_origin(git)  # must not raise when there is no origin remote
+        compare(git('remote').split(), expected=[])
+
+    def test_updates_remote_tracking_refs(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        clone = Git.clone(git_repo.path, tmpdir / 'clone')
+        git_repo.commit_content('remote-ahead')
+        fetch_origin(clone)
+        compare(
+            clone.rev_parse('origin/main', short=False),
+            expected=Git(git_repo.path).rev_parse('main', short=False),
+        )
