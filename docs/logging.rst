@@ -11,15 +11,16 @@ Ref safety
 ----------
 
 Creating, repointing, or deleting a git ref (a branch, a tag, any named ref) is
-destructive: the old value is gone the moment the ref moves. So before any such
-change, ``ch`` records the affected refs and the full commit sha each points at,
-then records them again afterwards. The pair is enough to undo the change by
+destructive: the old value is gone the moment the ref moves. So ``ch`` records
+the affected refs and the full commit sha each points at, both before and after
+the change, on a single log line. The pair is enough to undo the change by
 hand — for example ``git branch <name> <sha>`` to resurrect a deleted branch.
 
-The record is a single ``git`` field on the action's log line, holding a
-``before`` and an ``after`` map of ``{ref: full-sha}``. Only refs that exist at
-that moment appear; a ref missing from a map did not exist then. That makes the
-operation legible from the pair alone:
+The record is a single ``git`` field on a log line (its message is the command
+path suffixed ``: refs``), holding a ``before`` and an ``after`` map of
+``{ref: full-sha}``. Only refs that exist at that moment appear; a ref missing
+from a map did not exist then. That makes the operation legible from the pair
+alone:
 
 ============  ====================  ====================
 Operation     ``before``            ``after``

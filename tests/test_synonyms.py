@@ -34,7 +34,8 @@ def test_cleanup_dispatches_to_finish(
     command.run('goal', 'start', 'feature-x')
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
     command.run('goal', 'cleanup', 'feature-x').check(
-        output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
+        output=f'Removed {worktree}',
+        logging=[('INFO', 'goal finish'), ('INFO', 'worktree rm: refs')],
     )
     tmpdir.compare(path='worktrees', expected=())
 

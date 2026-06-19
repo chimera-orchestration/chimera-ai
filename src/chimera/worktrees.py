@@ -97,6 +97,15 @@ def _ref_exists(git: Git, ref: str) -> bool:
         return False
 
 
+def ref_shas(git: Git, *refs: str) -> dict[str, str]:
+    """Each of ``refs`` that currently exists, mapped to the full sha it points at.
+
+    The before/after snapshot for logging a ref mutation (see ``agent-docs/logging.md``):
+    capture it either side of the change so the log alone can restore a ref.
+    """
+    return {ref: git.rev_parse(ref, short=False) for ref in refs if _ref_exists(git, ref)}
+
+
 def default_branch(git: Git) -> str:
     """The repo's default branch name (e.g. ``main`` or ``master``).
 

@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 from giterator import Git
+from loguru import logger
 
 from chimera.commands.agent import live_sessions
 from chimera.worktrees import (
@@ -12,6 +13,7 @@ from chimera.worktrees import (
     fetch_origin,
     is_dirty,
     is_merged,
+    ref_shas,
     registered_worktrees,
     worktree_path,
 )
@@ -25,8 +27,9 @@ def remove(
     Only touches worktrees/branches that actually exist, so re-running — or removing
     a goal that was never fully created — is a safe no-op. Refuses if a claude agent
     is live in the agent worktree, unless force. ``fetch`` (the default) refreshes
-    ``origin`` first so a branch merged upstream is recognised as merged. Returns
-    removed worktrees.
+    ``origin`` first so a branch merged upstream is recognised as merged. The deleted
+    branches and the commits they pointed at are logged first (see ``agent-docs/logging.md``),
+    so a force-discarded branch can still be recovered from the log. Returns removed worktrees.
     """
     git = Git(repo)
     if not force:
@@ -38,6 +41,8 @@ def remove(
         if fetch:
             fetch_origin(git)
         _refuse_if_unsafe(git, goal, worktrees, registered, branches)
+    refs = tuple(branch(goal, actor) for actor in ACTORS)
+    before = ref_shas(git, *refs)
     removed: list[Path] = []
     for actor, worktree in worktrees.items():
         if worktree.resolve() in registered:
@@ -47,6 +52,10 @@ def remove(
             # -D not -d: _refuse_if_unsafe is the authority on what's safe to drop (it sees
             # squash/rebase merges that git's ancestry-only -d would wrongly call unmerged).
             git('branch', '-D', ref)
+    if (after := ref_shas(git, *refs)) != before:
+        logger.bind(goal=goal, git={'before': before, 'after': after}, force=force).info(
+            'worktree rm: refs'
+        )
     return removed
 
 

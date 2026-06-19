@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
+from testfixtures import Command, LogCapture, Replacer, ShouldRaise, TempDir, compare
+from testfixtures.loguru import LoguruSource
 
 from chimera.commands.agent import live_sessions
 from chimera.commands.worktree import rm as worktree_rm
@@ -153,6 +154,50 @@ def test_remove_recognises_an_upstream_merge_only_after_fetch(tmpdir: TempDir) -
     compare(Git(local.path).branches(), expected=['main'])
 
 
+def test_remove_logs_the_refs_it_deletes(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    tip = git.rev_parse('main', short=False)  # both actor branches start at main
+    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        remove(git_repo.path, worktrees, 'g')
+    log.check(
+        (
+            'worktree rm: refs',
+            {
+                'goal': 'g',
+                'git': {'before': {'g/human': tip, 'g/agent': tip}, 'after': {}},
+                'force': False,
+            },
+        ),
+    )
+
+
+def test_remove_force_logs_the_discarded_refs(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    agent_tip = Repo(worktrees / 'g@agent').commit_content('work', short=False)  # unmerged
+    git = Git(git_repo.path)
+    human_tip = git.rev_parse('g/human', short=False)
+    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        remove(git_repo.path, worktrees, 'g', force=True)
+    log.check(
+        (
+            'worktree rm: refs',
+            {
+                'goal': 'g',
+                # the unmerged agent commit is recorded by sha before being discarded
+                'git': {'before': {'g/human': human_tip, 'g/agent': agent_tip}, 'after': {}},
+                'force': True,
+            },
+        ),
+    )
+
+
+def test_remove_a_ghost_goal_logs_nothing(tmpdir: TempDir, git_repo: Repo) -> None:
+    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        remove(git_repo.path, tmpdir / 'worktrees', 'ghost')
+    log.check()  # no refs changed → no ref record
+
+
 def test_remove_uses_the_repos_default_branch(tmpdir: TempDir) -> None:
     repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
@@ -169,7 +214,8 @@ def test_worktree_rm_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> N
     command.run('worktree', 'add', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('worktree', 'rm', 'g').check(
-        output=f'Removed {worktree}', logging=[('INFO', 'worktree rm')]
+        output=f'Removed {worktree}',
+        logging=[('INFO', 'worktree rm'), ('INFO', 'worktree rm: refs')],
     )
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])
@@ -189,7 +235,8 @@ def test_goal_finish_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Comma
     command.run('worktree', 'add', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('goal', 'finish', 'g', '--offline').check(
-        output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
+        output=f'Removed {worktree}',
+        logging=[('INFO', 'goal finish'), ('INFO', 'worktree rm: refs')],
     )
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])
@@ -201,7 +248,8 @@ def test_goal_finish_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> N
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     # finish is the lifecycle name for rm
     command.run('goal', 'finish', 'g').check(
-        output=f'Removed {worktree}', logging=[('INFO', 'goal finish')]
+        output=f'Removed {worktree}',
+        logging=[('INFO', 'goal finish'), ('INFO', 'worktree rm: refs')],
     )
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])
