@@ -27,6 +27,7 @@ from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
+from chimera.config import UserError
 from chimera.completions import complete_actor, complete_goal, complete_project
 from chimera.help import command_index, render_json, render_text
 from chimera.context import (
@@ -154,7 +155,13 @@ class LoggingCommand(TyperCommand):
     def invoke(self, ctx: Context) -> object:
         logging.configure()
         logging.log_action(_action(ctx), dict(ctx.params))
-        return super().invoke(ctx)
+        try:
+            return super().invoke(ctx)
+        except UserError as error:
+            # Expected faults (a bad name, the wrong directory) get a one-line message,
+            # not the rich traceback typer's excepthook renders for an escaping exception.
+            typer.echo(f'Error: {error}', err=True)
+            raise typer.Exit(1) from error
 
 
 def _action(ctx: Context) -> str:

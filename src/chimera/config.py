@@ -19,12 +19,22 @@ AnyConfig = Annotated[WorkspaceConfig | ProjectConfig, Field(discriminator='kind
 _ADAPTER: TypeAdapter[AnyConfig] = TypeAdapter(AnyConfig)
 
 
-class NotInWorkspaceError(Exception):
+class UserError(Exception):
+    """An error meant for the user: shown as a one-line message, never a traceback.
+
+    Raised when the fault is in what was asked for (a bad name, the wrong directory),
+    not a bug. The CLI chokepoint (``LoggingCommand``) catches the whole family and
+    prints ``str(error)`` to stderr with a non-zero exit, so no two error sites have to
+    agree on how to present themselves.
+    """
+
+
+class NotInWorkspaceError(UserError):
     def __init__(self, start: Path) -> None:
         super().__init__(f'{start} is not inside a Chimera workspace')
 
 
-class NotInProjectError(Exception):
+class NotInProjectError(UserError):
     def __init__(self, start: Path) -> None:
         super().__init__(f'{start} is not inside a Chimera project')
 

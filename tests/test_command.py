@@ -39,3 +39,17 @@ def test_logs_fixture_captures_loguru(logs: LogCapture) -> None:
 def test_command_logs_the_action(command: Command, tmpdir: TempDir, replace: Replacer) -> None:
     replace.in_environ('CHIMERA_WORKSPACE', str(init(tmpdir / 'ws')))
     command.run('project', 'ls').check(logging=[('INFO', 'project ls')])
+
+
+def test_unknown_project_is_a_clean_error(
+    command: Command, tmpdir: TempDir, replace: Replacer
+) -> None:
+    workspace = init(tmpdir / 'ws')
+    tmpdir.dump('ws/chimera/config.yaml', {'kind': 'project', 'repo': '/r'})
+    replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
+    # a typo'd -p gets a one-line message with a suggestion, not a rich traceback
+    command.run('-p', 'chimerma', 'ls').check(
+        output="Error: no project 'chimerma', did you mean 'chimera'? (available: chimera)",
+        return_code=1,
+        logging=[('INFO', 'ls')],
+    )

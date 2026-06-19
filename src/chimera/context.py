@@ -1,13 +1,14 @@
 import os
 from dataclasses import dataclass
+from difflib import get_close_matches
 from pathlib import Path
 
 from giterator import Git, GitError
 
 from chimera.config import (
-    NotInProjectError,
     NotInWorkspaceError,
     ProjectConfig,
+    UserError,
     WorkspaceConfig,
     find_workspace,
     load_config,
@@ -15,12 +16,23 @@ from chimera.config import (
 from chimera.worktrees import goals
 
 
-class CannotIdentifyProjectError(Exception):
+class CannotIdentifyProjectError(UserError):
     def __init__(self, cwd: Path) -> None:
         super().__init__(f'cannot identify a project from {cwd}; pass --project')
 
 
-class GoalRequiredError(Exception):
+class UnknownProjectError(UserError):
+    """A ``--project`` name that doesn't match any tracked project — with a typo hint."""
+
+    def __init__(self, name: str, workspace: Path) -> None:
+        available = [project.name for project in iter_projects(workspace)]
+        hint = (
+            f", did you mean '{match[0]}'?" if (match := get_close_matches(name, available)) else ''
+        )
+        super().__init__(f"no project '{name}'{hint} (available: {', '.join(available) or 'none'})")
+
+
+class GoalRequiredError(UserError):
     def __init__(self, cwd: Path) -> None:
         super().__init__(f'cannot infer a goal from {cwd}; pass --goal')
 
@@ -85,7 +97,10 @@ def resolve_project(cwd: Path, explicit: str | None = None) -> Project:
     workspace — identify it by matching the git repo against each project's ``repo``.
     """
     if explicit is not None:
-        return _project_at(resolve_workspace(cwd) / explicit)
+        workspace = resolve_workspace(cwd)
+        if isinstance(config := load_config(workspace / explicit), ProjectConfig):
+            return Project(workspace / explicit, config)
+        raise UnknownProjectError(explicit, workspace)
     for directory in (cwd, *cwd.parents):
         config = load_config(directory)
         if isinstance(config, ProjectConfig):
@@ -120,7 +135,7 @@ def resolve_scope(
     Without it (the ``ch ls`` dashboard) only an explicit ``--project``/``--goal`` narrows;
     cwd is never read, so the view stays workspace-wide wherever you stand.
 
-    A bad explicit ``--project`` always raises ``NotInProjectError`` (naming a ghost is an
+    A bad explicit ``--project`` always raises ``UnknownProjectError`` (naming a ghost is an
     error, not a reason to widen), as does genuinely not being in a workspace.
     """
     workspace = resolve_workspace(cwd)
@@ -138,13 +153,6 @@ def resolve_scope(
         except GoalRequiredError:
             pinned_goal = None
     return Scope(workspace, resolved, pinned_goal)
-
-
-def _project_at(directory: Path) -> Project:
-    config = load_config(directory)
-    if not isinstance(config, ProjectConfig):
-        raise NotInProjectError(directory)
-    return Project(directory, config)
 
 
 def _match_repo(cwd: Path, workspace: Path) -> Project:

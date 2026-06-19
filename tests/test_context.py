@@ -4,12 +4,13 @@ from giterator import Git
 from giterator.testing import Repo
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
-from chimera.config import NotInProjectError, NotInWorkspaceError, ProjectConfig
+from chimera.config import NotInWorkspaceError, ProjectConfig
 from chimera.context import (
     CannotIdentifyProjectError,
     GoalRequiredError,
     Project,
     Scope,
+    UnknownProjectError,
     iter_projects,
     resolve_goal,
     resolve_project,
@@ -65,8 +66,9 @@ class TestResolveProject:
         bar = _project(tmpdir, workspace, 'bar')
         compare(resolve_project(bar, 'foo'), expected=_resolved(foo))  # in bar, asked for foo
 
-    def test_by_name_raises_when_absent(self, workspace: Path) -> None:
-        with ShouldRaise(NotInProjectError(workspace / 'ghost')):
+    def test_by_name_raises_when_absent(self, tmpdir: TempDir, workspace: Path) -> None:
+        _project(tmpdir, workspace, 'ghoul')
+        with ShouldRaise(UnknownProjectError('ghost', workspace)):  # suggests 'ghoul'
             resolve_project(workspace, 'ghost')
 
     def test_matches_repo_from_external_checkout(
@@ -178,7 +180,7 @@ class TestResolveScope:
         compare(resolve_scope(git_repo.path), expected=Scope(workspace_with_env, project, None))
 
     def test_bad_explicit_project_still_raises(self, workspace_with_env: Path) -> None:
-        with ShouldRaise(NotInProjectError(workspace_with_env / 'ghost')):
+        with ShouldRaise(UnknownProjectError('ghost', workspace_with_env)):
             resolve_scope(workspace_with_env, project='ghost')
 
     def test_without_infer_ignores_cwd(
@@ -200,5 +202,5 @@ class TestResolveScope:
             resolve_scope(tmpdir.path, project=project.name, goal='g', infer=False),
             expected=Scope(workspace_with_env, _resolved(project), 'g'),
         )
-        with ShouldRaise(NotInProjectError(workspace_with_env / 'ghost')):
+        with ShouldRaise(UnknownProjectError('ghost', workspace_with_env)):
             resolve_scope(workspace_with_env, project='ghost', infer=False)

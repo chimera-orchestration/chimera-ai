@@ -1,7 +1,8 @@
+from pathlib import Path
+
 from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
 
 from chimera.commands.project.track import track
-from chimera.config import NotInWorkspaceError
 
 
 def test_track_creates_project_layout(tmpdir: TempDir) -> None:
@@ -54,7 +55,10 @@ def test_track_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None
 
 def test_track_cli_outside_a_workspace(tmpdir: TempDir, command: Command) -> None:
     repo = tmpdir.makedir('myrepo')
-    # raised through typer, which annotates the instance — match the message instead
-    with ShouldRaise(NotInWorkspaceError, match='is not inside a Chimera workspace'):
-        command.run('project', 'add', str(repo))
+    # a UserError is caught at the chokepoint: one clean line, exit 1, no traceback
+    command.run('project', 'add', str(repo)).check(
+        output=f'Error: {Path.cwd()} is not inside a Chimera workspace',
+        return_code=1,
+        logging=[('INFO', 'project add')],
+    )
     tmpdir.compare(path='myrepo', expected=())  # nothing written into the repo dir
