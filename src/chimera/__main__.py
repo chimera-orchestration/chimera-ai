@@ -211,7 +211,11 @@ def _scope(
     )
 
 
-app = typer.Typer(callback=_context, help='Chimera — AI agent orchestration.')
+app = typer.Typer(
+    callback=_context,
+    cls=alias_group({'list': 'ls'}),
+    help='Chimera — AI agent orchestration.',
+)
 
 
 @app.command(cls=LoggingCommand, help='Create a Chimera workspace at PATH.')
@@ -315,7 +319,7 @@ def _render_board(b: Board) -> None:
         typer.echo(f'  · {_summary(a)}')
 
 
-project_app = typer.Typer(help='Manage projects.')
+project_app = typer.Typer(cls=alias_group({'list': 'ls'}), help='Manage projects.')
 app.add_typer(project_app, name='project')
 
 
@@ -344,7 +348,11 @@ def project_ls() -> None:
         typer.echo(name)
 
 
-worktree_app = typer.Typer(callback=_context, help="Manage a goal's worktrees and branches.")
+worktree_app = typer.Typer(
+    callback=_context,
+    cls=alias_group({'list': 'ls'}),
+    help="Manage a goal's worktrees and branches.",
+)
 app.add_typer(worktree_app, name='worktree')
 
 
@@ -389,7 +397,7 @@ def worktree_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
 
 goal_app = typer.Typer(
     callback=_context,
-    cls=alias_group({'new': 'start', 'cleanup': 'finish'}),
+    cls=alias_group({'new': 'start', 'cleanup': 'finish', 'list': 'ls'}),
     help='Work on goals.',
 )
 app.add_typer(goal_app, name='goal')
@@ -459,7 +467,9 @@ def goal_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
         typer.echo(goal if scope.project is not None else f'{proj}  {goal}')
 
 
-agent_app = typer.Typer(callback=_context, help='Launch and list agents.')
+agent_app = typer.Typer(
+    callback=_context, cls=alias_group({'list': 'ls'}), help='Launch and list agents.'
+)
 app.add_typer(agent_app, name='agent')
 
 

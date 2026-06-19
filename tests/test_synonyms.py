@@ -1,11 +1,21 @@
+from collections.abc import Iterator
 from pathlib import Path
 
 from giterator.testing import Repo
 from testfixtures import Command, Replacer, TempDir, compare
+from typer import Typer
 
+from chimera import __main__ as chimera_main
 from chimera.__main__ import app
-from chimera.commands.agent import agent
+from chimera.commands.agent import agent, agents
 from chimera.commands.goal import start as goal_start
+
+
+def _groups() -> Iterator[Typer]:
+    yield app  # the root app carries synonyms too, but isn't in registered_groups
+    for registered in app.registered_groups:
+        assert registered.typer_instance is not None
+        yield registered.typer_instance
 
 
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
@@ -46,12 +56,29 @@ def test_synonyms_are_hidden_from_help(command: Command) -> None:
     assert ('cleanup' in output) is False
 
 
+def _synonyms(group: Typer) -> dict[str, str]:
+    return getattr(group.info.cls, 'synonyms', None) or {}
+
+
 def test_no_synonym_shadows_a_real_command() -> None:
-    for registered in app.registered_groups:
-        instance = registered.typer_instance
-        assert instance is not None
-        synonyms = getattr(instance.info.cls, 'synonyms', None)
-        if not synonyms:
-            continue
-        names = {cmd.name for cmd in instance.registered_commands}
-        compare(synonyms.keys() & names, expected=set())  # no synonym shadows a real command
+    for group in _groups():
+        names = {cmd.name for cmd in group.registered_commands}
+        compare(_synonyms(group).keys() & names, expected=set())  # no synonym shadows a command
+
+
+def test_list_is_a_synonym_for_every_ls() -> None:
+    # every group offering `ls` maps `list` onto it, so `list` works wherever `ls` does
+    mapped = {
+        _synonyms(group).get('list')
+        for group in _groups()
+        if 'ls' in {cmd.name for cmd in group.registered_commands}
+    }
+    compare(mapped, expected={'ls'})
+
+
+def test_list_dispatches_to_ls(
+    workspace_with_env: Path, replace: Replacer, command: Command
+) -> None:
+    replace.in_module(agents, list, module=chimera_main)
+    # the synonym runs the canonical `ls`, which is what gets logged
+    command.run('list').check(output='lycia', logging=[('INFO', 'ls')])

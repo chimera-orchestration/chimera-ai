@@ -24,7 +24,8 @@ the function callable from Python:
 ## Synonyms
 
 A group may accept synonyms for a command (e.g. `goal new` → `goal start`,
-`goal cleanup` → `goal finish`). Two rules, no exceptions:
+`goal cleanup` → `goal finish`, and `list` → `ls` on every group that has an `ls`).
+Two rules, no exceptions:
 - **`--help` shows only the canonical name** — synonyms never appear.
 - **only the canonical name is logged** — a synonym must dispatch to the canonical
   command, never run as a command of its own.
