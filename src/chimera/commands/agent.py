@@ -163,12 +163,27 @@ def resume(
     return _launch(worktree, _session_args(['--resume', name], prompt, extra))
 
 
+# claude only makes bypass-permissions mode reachable via shift-tab when launched with this;
+# availability is fixed at launch, so it must ride on the very command that starts the session.
+ALLOW_BYPASS = '--allow-dangerously-skip-permissions'
+
+# the forms that already arrange for bypass mode — don't double up if the caller passed one
+_BYPASS_FLAGS = frozenset({ALLOW_BYPASS, '--dangerously-skip-permissions'})
+
+
 def _session_args(lead: list[str], prompt: str | None, extra: Sequence[str]) -> list[str]:
-    """The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, then prompt."""
-    args = (['--bg'] if prompt is not None else []) + [*lead, *extra]
+    """The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, then prompt.
+
+    Every session also gets ``--allow-dangerously-skip-permissions`` (unless ``extra`` already
+    asks for bypass) so bypass-permissions mode stays reachable with shift-tab even when auto
+    mode is unavailable. A ``--bg`` session is an attachable fork, not headless — you cycle
+    after attaching — and the mode's availability is decided at *its* launch, so the flag has
+    to be here too. It only enables the mode; the autonomous run keeps its resolved mode.
+    """
+    allow = () if _BYPASS_FLAGS.intersection(extra) else (ALLOW_BYPASS,)
     if prompt is not None:
-        args.append(prompt)
-    return args
+        return ['--bg', *lead, *extra, *allow, prompt]
+    return [*lead, *extra, *allow]
 
 
 def _launch(worktree: Path, args: Sequence[str]) -> subprocess.CompletedProcess[bytes]:

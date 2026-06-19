@@ -51,4 +51,10 @@ def test_goal_and_actor_before_the_command(
     command.run('agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start').check(
         output=f'Launched agent in {worktree}', logging=[('INFO', 'agent start')]
     )
-    compare(calls, expected=[(['claude', '--name', 'myproject@g@reviewer'], worktree)])
+    claude_cmd = [
+        'claude',
+        '--name',
+        'myproject@g@reviewer',
+        '--allow-dangerously-skip-permissions',
+    ]
+    compare(calls, expected=[(claude_cmd, worktree)])

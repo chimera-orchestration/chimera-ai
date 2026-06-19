@@ -148,6 +148,8 @@ Naming pattern (see core concepts): each actor gets branch `{goal}/{actor}`; age
 
 Everything after a `--` on `ch agent start`, `ch agent resume`, `ch goal start` or `ch goal adopt` is forwarded verbatim to `claude` (e.g. `ch agent resume -- --dangerously-skip-permissions`, `ch goal start x -- --model opus`). The split is done before arg parsing (like git/cargo), so a flag is never mistaken for the `[prompt]` positional even when no prompt is given. Forgetting the `--` makes `claude`'s flags unknown options and errors, rather than silently misparsing.
 
+Every launch adds `--allow-dangerously-skip-permissions` automatically so bypass-permissions mode stays reachable with shift-tab even when auto mode is unavailable — it only *enables* the mode, never activates it (the autonomous run keeps its resolved mode). A `--bg` session is an attachable fork, not headless, and the mode's availability is fixed at *its* launch, so the flag rides on background launches too — you cycle after attaching (`claude agents attach` / `ch agent resume`). Not duplicated when a `--dangerously-skip-permissions`/`--allow-dangerously-skip-permissions` is already passed after `--`. Note: claude rejects a `--bg` launch carrying any dangerous-skip flag unless the bypass disclaimer has been accepted (`skipDangerousModePermissionPrompt` in claude settings, or accepting it once interactively).
+
 Refuses if the repo has no commits (nothing to branch from) — including bare repos.
 
 ## What the workspace's git tracks vs ignores
