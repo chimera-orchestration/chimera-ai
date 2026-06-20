@@ -3,7 +3,8 @@ import shutil
 import yaml
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir, compare, not_there
+from testfixtures import LogCapture, Replacer, TempDir, compare, not_there
+from testfixtures.loguru import LoguruSource
 
 from chimera.commands.doctor.checks import (
     GitignoreCheck,
@@ -14,6 +15,7 @@ from chimera.commands.doctor.checks import (
     StaleHumanWorktreeCheck,
     WorkspaceConfigCheck,
     WorkspaceEnvCheck,
+    WorktreeBranchCheck,
 )
 from chimera.commands.doctor.core import Check, Finding
 from chimera.commands.init import TEMPLATE
@@ -448,6 +450,140 @@ class TestLegacyWorktreeSeparator:
         worktree = _legacy_worktree(git_repo, project, 'g')
         shutil.rmtree(worktree)  # registered but the dir is gone — can't read its branch
         compare(_run(LegacyWorktreeSeparatorCheck(), ws), expected=[])
+
+
+def _agent_worktree(repo, project, goal, actor='agent'):
+    worktree = project / 'worktrees' / f'{goal}@{actor}'
+    Git(repo.path)('worktree', 'add', '-b', f'{goal}/{actor}', str(worktree), 'main')
+    return worktree.resolve()  # the check reports the resolved path (from registered_worktrees)
+
+
+def _flip(worktree, to='stray'):
+    Git(worktree)('checkout', '-b', to)  # a GUI parks the worktree on the wrong branch
+
+
+class TestWorktreeBranch:
+    def test_correct_branch_is_silent(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        _agent_worktree(git_repo, project, 'g')
+        compare(_run(WorktreeBranchCheck(), ws), expected=[])
+
+    def test_wrong_branch_fixed(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        seed = Git(git_repo.path).rev_parse('main', short=False)  # both branches sit at seed
+        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+            compare(
+                _run(WorktreeBranchCheck(), ws, fix=True),
+                expected=[
+                    Finding(
+                        'worktree-branch', f'{worktree} is on stray, expected g/agent', True, True
+                    )
+                ],
+            )
+        compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/agent')
+        log.check(
+            (
+                'worktree-branch: refs',
+                {
+                    'worktree': str(worktree),
+                    'git': {'before': {'stray': seed}, 'after': {'g/agent': seed}},
+                },
+            )
+        )
+
+    def test_wrong_branch_report_only(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        compare(
+            _run(WorktreeBranchCheck(), ws),
+            expected=[
+                Finding('worktree-branch', f'{worktree} is on stray, expected g/agent', False, True)
+            ],
+        )
+        compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='stray')
+
+    def test_dirty_left_in_place(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        (worktree / 'scratch.txt').write_text('wip')
+        compare(
+            _run(WorktreeBranchCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on stray, expected g/agent — uncommitted changes, left in place',
+                    False,
+                    False,
+                )
+            ],
+        )
+        compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='stray')
+
+    def test_missing_target_branch_not_fixable(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        Git(git_repo.path)('branch', '-D', 'g/agent')  # nothing left to switch back to
+        compare(
+            _run(WorktreeBranchCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on stray, but branch g/agent is gone',
+                    False,
+                    False,
+                )
+            ],
+        )
+
+    def test_detached_head_fixed(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        Git(worktree)('checkout', '--detach')
+        compare(
+            _run(WorktreeBranchCheck(), ws, fix=True),
+            expected=[
+                Finding('worktree-branch', f'{worktree} is on HEAD, expected g/agent', True, True)
+            ],
+        )
+        compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/agent')
+
+    def test_ignores_human_actor(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        _flip(_agent_worktree(git_repo, project, 'g', actor='human'))  # humans aren't policed
+        compare(_run(WorktreeBranchCheck(), ws), expected=[])
+
+    def test_ignores_dir_without_separator(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        Git(git_repo.path)(
+            'worktree', 'add', '-b', 'sidequest', str(project / 'worktrees' / 'sidequest'), 'main'
+        )
+        compare(_run(WorktreeBranchCheck(), ws), expected=[])
+
+    def test_skips_stale_registration(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        shutil.rmtree(worktree)  # registered but gone — can't read its branch
+        compare(_run(WorktreeBranchCheck(), ws), expected=[])
+
+    def test_skips_project_without_a_live_repo(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        _project(tmpdir, ws, ws / 'proj' / 'repo')  # repo path doesn't exist
+        compare(_run(WorktreeBranchCheck(), ws), expected=[])
 
 
 class TestOrphanedWorktree:

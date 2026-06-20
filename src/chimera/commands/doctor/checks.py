@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from giterator import Git
+from loguru import logger
 
 from chimera.commands.doctor.core import (
     Check,
@@ -15,7 +16,9 @@ from chimera.commands.doctor.core import (
 from chimera.commands.init import TEMPLATE
 from chimera.worktrees import (
     HUMAN,
+    SEP,
     base_ref,
+    branch,
     is_dirty,
     is_merged,
     registered_worktrees,
@@ -192,6 +195,65 @@ def _canonical_worktree(worktree: Path) -> Path | None:
     return worktree_path(worktree.parent, goal, actor)
 
 
+class WorktreeBranchCheck:
+    """Each agent worktree is on the branch its <goal>@<actor> name implies.
+
+    The inverse of the separator check: that one trusts the branch and fixes the dir
+    name; this one trusts the dir name and fixes the branch. Catches a git GUI flipping
+    a worktree onto the wrong branch (or detaching its HEAD) — the dir still says which
+    branch belongs here. ``--fix`` checks the right branch back out, but only when the
+    worktree is clean (a dirty switch could lose uncommitted work); the before/after
+    HEAD shas are logged first so the move can be undone (see ``agent-docs/logging.md``).
+    """
+
+    name = 'worktree-branch'
+
+    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+        for project in iter_project_dirs(workspace):
+            repo = project_repo(project)
+            worktrees_dir = project / 'worktrees'
+            if repo is None or not repo.is_dir() or not worktrees_dir.is_dir():
+                continue
+            git = Git(repo)
+            branches = set(git.branches())
+            root = worktrees_dir.resolve()
+            for worktree in sorted(p for p in registered_worktrees(git) if p.parent == root):
+                yield from self._check(worktree, branches, fix)
+
+    def _check(self, worktree: Path, branches: set[str], fix: bool) -> Iterator[Finding]:
+        if not worktree.is_dir() or SEP not in worktree.name:
+            return  # a stale registration (orphan check's concern) or an unmanaged dir
+        goal, actor = worktree.name.rsplit(SEP, 1)
+        if actor == HUMAN:
+            return  # humans don't get worktrees — not this check's business
+        wt = Git(worktree)
+        actual = wt('rev-parse', '--abbrev-ref', 'HEAD').strip()  # 'HEAD' when detached
+        expected = branch(goal, actor)
+        if actual == expected:
+            return
+        if expected not in branches:
+            yield Finding(
+                self.name, f'{worktree} is on {actual}, but branch {expected} is gone', False, False
+            )
+            return
+        if is_dirty(worktree):
+            yield Finding(
+                self.name,
+                f'{worktree} is on {actual}, expected {expected} — uncommitted changes, left in place',
+                False,
+                False,
+            )
+            return
+        if fix:
+            before = {actual: wt.rev_parse('HEAD', short=False)}
+            wt('checkout', expected)
+            logger.bind(
+                worktree=str(worktree),
+                git={'before': before, 'after': {expected: wt.rev_parse('HEAD', short=False)}},
+            ).info(f'{self.name}: refs')
+        yield Finding(self.name, f'{worktree} is on {actual}, expected {expected}', fix, True)
+
+
 class OrphanedWorktreeCheck:
     """Git's worktree registrations and the worktrees/ dir agree with each other."""
 
@@ -283,6 +345,7 @@ CHECKS: tuple[Check, ...] = (
     ProjectConfigCheck(),
     StaleHumanWorktreeCheck(),
     LegacyWorktreeSeparatorCheck(),
+    WorktreeBranchCheck(),
     OrphanedWorktreeCheck(),
     WorkspaceEnvCheck(),
     ShellCompletionCheck(),

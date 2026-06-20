@@ -130,6 +130,7 @@ def test_doctor_cli_verbose_lists_every_check(
                 '[project-config] (ok)',
                 '[human-worktrees] (ok)',
                 '[worktree-separator] (ok)',
+                '[worktree-branch] (ok)',
                 '[orphaned-worktrees] (ok)',
                 '[workspace-env] (ok)',
                 '[shell-completion] (ok)',
