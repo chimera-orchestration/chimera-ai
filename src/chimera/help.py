@@ -86,6 +86,8 @@ def render_text(entries: list[HelpEntry], *, verbose: bool) -> str:
             lines.extend(f'    {option}' for option in entry.options)
             if entry.synonyms:
                 lines.append(f'    (also: {", ".join(entry.synonyms)})')
+    if not verbose and any(e.options or e.synonyms for e in entries):
+        lines.append("ch help -v also lists each command's options & synonyms")
     return '\n'.join(lines)
 
 

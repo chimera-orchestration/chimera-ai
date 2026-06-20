@@ -71,10 +71,20 @@ def test_text_default_omits_options_and_synonyms() -> None:
     compare('cleanup' in text, expected=False)
 
 
+def test_text_default_signposts_verbose() -> None:
+    compare(
+        render_text(_index(), verbose=False).endswith(
+            "ch help -v also lists each command's options & synonyms"
+        ),
+        expected=True,
+    )
+
+
 def test_text_verbose_shows_options_and_synonyms() -> None:
     text = render_text(_index(), verbose=True)
     compare('    --force' in text, expected=True)
     compare('    (also: cleanup)' in text, expected=True)
+    compare('also lists' in text, expected=False)  # no signpost when nothing is hidden
 
 
 def test_json_includes_synonyms() -> None:

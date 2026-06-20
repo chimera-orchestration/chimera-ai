@@ -110,7 +110,10 @@ def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Comma
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor').check(  # cwd is the tmpdir, not ws, so the note appears
-        output=f'note: resolved workspace root: {ws.resolve()}\nAll checks passed!',
+        output=(
+            f'note: resolved workspace root: {ws.resolve()}\n'
+            'All checks passed! (ch doctor -v lists the 9 checks run)'
+        ),
         logging=[('INFO', 'doctor')],
     )
 
@@ -149,7 +152,7 @@ def test_doctor_cli_flags_unset_workspace_env(
     replace.in_environ('CHIMERA_WORKSPACE', not_there)
     os.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
     command.run('doctor').check(
-        output=_env_not_set(ws.resolve()),
+        output=_env_not_set(ws.resolve()) + '\n(+8 checks passed — ch doctor -v to list)',
         return_code=1,
         logging=[('INFO', 'doctor')],
     )
@@ -163,6 +166,7 @@ def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command)
             [
                 f'[workspace-config] (would fix — run with --fix) {ws.resolve()}/config.yaml missing',
                 _env_not_set(ws.resolve()),
+                '(+7 checks passed — ch doctor -v to list)',
             ]
         ),
         return_code=1,
@@ -177,7 +181,10 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
     ws = _ws(tmpdir)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor', str(ws), '--fix').check(
-        output=f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing',
+        output=(
+            f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing\n'
+            '(+8 checks passed — ch doctor -v to list)'
+        ),
         logging=[('INFO', 'doctor')],
     )
     compare(tmpdir.parse('lycia/config.yaml'), expected={'kind': 'workspace'})
@@ -192,6 +199,7 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Co
                 f'[workspace-config] (needs attention) {ws.resolve()}/config.yaml '
                 'has kind: nonsense at the workspace root',
                 _env_not_set(ws.resolve()),
+                '(+7 checks passed — ch doctor -v to list)',
             ]
         ),
         return_code=1,
@@ -211,6 +219,7 @@ def test_doctor_cli_navigates_from_a_project(
             [
                 f'note: resolved workspace root: {ws.resolve()}',
                 f'[project-config] (fixed) {ws.resolve()}/chimera/config.yaml missing kind: project',
+                '(+8 checks passed — ch doctor -v to list)',
             ]
         ),
         logging=[('INFO', 'doctor')],

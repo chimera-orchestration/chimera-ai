@@ -269,8 +269,14 @@ def doctor(
                 typer.echo(f'[{finding.check}] ({_tag(finding)}) {finding.message}')
         elif verbose:
             typer.echo(f'[{check.name}] (ok)')
+    passing = sum(1 for check in CHECKS if check.name not in by_check)
     if not findings:
-        typer.echo('All checks passed!')
+        if verbose:
+            typer.echo('All checks passed!')
+        else:
+            typer.echo(f'All checks passed! (ch doctor -v lists the {passing} checks run)')
+    elif passing and not verbose:
+        typer.echo(f'(+{passing} checks passed — ch doctor -v to list)')
     if any(not finding.resolved for finding in findings):
         raise typer.Exit(1)
 
