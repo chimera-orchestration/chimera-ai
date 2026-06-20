@@ -15,14 +15,15 @@ def adopt(
     name: str,
     prompt: str | None = None,
     extra: Sequence[str] = (),
+    dangerous: bool = False,
 ) -> Path:
     """Adopt an existing branch ``<goal>`` as a goal, then launch its agent.
 
     Restructures the branch into ``<goal>/human`` and ``<goal>/agent`` — preserving its
     commits as the base — creates the agent worktree, and launches the agent, otherwise
-    behaving like ``goal start``. Idempotent: the restructure is skipped once both actor
-    branches exist, and the worktree is reused when it is already checked out. Returns the
-    agent worktree.
+    behaving like ``goal start``. ``dangerous`` makes bypass-permissions mode reachable.
+    Idempotent: the restructure is skipped once both actor branches exist, and the worktree
+    is reused when it is already checked out. Returns the agent worktree.
 
     Because the restructure rewrites refs, the goal's branches and the commits they point at
     are logged before/after the change (see ``agent-docs/logging.md``): the ``before`` snapshot
@@ -37,7 +38,7 @@ def adopt(
         git={'before': before, 'after': goal_refs(git, goal)},
         worktree=str(agent_worktree),
     ).info('goal adopt: refs')
-    agent(agent_worktree, name, prompt, extra)
+    agent(agent_worktree, name, prompt, extra, dangerous)
     return agent_worktree
 
 

@@ -77,6 +77,14 @@ PromptArg = Annotated[
     typer.Argument(help='Prompt; its presence runs the agent in background'),
 ]
 ForceOpt = Annotated[bool, typer.Option('--force')]
+DangerousOpt = Annotated[
+    bool,
+    typer.Option(
+        '--dangerous',
+        help='Make bypass-permissions mode reachable via shift-tab, dropping auto-accept from '
+        'the cycle. AGENTS: never pass this on your own — only with explicit user instruction.',
+    ),
+]
 
 
 @dataclass
@@ -427,6 +435,7 @@ def goal_start(
     prompt: PromptArg = None,
     frm: FromOpt = None,
     offline: OfflineOpt = False,
+    dangerous: DangerousOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
@@ -439,6 +448,7 @@ def goal_start(
         frm,
         _passthrough(ctx),
         fetch=not offline,
+        dangerous=dangerous,
     )
     typer.echo(f'Started {goal} in {worktree}')
 
@@ -452,11 +462,18 @@ def goal_adopt(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument(help='Existing branch to adopt as a goal')],
     prompt: PromptArg = None,
+    dangerous: DangerousOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
     worktree = _goal_adopt(
-        p.repo, p.worktrees, goal, session_name(p.name, goal, AGENT), prompt, _passthrough(ctx)
+        p.repo,
+        p.worktrees,
+        goal,
+        session_name(p.name, goal, AGENT),
+        prompt,
+        _passthrough(ctx),
+        dangerous,
     )
     typer.echo(f'Adopted {goal} in {worktree}')
 
@@ -494,6 +511,7 @@ def agent_start(
     prompt: PromptArg = None,
     goal: GoalOpt = None,
     actor: ActorOpt = None,
+    dangerous: DangerousOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
@@ -501,7 +519,7 @@ def agent_start(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
-    _agent(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx))
+    _agent(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous)
     typer.echo(f'Launched agent in {worktree}')
 
 
@@ -511,6 +529,7 @@ def agent_resume(
     prompt: PromptArg = None,
     goal: GoalOpt = None,
     actor: ActorOpt = None,
+    dangerous: DangerousOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
@@ -518,7 +537,7 @@ def agent_resume(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
-    _resume(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx))
+    _resume(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous)
     typer.echo(f'Resumed agent in {worktree}')
 
 

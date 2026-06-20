@@ -136,20 +136,29 @@ def session_summary(cwd: str, name: str, projects: Path | None = None) -> str | 
 
 
 def agent(
-    worktree: Path, name: str, prompt: str | None = None, extra: Sequence[str] = ()
+    worktree: Path,
+    name: str,
+    prompt: str | None = None,
+    extra: Sequence[str] = (),
+    dangerous: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     """Run a claude agent named <name>, with cwd set to the worktree.
 
     Runs interactively in the foreground unless ``prompt`` is given, in which case
     it daemonizes (`claude --bg`) to work on the prompt autonomously. ``extra`` is
     passed straight through to ``claude`` (e.g. ``--model``, ``--dangerously-skip-permissions``).
+    ``dangerous`` makes bypass-permissions mode reachable (see ``_session_args``).
     Refuses if a claude session is already live in the worktree.
     """
-    return _launch(worktree, _session_args(['--name', name], prompt, extra))
+    return _launch(worktree, _session_args(['--name', name], prompt, extra, dangerous))
 
 
 def resume(
-    worktree: Path, name: str, prompt: str | None = None, extra: Sequence[str] = ()
+    worktree: Path,
+    name: str,
+    prompt: str | None = None,
+    extra: Sequence[str] = (),
+    dangerous: bool = False,
 ) -> subprocess.CompletedProcess[bytes]:
     """Resume the claude session named <name>, with cwd set to the worktree.
 
@@ -158,9 +167,10 @@ def resume(
     key — claude has no ``--cwd``, so setting it here is what lets a session be revived
     in its worktree from anywhere. Interactive foreground by default; with ``prompt`` it
     resumes in the background (``--bg``) to keep working. ``extra`` passes straight
-    through to ``claude``. Refuses if a claude session is already live in the worktree.
+    through to ``claude``. ``dangerous`` makes bypass-permissions mode reachable (see
+    ``_session_args``). Refuses if a claude session is already live in the worktree.
     """
-    return _launch(worktree, _session_args(['--resume', name], prompt, extra))
+    return _launch(worktree, _session_args(['--resume', name], prompt, extra, dangerous))
 
 
 # claude only makes bypass-permissions mode reachable via shift-tab when launched with this;
@@ -171,16 +181,20 @@ ALLOW_BYPASS = '--allow-dangerously-skip-permissions'
 _BYPASS_FLAGS = frozenset({ALLOW_BYPASS, '--dangerously-skip-permissions'})
 
 
-def _session_args(lead: list[str], prompt: str | None, extra: Sequence[str]) -> list[str]:
+def _session_args(
+    lead: list[str], prompt: str | None, extra: Sequence[str], dangerous: bool
+) -> list[str]:
     """The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, then prompt.
 
-    Every session also gets ``--allow-dangerously-skip-permissions`` (unless ``extra`` already
-    asks for bypass) so bypass-permissions mode stays reachable with shift-tab even when auto
-    mode is unavailable. A ``--bg`` session is an attachable fork, not headless — you cycle
-    after attaching — and the mode's availability is decided at *its* launch, so the flag has
-    to be here too. It only enables the mode; the autonomous run keeps its resolved mode.
+    With ``dangerous`` the session also gets ``--allow-dangerously-skip-permissions`` (unless
+    ``extra`` already asks for bypass) so bypass-permissions mode is reachable with shift-tab.
+    It's opt-in: enabling bypass *displaces* auto-accept from claude's shift-tab cycle, so the
+    everyday default keeps auto-accept and only an explicit request pays that cost. A ``--bg``
+    session is an attachable fork, not headless — you cycle after attaching — and the mode's
+    availability is decided at *its* launch, so the flag has to ride the background launch too.
+    The flag only enables the mode; the autonomous run keeps its resolved mode.
     """
-    allow = () if _BYPASS_FLAGS.intersection(extra) else (ALLOW_BYPASS,)
+    allow = (ALLOW_BYPASS,) if dangerous and not _BYPASS_FLAGS.intersection(extra) else ()
     if prompt is not None:
         return ['--bg', *lead, *extra, *allow, prompt]
     return [*lead, *extra, *allow]

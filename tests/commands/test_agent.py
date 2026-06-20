@@ -45,6 +45,14 @@ def test_agent_runs_claude_in_the_foreground_by_default(tmpdir: TempDir, replace
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent')
+    expected = ['claude', '--name', 'proj@goal@agent']  # no bypass flag unless dangerous
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_agent_makes_bypass_reachable_when_dangerous(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(worktree, 'proj@goal@agent', dangerous=True)
     expected = ['claude', '--name', 'proj@goal@agent', '--allow-dangerously-skip-permissions']
     compare(calls, expected=[(expected, worktree, True)])
 
@@ -55,6 +63,14 @@ def test_agent_runs_in_the_background_when_given_a_prompt(
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent', 'fix the bug')
+    expected = ['claude', '--bg', '--name', 'proj@goal@agent', 'fix the bug']
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_agent_background_carries_bypass_when_dangerous(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(worktree, 'proj@goal@agent', 'fix the bug', dangerous=True)
     expected = [
         'claude',
         '--bg',
@@ -85,14 +101,7 @@ def test_agent_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) ->
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent', extra=['--model', 'opus'])
-    expected = [
-        'claude',
-        '--name',
-        'proj@goal@agent',
-        '--model',
-        'opus',
-        '--allow-dangerously-skip-permissions',
-    ]
+    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'opus']
     compare(calls, expected=[(expected, worktree, True)])
 
 
@@ -101,7 +110,12 @@ def test_agent_does_not_double_up_when_bypass_already_requested(
 ) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
-    agent(worktree, 'proj@goal@agent', extra=['--allow-dangerously-skip-permissions'])
+    agent(
+        worktree,
+        'proj@goal@agent',
+        extra=['--allow-dangerously-skip-permissions'],
+        dangerous=True,
+    )
     expected = ['claude', '--name', 'proj@goal@agent', '--allow-dangerously-skip-permissions']
     compare(calls, expected=[(expected, worktree, True)])
 
@@ -112,6 +126,14 @@ def test_resume_runs_claude_resume_in_the_foreground_by_default(
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     resume(worktree, 'proj@goal@agent')
+    expected = ['claude', '--resume', 'proj@goal@agent']  # no bypass flag unless dangerous
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_resume_makes_bypass_reachable_when_dangerous(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    resume(worktree, 'proj@goal@agent', dangerous=True)
     expected = ['claude', '--resume', 'proj@goal@agent', '--allow-dangerously-skip-permissions']
     compare(calls, expected=[(expected, worktree, True)])
 
@@ -122,14 +144,7 @@ def test_resume_runs_in_the_background_when_given_a_prompt(
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     resume(worktree, 'proj@goal@agent', 'carry on')
-    expected = [
-        'claude',
-        '--bg',
-        '--resume',
-        'proj@goal@agent',
-        '--allow-dangerously-skip-permissions',
-        'carry on',
-    ]
+    expected = ['claude', '--bg', '--resume', 'proj@goal@agent', 'carry on']
     compare(calls, expected=[(expected, worktree, True)])
 
 
@@ -200,6 +215,19 @@ def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
+    claude_cmd = ['claude', '--name', 'myproject@g@agent']  # no bypass flag by default
+    compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+def test_agent_start_cli_dangerous_makes_bypass_reachable(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'start', '-g', 'g', '--dangerous').check(
+        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+    )
     claude_cmd = ['claude', '--name', 'myproject@g@agent', '--allow-dangerously-skip-permissions']
     compare(calls, expected=[(claude_cmd, expected, True)])
 
@@ -211,14 +239,7 @@ def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command
     command.run('agent', 'start', 'do it', '-g', 'g').check(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
-    claude_cmd = [
-        'claude',
-        '--bg',
-        '--name',
-        'myproject@g@agent',
-        '--allow-dangerously-skip-permissions',
-        'do it',
-    ]
+    claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', 'do it']
     compare(calls, expected=[(claude_cmd, expected, True)])
 
 
@@ -230,12 +251,7 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command:
     command.run('agent', 'start', '-g', 'g', '-a', 'reviewer').check(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
-    claude_cmd = [
-        'claude',
-        '--name',
-        'myproject@g@reviewer',
-        '--allow-dangerously-skip-permissions',
-    ]
+    claude_cmd = ['claude', '--name', 'myproject@g@reviewer']
     compare(calls, expected=[(claude_cmd, expected, True)])
 
 
@@ -262,16 +278,7 @@ def test_agent_start_cli_with_prompt_and_passthrough(
     command.run('agent', 'start', 'do it', '-g', 'g', '--', '--model', 'opus').check(
         output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
     )
-    claude_cmd = [
-        'claude',
-        '--bg',
-        '--name',
-        'myproject@g@agent',
-        '--model',
-        'opus',
-        '--allow-dangerously-skip-permissions',
-        'do it',
-    ]
+    claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', '--model', 'opus', 'do it']
     compare(calls, expected=[(claude_cmd, expected, True)])
 
 
@@ -282,7 +289,7 @@ def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) 
     command.run('agent', 'resume', '-g', 'g').check(
         output=f'Resumed agent in {expected}', logging=[('INFO', 'agent resume')]
     )
-    claude_cmd = ['claude', '--resume', 'myproject@g@agent', '--allow-dangerously-skip-permissions']
+    claude_cmd = ['claude', '--resume', 'myproject@g@agent']  # no bypass flag by default
     compare(calls, expected=[(claude_cmd, expected, True)])
 
 

@@ -1,4 +1,5 @@
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 from giterator import Git
@@ -20,11 +21,17 @@ def _project(tmpdir: TempDir, repo: Repo) -> Path:
 
 def _stub_agent(replace: Replacer) -> list[object]:
     calls: list[object] = []
-    replace.in_module(
-        agent,
-        lambda worktree, name, prompt=None, extra=(): calls.append((worktree, name, prompt, extra)),
-        module=goal_adopt,
-    )
+
+    def record(
+        worktree: Path,
+        name: str,
+        prompt: str | None = None,
+        extra: Sequence[str] = (),
+        dangerous: bool = False,
+    ) -> None:
+        calls.append((worktree, name, prompt, extra, dangerous))
+
+    replace.in_module(agent, record, module=goal_adopt)
     return calls
 
 
@@ -49,7 +56,7 @@ def test_adopt_restructures_the_branch_then_launches_the_agent(
     compare(Git(git_repo.path).branches(), expected=['feature/agent', 'feature/human', 'main'])
     compare(_rev(git_repo.path, 'feature/human'), expected=tip)
     compare(_rev(git_repo.path, 'feature/agent'), expected=tip)
-    compare(calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', None, ())])
+    compare(calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', None, (), False)])
 
 
 def test_adopt_agent_worktree_checks_out_the_adopted_work(
@@ -77,7 +84,9 @@ def test_adopt_passes_the_prompt_to_the_agent(
     worktrees = tmpdir / 'worktrees'
     calls = _stub_agent(replace)
     adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent', prompt='do it')
-    compare(calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', 'do it', ())])
+    compare(
+        calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', 'do it', (), False)]
+    )
 
 
 def test_adopt_is_idempotent(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
@@ -168,7 +177,7 @@ def test_goal_adopt_cli(
     )
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [])])
+    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False)])
 
 
 def test_goal_adopt_cli_passes_extra_flags_through(
@@ -182,4 +191,20 @@ def test_goal_adopt_cli_passes_extra_flags_through(
         output=f'Adopted feature-x in {expected}',
         logging=[('INFO', 'goal adopt'), ('INFO', 'goal adopt: refs')],
     )
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, ['--model', 'opus'])])
+    compare(
+        calls, expected=[(expected, 'project@feature-x@agent', None, ['--model', 'opus'], False)]
+    )
+
+
+def test_goal_adopt_cli_dangerous(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    _project(tmpdir, git_repo)
+    git_repo('branch', 'feature-x')
+    calls = _stub_agent(replace)
+    expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
+    command.run('goal', 'adopt', 'feature-x', '--dangerous').check(
+        output=f'Adopted feature-x in {expected}',
+        logging=[('INFO', 'goal adopt'), ('INFO', 'goal adopt: refs')],
+    )
+    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], True)])
