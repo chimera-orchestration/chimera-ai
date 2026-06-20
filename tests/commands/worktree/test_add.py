@@ -69,8 +69,8 @@ def test_add_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
 def test_add_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir / 'repo')
-    Repo(local.path).commit_content('local-ahead', datetime(2022, 1, 1))
+    local = Repo.clone(origin.path, tmpdir / 'repo')
+    local.commit_content('local-ahead', datetime(2022, 1, 1))
     expected = local.rev_parse('main', short=False)
     assert (expected == local.rev_parse('origin/main', short=False)) is False
     worktrees = tmpdir / 'worktrees'
