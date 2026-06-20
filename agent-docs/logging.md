@@ -38,3 +38,10 @@ from. Snapshot both sides with the `ref_shas(git, *refs)` helper (existing refs 
 take `before` *before* the first mutating call (the refs may be gone afterwards), `after` once
 done, and log the line so any completed change can be undone from the record. Skip the line
 when nothing changed (`before == after`).
+
+**Moving HEAD (a checkout)** — switching a worktree onto a different branch is not a ref-value
+mutation (neither branch's sha changes), so the skip-when-unchanged rule above doesn't apply: log
+it anyway, because the recovery datum is *where HEAD pointed*, not a repointed ref. Use the same
+shape but key each side by the **branch HEAD was on**, mapped to that HEAD's full sha — `before`
+the branch left behind, `after` the branch switched to (`'HEAD'` as the key when detached). To undo,
+`git -C <worktree> checkout <before-key>`. Pioneered by doctor's `worktree-branch` check.
