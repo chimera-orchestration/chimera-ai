@@ -6,6 +6,7 @@ from giterator.testing import Repo
 from testfixtures import Command, ShouldRaise, TempDir, compare
 
 from chimera.commands.worktree.add import add
+from chimera.config import UserError
 
 
 def _head(path: Path) -> str:
@@ -131,13 +132,25 @@ def test_add_fetches_origin_by_default(tmpdir: TempDir) -> None:
     compare(_head(created), expected=_head(origin.path))
 
 
-def test_add_falls_back_to_head_without_a_main_branch(tmpdir: TempDir, git_repo: Repo) -> None:
-    git_repo('branch', '-m', 'main', 'trunk')  # no main, no origin/main
-    head = _head(git_repo.path)
+def test_add_refuses_without_a_resolvable_default_branch(tmpdir: TempDir, git_repo: Repo) -> None:
+    git_repo('branch', '-m', 'main', 'trunk')  # no main/master, local or origin
     worktrees = tmpdir / 'worktrees'
-    [created] = add(git_repo.path, worktrees, 'g')
-    compare(_head(created), expected=head)
-    compare(_branch(git_repo.path, 'g/human'), expected=head)
+    with ShouldRaise(
+        UserError(
+            f'{git_repo.path}: no default branch (main/master) to branch from, '
+            f'local or on origin — pass --from <ref>'
+        )
+    ):
+        add(git_repo.path, worktrees, 'g')
+    assert worktrees.exists() is False  # refused before touching anything
+
+
+def test_add_from_rescues_a_repo_without_a_default_branch(tmpdir: TempDir, git_repo: Repo) -> None:
+    git_repo('branch', '-m', 'main', 'trunk')  # no main/master to resolve a base from
+    trunk = _head(git_repo.path)
+    [created] = add(git_repo.path, tmpdir / 'worktrees', 'g', frm='trunk')
+    compare(_head(created), expected=trunk)
+    compare(_branch(git_repo.path, 'g/human'), expected=trunk)
 
 
 def test_add_refuses_repo_without_commits(tmpdir: TempDir) -> None:

@@ -2,6 +2,7 @@ from pathlib import Path
 
 from giterator import Git, GitError
 
+from chimera.config import UserError
 from chimera.worktrees import ACTORS, HUMAN, base_ref, branch, fetch_origin, worktree_path
 
 
@@ -21,14 +22,21 @@ def add(
 
     ``frm`` is the start point for the new branches. When omitted, it defaults to the
     most recently committed of the repo's default branch and its ``origin/`` tracking ref
-    (not whatever the repo currently has checked out), falling back to ``HEAD`` if neither
-    exists. ``fetch`` (the default) refreshes ``origin`` first so that base is current.
+    (not whatever the repo currently has checked out). When neither exists it refuses
+    rather than silently grabbing the checked-out ``HEAD`` (the worst thing to inherit
+    right after an adopt parks the repo on another branch) — pass ``frm`` to be explicit.
+    ``fetch`` (the default) refreshes ``origin`` first so that base is current.
     """
     git = Git(repo)
     _require_commit(git, repo)
     if fetch:
         fetch_origin(git)
-    base = frm or base_ref(git) or 'HEAD'
+    base = frm or base_ref(git)
+    if base is None:
+        raise UserError(
+            f'{repo}: no default branch (main/master) to branch from, '
+            f'local or on origin — pass --from <ref>'
+        )
     worktrees_root.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
     for actor in actors:
