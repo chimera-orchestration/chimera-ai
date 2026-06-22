@@ -109,6 +109,13 @@ add/retire via the `CHECKS` tuple). Current checks:
   it's reported and left. The before/after HEAD shas are logged for recovery
 - **orphaned-worktrees** — prune stale git worktree registrations; flag untracked dirs under
   `worktrees/`
+- **chimera-up-to-date** — chimera's own dev checkout (found by walking up from the installed
+  package's location; skipped when there isn't one, e.g. a wheel install) is fetched from
+  `origin` on every run, check or `--fix` alike. If its default branch is out of sync with
+  `origin/<default>`, that's reported but never auto-fixed (could need a merge or clobber local
+  commits). Only once it's confirmed current does a local `deploy` branch, if one exists, get
+  checked against it — `--fix` repoints `deploy` to match (left in place, reported, if `deploy`
+  is checked out in another worktree)
 - **workspace-env** — `$CHIMERA_WORKSPACE` is set and points at this workspace; not auto-fixable
   (never touches your shell profile) — the finding prints the `export …` line to add to
   `~/.zshrc`/`~/.bashrc`/`~/.profile`

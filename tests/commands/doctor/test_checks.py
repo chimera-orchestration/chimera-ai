@@ -6,7 +6,9 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, TempDir, compare, not_there
 from testfixtures.loguru import LoguruSource
 
+from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor.checks import (
+    ChimeraUpToDateCheck,
     GitignoreCheck,
     LegacyWorktreeSeparatorCheck,
     OrphanedWorktreeCheck,
@@ -651,6 +653,140 @@ class TestOrphanedWorktree:
         ws = _ws(tmpdir)
         tmpdir.dump('lycia/ref/config.yaml', {'kind': 'project'})
         compare(_run(OrphanedWorktreeCheck(), ws), expected=[])
+
+
+class TestChimeraRepoDiscovery:
+    def test_finds_the_nearest_checkout(self, tmpdir: TempDir) -> None:
+        repo = tmpdir.makedir('repo')
+        (repo / '.git').mkdir()
+        nested = tmpdir.makedir('repo/src/pkg')
+        compare(doctor_checks._chimera_repo(nested / 'checks.py'), expected=repo.resolve())
+
+    def test_none_without_a_checkout(self, tmpdir: TempDir) -> None:
+        nested = tmpdir.makedir('a/b/c')
+        compare(doctor_checks._chimera_repo(nested / 'checks.py'), expected=None)
+
+
+def _chimera_clone(tmpdir: TempDir, replace: Replacer) -> tuple[Repo, Git]:
+    """An origin repo and a clone wired together like a real dev checkout, patched in."""
+    origin = Repo.make(tmpdir / 'origin')
+    origin.commit_content('seed')
+    local = Git.clone(origin.path, tmpdir / 'local')
+    replace.in_module(doctor_checks._chimera_repo, lambda: local.path)
+    return origin, local
+
+
+class TestChimeraUpToDate:
+    def test_no_checkout_is_silent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_module(doctor_checks._chimera_repo, lambda: None)
+        compare(_run(ChimeraUpToDateCheck(), _ws(tmpdir)), expected=[])
+
+    def test_no_remote_is_silent(self, tmpdir: TempDir, replace: Replacer, git_repo: Repo) -> None:
+        replace.in_module(doctor_checks._chimera_repo, lambda: git_repo.path)  # no origin at all
+        compare(_run(ChimeraUpToDateCheck(), _ws(tmpdir)), expected=[])
+
+    def test_up_to_date_no_deploy_is_silent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        _chimera_clone(tmpdir, replace)
+        compare(_run(ChimeraUpToDateCheck(), _ws(tmpdir)), expected=[])
+
+    def test_deploy_matching_main_is_silent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        _origin, local = _chimera_clone(tmpdir, replace)
+        local('branch', 'deploy', 'main')
+        compare(_run(ChimeraUpToDateCheck(), _ws(tmpdir)), expected=[])
+
+    def test_main_behind_origin_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
+        origin, local = _chimera_clone(tmpdir, replace)
+        origin.commit_content('remote-ahead')  # local hasn't fetched this yet
+        compare(
+            _run(ChimeraUpToDateCheck(), _ws(tmpdir)),
+            expected=[
+                Finding(
+                    'chimera-up-to-date',
+                    f'{local.path} main is not up to date with origin/main',
+                    False,
+                    False,
+                )
+            ],
+        )
+        # the check's own `git fetch` ran even without --fix — origin/main is now current
+        compare(
+            local.rev_parse('origin/main', short=False),
+            expected=origin.rev_parse('main', short=False),
+        )
+
+    def test_main_behind_origin_is_never_auto_fixed(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        origin, local = _chimera_clone(tmpdir, replace)
+        original = local.rev_parse('main', short=False)
+        origin.commit_content('remote-ahead')
+        _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True)
+        compare(local.rev_parse('main', short=False), expected=original)  # untouched
+
+    def test_deploy_mismatch_report_only(self, tmpdir: TempDir, replace: Replacer) -> None:
+        origin, local = _chimera_clone(tmpdir, replace)
+        first = origin.rev_parse('main', short=False)
+        origin.commit_content('second')
+        local('fetch', 'origin')
+        local('checkout', 'origin/main', '-B', 'main')  # local main now matches origin again
+        local('branch', 'deploy', first)  # deploy lags behind
+        compare(
+            _run(ChimeraUpToDateCheck(), _ws(tmpdir)),
+            expected=[
+                Finding(
+                    'chimera-up-to-date', f'{local.path} deploy does not point at main', False, True
+                )
+            ],
+        )
+        compare(local.rev_parse('deploy', short=False), expected=first)  # left in place
+
+    def test_deploy_mismatch_fixed(self, tmpdir: TempDir, replace: Replacer) -> None:
+        origin, local = _chimera_clone(tmpdir, replace)
+        first = origin.rev_parse('main', short=False)
+        second = origin.commit_content('second', short=False)
+        local('fetch', 'origin')
+        local('checkout', 'origin/main', '-B', 'main')
+        local('branch', 'deploy', first)
+        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+            compare(
+                _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
+                expected=[
+                    Finding(
+                        'chimera-up-to-date', f'{local.path} deploy repointed to main', True, True
+                    )
+                ],
+            )
+        compare(local.rev_parse('deploy', short=False), expected=second)
+        log.check(
+            (
+                'chimera-up-to-date: refs',
+                {'git': {'before': {'deploy': first}, 'after': {'deploy': second}}},
+            )
+        )
+
+    def test_deploy_checked_out_elsewhere_left_in_place(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        origin, local = _chimera_clone(tmpdir, replace)
+        first = origin.rev_parse('main', short=False)
+        origin.commit_content('second')
+        local('fetch', 'origin')
+        local('checkout', 'origin/main', '-B', 'main')
+        local('branch', 'deploy', first)
+        local('worktree', 'add', str(tmpdir / 'deploy-wt'), 'deploy')
+        compare(
+            _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
+            expected=[
+                Finding(
+                    'chimera-up-to-date',
+                    f'{local.path} deploy does not point at main — '
+                    'could not repoint, branch checked out elsewhere',
+                    False,
+                    True,
+                )
+            ],
+        )
+        compare(local.rev_parse('deploy', short=False), expected=first)  # left in place
 
 
 def _shell_home(tmpdir: TempDir, replace: Replacer, shell: str):

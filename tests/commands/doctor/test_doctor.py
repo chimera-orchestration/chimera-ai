@@ -3,12 +3,25 @@ import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
 from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare, not_there
 
 from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
+from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor.core import Finding
 from chimera.commands.init import TEMPLATE
 from chimera.config import NotInWorkspaceError
+
+
+@pytest.fixture(autouse=True)
+def _no_chimera_checkout(replace: Replacer) -> None:
+    """These CLI tests run the real CHECKS tuple — keep chimera-up-to-date inert.
+
+    Without this, it would hit this very repo's actual git state (and network), which
+    these tests don't control and shouldn't depend on. The check itself is covered in
+    tests/commands/doctor/test_checks.py.
+    """
+    replace.in_module(doctor_checks._chimera_repo, lambda: None)
 
 
 def _env_not_set(workspace: Path) -> str:
@@ -112,7 +125,7 @@ def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Comma
     command.run('doctor').check(  # cwd is the tmpdir, not ws, so the note appears
         output=(
             f'note: resolved workspace root: {ws.resolve()}\n'
-            'All checks passed! (ch doctor -v lists the 9 checks run)'
+            'All checks passed! (ch doctor -v lists the 10 checks run)'
         ),
         logging=[('INFO', 'doctor')],
     )
@@ -135,6 +148,7 @@ def test_doctor_cli_verbose_lists_every_check(
                 '[worktree-separator] (ok)',
                 '[worktree-branch] (ok)',
                 '[orphaned-worktrees] (ok)',
+                '[chimera-up-to-date] (ok)',
                 '[workspace-env] (ok)',
                 '[shell-completion] (ok)',
                 'All checks passed!',
@@ -152,7 +166,7 @@ def test_doctor_cli_flags_unset_workspace_env(
     replace.in_environ('CHIMERA_WORKSPACE', not_there)
     os.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
     command.run('doctor').check(
-        output=_env_not_set(ws.resolve()) + '\n(+8 checks passed — ch doctor -v to list)',
+        output=_env_not_set(ws.resolve()) + '\n(+9 checks passed — ch doctor -v to list)',
         return_code=1,
         logging=[('INFO', 'doctor')],
     )
@@ -166,7 +180,7 @@ def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command)
             [
                 f'[workspace-config] (would fix — run with --fix) {ws.resolve()}/config.yaml missing',
                 _env_not_set(ws.resolve()),
-                '(+7 checks passed — ch doctor -v to list)',
+                '(+8 checks passed — ch doctor -v to list)',
             ]
         ),
         return_code=1,
@@ -183,7 +197,7 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
     command.run('doctor', str(ws), '--fix').check(
         output=(
             f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing\n'
-            '(+8 checks passed — ch doctor -v to list)'
+            '(+9 checks passed — ch doctor -v to list)'
         ),
         logging=[('INFO', 'doctor')],
     )
@@ -199,7 +213,7 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Co
                 f'[workspace-config] (needs attention) {ws.resolve()}/config.yaml '
                 'has kind: nonsense at the workspace root',
                 _env_not_set(ws.resolve()),
-                '(+7 checks passed — ch doctor -v to list)',
+                '(+8 checks passed — ch doctor -v to list)',
             ]
         ),
         return_code=1,
@@ -219,7 +233,7 @@ def test_doctor_cli_navigates_from_a_project(
             [
                 f'note: resolved workspace root: {ws.resolve()}',
                 f'[project-config] (fixed) {ws.resolve()}/chimera/config.yaml missing kind: project',
-                '(+8 checks passed — ch doctor -v to list)',
+                '(+9 checks passed — ch doctor -v to list)',
             ]
         ),
         logging=[('INFO', 'doctor')],

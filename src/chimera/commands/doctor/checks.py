@@ -2,7 +2,7 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
-from giterator import Git
+from giterator import Git, GitError
 from loguru import logger
 
 from chimera.commands.doctor.core import (
@@ -19,8 +19,11 @@ from chimera.worktrees import (
     SEP,
     base_ref,
     branch,
+    default_branch,
+    fetch_origin,
     is_dirty,
     is_merged,
+    ref_shas,
     registered_worktrees,
     worktree_path,
 )
@@ -281,6 +284,73 @@ class OrphanedWorktreeCheck:
                         )
 
 
+def _chimera_repo(start: Path = Path(__file__)) -> Path | None:
+    """The git checkout chimera itself is running from, None for a git-less install.
+
+    Walks up from ``start`` (this file's location by default) — present for an
+    editable/dev install, absent for a wheel install with no ``.git`` alongside the
+    package. Takes ``start`` as a parameter, rather than hardcoding ``__file__``
+    inside, so the walk can be exercised against a throwaway directory tree in tests.
+    """
+    for directory in start.resolve().parents:
+        if (directory / '.git').exists():
+            return directory
+    return None
+
+
+class ChimeraUpToDateCheck:
+    """Chimera's own checkout is current with origin, and any deploy branch tracks main.
+
+    Skipped entirely when chimera isn't running from a git checkout. ``git fetch`` always
+    runs, even on a plain check — it's read-only. Whether the default branch matches its
+    remote-tracking ref is report-only: never auto-fast-forwarded, since that could need a
+    merge or clobber local commits. Only a ``deploy`` branch, when one exists, is ever
+    repointed by ``--fix``, and only once the default branch is confirmed current.
+    """
+
+    name = 'chimera-up-to-date'
+
+    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+        repo = _chimera_repo()
+        if repo is None:
+            return
+        git = Git(repo)
+        fetch_origin(git)
+        default = default_branch(git)
+        remote = f'origin/{default}'
+        try:
+            local_sha = git.rev_parse(default, short=False)
+            remote_sha = git.rev_parse(remote, short=False)
+        except GitError:
+            return  # no local/remote-tracking branch to compare — nothing to verify
+        if local_sha != remote_sha:
+            yield Finding(
+                self.name, f'{repo} {default} is not up to date with {remote}', False, False
+            )
+            return
+        if 'deploy' not in git.branches() or git.rev_parse('deploy', short=False) == local_sha:
+            return
+        if not fix:
+            yield Finding(self.name, f'{repo} deploy does not point at {default}', False, True)
+            return
+        before = ref_shas(git, 'deploy')
+        try:
+            git('branch', '-f', 'deploy', default)
+        except GitError:
+            yield Finding(
+                self.name,
+                f'{repo} deploy does not point at {default} — '
+                'could not repoint, branch checked out elsewhere',
+                False,
+                True,
+            )
+            return
+        logger.bind(git={'before': before, 'after': ref_shas(git, 'deploy')}).info(
+            f'{self.name}: refs'
+        )
+        yield Finding(self.name, f'{repo} deploy repointed to {default}', True, True)
+
+
 class WorkspaceEnvCheck:
     """$CHIMERA_WORKSPACE is exported and points at this workspace."""
 
@@ -347,6 +417,7 @@ CHECKS: tuple[Check, ...] = (
     LegacyWorktreeSeparatorCheck(),
     WorktreeBranchCheck(),
     OrphanedWorktreeCheck(),
+    ChimeraUpToDateCheck(),
     WorkspaceEnvCheck(),
     ShellCompletionCheck(),
 )
