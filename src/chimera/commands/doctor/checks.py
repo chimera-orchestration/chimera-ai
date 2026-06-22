@@ -41,8 +41,8 @@ class WorkspaceConfigCheck:
             yield Finding(
                 self.name,
                 f'{workspace}/config.yaml looks like a project (has repo:), not a workspace root',
-                False,
-                False,
+                resolved=False,
+                fixable=False,
             )
             return
         kind = raw.get('kind') if raw else None
@@ -52,14 +52,14 @@ class WorkspaceConfigCheck:
             yield Finding(
                 self.name,
                 f'{workspace}/config.yaml has kind: {kind} at the workspace root',
-                False,
-                False,
+                resolved=False,
+                fixable=False,
             )
             return
         if fix:
             write_config(workspace, {'kind': 'workspace', **(raw or {})})
         missing = 'missing' if raw is None else 'missing kind: workspace'
-        yield Finding(self.name, f'{workspace}/config.yaml {missing}', fix, True)
+        yield Finding(self.name, f'{workspace}/config.yaml {missing}', resolved=fix, fixable=True)
 
 
 def _gitignore_entries(path: Path) -> list[str]:
@@ -84,7 +84,7 @@ class GitignoreCheck:
                 text += '\n'
             gitignore.write_text(text + ''.join(f'{e}\n' for e in missing))
         for entry in missing:
-            yield Finding(self.name, f'{gitignore} missing {entry!r}', fix, True)
+            yield Finding(self.name, f'{gitignore} missing {entry!r}', resolved=fix, fixable=True)
 
 
 class ProjectConfigCheck:
@@ -111,14 +111,22 @@ class ProjectConfigCheck:
                     if kind is None
                     else f'has kind: {kind} but repo: marks it a project'
                 )
-                yield Finding(self.name, f'{project}/config.yaml {problem}', fix, True)
+                yield Finding(
+                    self.name, f'{project}/config.yaml {problem}', resolved=fix, fixable=True
+                )
             elif kind is not None:
                 yield Finding(
-                    self.name, f'{project}/config.yaml has unexpected kind: {kind}', False, False
+                    self.name,
+                    f'{project}/config.yaml has unexpected kind: {kind}',
+                    resolved=False,
+                    fixable=False,
                 )
             else:
                 yield Finding(
-                    self.name, f'{project}/config.yaml has no kind and no repo', False, False
+                    self.name,
+                    f'{project}/config.yaml has no kind and no repo',
+                    resolved=False,
+                    fixable=False,
                 )
 
 
@@ -148,12 +156,17 @@ class StaleHumanWorktreeCheck:
                 if dirty or unmerged:
                     reason = 'uncommitted changes' if dirty else 'unmerged commits'
                     yield Finding(
-                        self.name, f'{worktree} has {reason} — left in place', False, False
+                        self.name,
+                        f'{worktree} has {reason} — left in place',
+                        resolved=False,
+                        fixable=False,
                     )
                     continue
                 if fix:
                     git('worktree', 'remove', str(worktree))
-                yield Finding(self.name, f'stale human worktree {worktree}', fix, True)
+                yield Finding(
+                    self.name, f'stale human worktree {worktree}', resolved=fix, fixable=True
+                )
 
 
 class LegacyWorktreeSeparatorCheck:
@@ -176,7 +189,10 @@ class LegacyWorktreeSeparatorCheck:
                 if fix:
                     git('worktree', 'move', str(worktree), str(canonical))
                 yield Finding(
-                    self.name, f'legacy worktree {worktree.name} → {canonical.name}', fix, True
+                    self.name,
+                    f'legacy worktree {worktree.name} → {canonical.name}',
+                    resolved=fix,
+                    fixable=True,
                 )
 
 
@@ -236,15 +252,18 @@ class WorktreeBranchCheck:
             return
         if expected not in branches:
             yield Finding(
-                self.name, f'{worktree} is on {actual}, but branch {expected} is gone', False, False
+                self.name,
+                f'{worktree} is on {actual}, but branch {expected} is gone',
+                resolved=False,
+                fixable=False,
             )
             return
         if is_dirty(worktree):
             yield Finding(
                 self.name,
                 f'{worktree} is on {actual}, expected {expected} — uncommitted changes, left in place',
-                False,
-                False,
+                resolved=False,
+                fixable=False,
             )
             return
         if fix:
@@ -254,7 +273,9 @@ class WorktreeBranchCheck:
                 worktree=str(worktree),
                 git={'before': before, 'after': {expected: wt.rev_parse('HEAD', short=False)}},
             ).info(f'{self.name}: refs')
-        yield Finding(self.name, f'{worktree} is on {actual}, expected {expected}', fix, True)
+        yield Finding(
+            self.name, f'{worktree} is on {actual}, expected {expected}', resolved=fix, fixable=True
+        )
 
 
 class OrphanedWorktreeCheck:
@@ -274,13 +295,21 @@ class OrphanedWorktreeCheck:
                 if fix:
                     git('worktree', 'prune')
                 for path in stale:
-                    yield Finding(self.name, f'stale worktree registration for {path}', fix, True)
+                    yield Finding(
+                        self.name,
+                        f'stale worktree registration for {path}',
+                        resolved=fix,
+                        fixable=True,
+                    )
             worktrees_dir = project / 'worktrees'
             if worktrees_dir.is_dir():
                 for child in sorted(worktrees_dir.iterdir()):
                     if child.is_dir() and child.resolve() not in registered:
                         yield Finding(
-                            self.name, f'{child} is not a registered worktree', False, False
+                            self.name,
+                            f'{child} is not a registered worktree',
+                            resolved=False,
+                            fixable=False,
                         )
 
 
@@ -325,13 +354,21 @@ class ChimeraUpToDateCheck:
             return  # no local/remote-tracking branch to compare — nothing to verify
         if local_sha != remote_sha:
             yield Finding(
-                self.name, f'{repo} {default} is not up to date with {remote}', False, False
+                self.name,
+                f'{repo} {default} is not up to date with {remote}',
+                resolved=False,
+                fixable=False,
             )
             return
         if 'deploy' not in git.branches() or git.rev_parse('deploy', short=False) == local_sha:
             return
         if not fix:
-            yield Finding(self.name, f'{repo} deploy does not point at {default}', False, True)
+            yield Finding(
+                self.name,
+                f'{repo} deploy does not point at {default}',
+                resolved=False,
+                fixable=True,
+            )
             return
         before = ref_shas(git, 'deploy')
         try:
@@ -341,14 +378,16 @@ class ChimeraUpToDateCheck:
                 self.name,
                 f'{repo} deploy does not point at {default} — '
                 'could not repoint, branch checked out elsewhere',
-                False,
-                True,
+                resolved=False,
+                fixable=True,
             )
             return
         logger.bind(git={'before': before, 'after': ref_shas(git, 'deploy')}).info(
             f'{self.name}: refs'
         )
-        yield Finding(self.name, f'{repo} deploy repointed to {default}', True, True)
+        yield Finding(
+            self.name, f'{repo} deploy repointed to {default}', resolved=True, fixable=True
+        )
 
 
 class WorkspaceEnvCheck:
@@ -362,14 +401,17 @@ class WorkspaceEnvCheck:
         env = os.environ.get('CHIMERA_WORKSPACE')
         if env is None:
             yield Finding(
-                self.name, f'$CHIMERA_WORKSPACE is not set — {hint}\n    {export}', False, False
+                self.name,
+                f'$CHIMERA_WORKSPACE is not set — {hint}\n    {export}',
+                resolved=False,
+                fixable=False,
             )
         elif Path(env).expanduser().resolve() != workspace.resolve():
             yield Finding(
                 self.name,
                 f'$CHIMERA_WORKSPACE is {env}, not this workspace — {hint}\n    {export}',
-                False,
-                False,
+                resolved=False,
+                fixable=False,
             )
 
 
@@ -404,8 +446,8 @@ class ShellCompletionCheck:
             f'tab completion for ch is not installed for {shell} — '
             f'run `ch --install-completion`, or add to ~/{rc_names[0]}:\n'
             f'    eval "$(env _CH_COMPLETE={instruction} ch)"',
-            False,
-            False,
+            resolved=False,
+            fixable=False,
         )
 
 

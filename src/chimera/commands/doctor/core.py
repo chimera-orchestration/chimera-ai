@@ -1,5 +1,5 @@
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -12,8 +12,8 @@ class Finding:
 
     check: str  # the reporting check's name, for grouping in output
     message: str
-    resolved: bool  # was it actually fixed on this run?
-    fixable: bool  # could --fix handle it at all?
+    resolved: bool = field(kw_only=True)  # was it actually fixed on this run?
+    fixable: bool = field(kw_only=True)  # could --fix handle it at all?
 
 
 class Check(Protocol):

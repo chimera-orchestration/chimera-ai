@@ -65,8 +65,8 @@ def _env_finding(ws, where: str) -> Finding:
         f'$CHIMERA_WORKSPACE {where} — '
         'add to your shell profile (~/.zshrc, ~/.bashrc, ~/.profile):\n'
         f'    export CHIMERA_WORKSPACE="{ws}"',
-        False,
-        False,
+        resolved=False,
+        fixable=False,
     )
 
 
@@ -75,7 +75,11 @@ class TestWorkspaceConfig:
         ws = _ws(tmpdir)
         compare(
             _run(WorkspaceConfigCheck(), ws),
-            expected=[Finding('workspace-config', f'{ws}/config.yaml missing', False, True)],
+            expected=[
+                Finding(
+                    'workspace-config', f'{ws}/config.yaml missing', resolved=False, fixable=True
+                )
+            ],
         )
         assert (ws / 'config.yaml').exists() is False  # report only, nothing written
 
@@ -83,7 +87,11 @@ class TestWorkspaceConfig:
         ws = _ws(tmpdir)
         compare(
             _run(WorkspaceConfigCheck(), ws, fix=True),
-            expected=[Finding('workspace-config', f'{ws}/config.yaml missing', True, True)],
+            expected=[
+                Finding(
+                    'workspace-config', f'{ws}/config.yaml missing', resolved=True, fixable=True
+                )
+            ],
         )
         compare(_config(ws), expected={'kind': 'workspace'})
 
@@ -93,7 +101,12 @@ class TestWorkspaceConfig:
         compare(
             _run(WorkspaceConfigCheck(), ws, fix=True),
             expected=[
-                Finding('workspace-config', f'{ws}/config.yaml missing kind: workspace', True, True)
+                Finding(
+                    'workspace-config',
+                    f'{ws}/config.yaml missing kind: workspace',
+                    resolved=True,
+                    fixable=True,
+                )
             ],
         )
         compare(_config(ws), expected={'kind': 'workspace', 'name': 'lycia'})
@@ -112,8 +125,8 @@ class TestWorkspaceConfig:
                 Finding(
                     'workspace-config',
                     f'{ws}/config.yaml has kind: project at the workspace root',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -128,8 +141,8 @@ class TestWorkspaceConfig:
                 Finding(
                     'workspace-config',
                     f'{ws}/config.yaml looks like a project (has repo:), not a workspace root',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -145,7 +158,14 @@ class TestGitignore:
         (ws / '.gitignore').write_text('*.lock\nservices-running.jsonl\n*/repo/\n*/worktrees/\n')
         compare(
             _run(GitignoreCheck(), ws),
-            expected=[Finding('gitignore', f"{ws / '.gitignore'} missing 'logs/'", False, True)],
+            expected=[
+                Finding(
+                    'gitignore',
+                    f"{ws / '.gitignore'} missing 'logs/'",
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
         )
 
     def test_missing_entry_appended_after_an_unterminated_final_line(self, tmpdir: TempDir) -> None:
@@ -153,7 +173,11 @@ class TestGitignore:
         (ws / '.gitignore').write_text('*.lock\nservices-running.jsonl\n*/repo/\n*/worktrees/')
         compare(
             _run(GitignoreCheck(), ws, fix=True),
-            expected=[Finding('gitignore', f"{ws / '.gitignore'} missing 'logs/'", True, True)],
+            expected=[
+                Finding(
+                    'gitignore', f"{ws / '.gitignore'} missing 'logs/'", resolved=True, fixable=True
+                )
+            ],
         )
         compare(
             (ws / '.gitignore').read_text(),
@@ -175,7 +199,12 @@ class TestGitignore:
         compare(
             _run(GitignoreCheck(), ws, fix=True),
             expected=[
-                Finding('gitignore', f'{ws / ".gitignore"} missing {entry!r}', True, True)
+                Finding(
+                    'gitignore',
+                    f'{ws / ".gitignore"} missing {entry!r}',
+                    resolved=True,
+                    fixable=True,
+                )
                 for entry in (
                     '*.lock',
                     'services-running.jsonl',
@@ -220,7 +249,10 @@ class TestProjectConfig:
             _run(ProjectConfigCheck(), ws, fix=True),
             expected=[
                 Finding(
-                    'project-config', f'{project}/config.yaml missing kind: project', True, True
+                    'project-config',
+                    f'{project}/config.yaml missing kind: project',
+                    resolved=True,
+                    fixable=True,
                 )
             ],
         )
@@ -242,8 +274,8 @@ class TestProjectConfig:
                 Finding(
                     'project-config',
                     f'{project}/config.yaml has kind: workspace but repo: marks it a project',
-                    True,
-                    True,
+                    resolved=True,
+                    fixable=True,
                 )
             ],
         )
@@ -259,8 +291,8 @@ class TestProjectConfig:
                 Finding(
                     'project-config',
                     f'{project}/config.yaml has unexpected kind: bogus',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -273,7 +305,10 @@ class TestProjectConfig:
             _run(ProjectConfigCheck(), ws),
             expected=[
                 Finding(
-                    'project-config', f'{project}/config.yaml has no kind and no repo', False, False
+                    'project-config',
+                    f'{project}/config.yaml has no kind and no repo',
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -286,7 +321,14 @@ class TestStaleHumanWorktree:
         worktree = _human_worktree(git_repo, project, 'g1')
         compare(
             _run(StaleHumanWorktreeCheck(), ws, fix=True),
-            expected=[Finding('human-worktrees', f'stale human worktree {worktree}', True, True)],
+            expected=[
+                Finding(
+                    'human-worktrees',
+                    f'stale human worktree {worktree}',
+                    resolved=True,
+                    fixable=True,
+                )
+            ],
         )
         tmpdir.compare(path='lycia/proj/worktrees', expected=())
         compare(Git(git_repo.path).branches(), expected=['g1/human', 'main'])
@@ -297,7 +339,14 @@ class TestStaleHumanWorktree:
         worktree = _human_worktree(git_repo, project, 'g1')
         compare(
             _run(StaleHumanWorktreeCheck(), ws),
-            expected=[Finding('human-worktrees', f'stale human worktree {worktree}', False, True)],
+            expected=[
+                Finding(
+                    'human-worktrees',
+                    f'stale human worktree {worktree}',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
         )
         tmpdir.compare(['g1-human'], path='lycia/proj/worktrees', recursive=False)
 
@@ -311,8 +360,8 @@ class TestStaleHumanWorktree:
                 Finding(
                     'human-worktrees',
                     f'{worktree} has uncommitted changes — left in place',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -328,8 +377,8 @@ class TestStaleHumanWorktree:
                 Finding(
                     'human-worktrees',
                     f'{worktree} has unmerged commits — left in place',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -366,8 +415,8 @@ class TestLegacyWorktreeSeparator:
                 Finding(
                     'worktree-separator',
                     'legacy worktree my-goal-agent → my-goal@agent',
-                    True,
-                    True,
+                    resolved=True,
+                    fixable=True,
                 )
             ],
         )
@@ -388,8 +437,8 @@ class TestLegacyWorktreeSeparator:
                 Finding(
                     'worktree-separator',
                     'legacy worktree my-goal-agent → my-goal@agent',
-                    False,
-                    True,
+                    resolved=False,
+                    fixable=True,
                 )
             ],
         )
@@ -413,7 +462,12 @@ class TestLegacyWorktreeSeparator:
         compare(
             _run(LegacyWorktreeSeparatorCheck(), ws, fix=True),
             expected=[
-                Finding('worktree-separator', 'legacy worktree g-reviewer → g@reviewer', True, True)
+                Finding(
+                    'worktree-separator',
+                    'legacy worktree g-reviewer → g@reviewer',
+                    resolved=True,
+                    fixable=True,
+                )
             ],
         )
         tmpdir.compare(['g@reviewer'], path='lycia/proj/worktrees', recursive=False)
@@ -482,7 +536,10 @@ class TestWorktreeBranch:
                 _run(WorktreeBranchCheck(), ws, fix=True),
                 expected=[
                     Finding(
-                        'worktree-branch', f'{worktree} is on stray, expected g/agent', True, True
+                        'worktree-branch',
+                        f'{worktree} is on stray, expected g/agent',
+                        resolved=True,
+                        fixable=True,
                     )
                 ],
             )
@@ -505,7 +562,12 @@ class TestWorktreeBranch:
         compare(
             _run(WorktreeBranchCheck(), ws),
             expected=[
-                Finding('worktree-branch', f'{worktree} is on stray, expected g/agent', False, True)
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on stray, expected g/agent',
+                    resolved=False,
+                    fixable=True,
+                )
             ],
         )
         compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='stray')
@@ -522,8 +584,8 @@ class TestWorktreeBranch:
                 Finding(
                     'worktree-branch',
                     f'{worktree} is on stray, expected g/agent — uncommitted changes, left in place',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -541,8 +603,8 @@ class TestWorktreeBranch:
                 Finding(
                     'worktree-branch',
                     f'{worktree} is on stray, but branch g/agent is gone',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -555,7 +617,12 @@ class TestWorktreeBranch:
         compare(
             _run(WorktreeBranchCheck(), ws, fix=True),
             expected=[
-                Finding('worktree-branch', f'{worktree} is on HEAD, expected g/agent', True, True)
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on HEAD, expected g/agent',
+                    resolved=True,
+                    fixable=True,
+                )
             ],
         )
         compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/agent')
@@ -601,8 +668,8 @@ class TestOrphanedWorktree:
                 Finding(
                     'orphaned-worktrees',
                     f'stale worktree registration for {worktree.resolve()}',
-                    True,
-                    True,
+                    resolved=True,
+                    fixable=True,
                 )
             ],
         )
@@ -620,8 +687,8 @@ class TestOrphanedWorktree:
                 Finding(
                     'orphaned-worktrees',
                     f'stale worktree registration for {worktree.resolve()}',
-                    False,
-                    True,
+                    resolved=False,
+                    fixable=True,
                 )
             ],
         )
@@ -639,7 +706,10 @@ class TestOrphanedWorktree:
             _run(OrphanedWorktreeCheck(), ws),
             expected=[
                 Finding(
-                    'orphaned-worktrees', f'{leftover} is not a registered worktree', False, False
+                    'orphaned-worktrees',
+                    f'{leftover} is not a registered worktree',
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -703,8 +773,8 @@ class TestChimeraUpToDate:
                 Finding(
                     'chimera-up-to-date',
                     f'{local.path} main is not up to date with origin/main',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -734,7 +804,10 @@ class TestChimeraUpToDate:
             _run(ChimeraUpToDateCheck(), _ws(tmpdir)),
             expected=[
                 Finding(
-                    'chimera-up-to-date', f'{local.path} deploy does not point at main', False, True
+                    'chimera-up-to-date',
+                    f'{local.path} deploy does not point at main',
+                    resolved=False,
+                    fixable=True,
                 )
             ],
         )
@@ -752,7 +825,10 @@ class TestChimeraUpToDate:
                 _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
                 expected=[
                     Finding(
-                        'chimera-up-to-date', f'{local.path} deploy repointed to main', True, True
+                        'chimera-up-to-date',
+                        f'{local.path} deploy repointed to main',
+                        resolved=True,
+                        fixable=True,
                     )
                 ],
             )
@@ -781,8 +857,8 @@ class TestChimeraUpToDate:
                     'chimera-up-to-date',
                     f'{local.path} deploy does not point at main — '
                     'could not repoint, branch checked out elsewhere',
-                    False,
-                    True,
+                    resolved=False,
+                    fixable=True,
                 )
             ],
         )
@@ -827,8 +903,8 @@ class TestShellCompletion:
                     'tab completion for ch is not installed for zsh — '
                     'run `ch --install-completion`, or add to ~/.zshrc:\n'
                     '    eval "$(env _CH_COMPLETE=source_zsh ch)"',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
@@ -854,8 +930,8 @@ class TestShellCompletion:
                     'tab completion for ch is not installed for bash — '
                     'run `ch --install-completion`, or add to ~/.bashrc:\n'
                     '    eval "$(env _CH_COMPLETE=source_bash ch)"',
-                    False,
-                    False,
+                    resolved=False,
+                    fixable=False,
                 )
             ],
         )
