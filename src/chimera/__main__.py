@@ -15,6 +15,7 @@ from chimera.commands.agent import agents
 from chimera.commands.agent import resume as _resume
 from chimera.commands.agent import scope_line, scoped
 from chimera.commands.doctor import CHECKS, Finding, resolve_root
+from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
@@ -266,6 +267,10 @@ def doctor(
     root = resolve_root(path, Path.cwd(), os.environ.get('CHIMERA_WORKSPACE'))
     if root != anchor:
         typer.echo(f'note: resolved workspace root: {root}')
+    if verbose:
+        repo = doctor_checks.chimera_repo()
+        if repo is not None:
+            typer.echo(f'note: chimera checkout: {repo}')
     findings = _doctor(root, fix)
     by_check: dict[str, list[Finding]] = {}
     for finding in findings:

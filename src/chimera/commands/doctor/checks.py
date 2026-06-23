@@ -23,7 +23,6 @@ from chimera.worktrees import (
     fetch_origin,
     is_dirty,
     is_merged,
-    ref_shas,
     registered_worktrees,
     worktree_path,
 )
@@ -313,13 +312,17 @@ class OrphanedWorktreeCheck:
                         )
 
 
-def _chimera_repo(start: Path = Path(__file__)) -> Path | None:
+def chimera_repo(start: Path = Path(__file__)) -> Path | None:
     """The git checkout chimera itself is running from, None for a git-less install.
 
-    Walks up from ``start`` (this file's location by default) — present for an
-    editable/dev install, absent for a wheel install with no ``.git`` alongside the
-    package. Takes ``start`` as a parameter, rather than hardcoding ``__file__``
-    inside, so the walk can be exercised against a throwaway directory tree in tests.
+    Resolved via Python's own module location, not the installed package's path: for an
+    editable install (the normal case for a dev checkout — ``uv tool install --editable``
+    or ``uv run`` from a worktree), that location *is* the original checkout, not a copy
+    under ``site-packages``, so walking up from it finds the real ``.git``. A non-editable
+    install (built/copied into ``site-packages``) has no ``.git`` nearby, so this returns
+    None and the check that uses it goes quiet. Takes ``start`` as a parameter, rather than
+    hardcoding ``__file__`` inside, so the walk can be exercised against a throwaway
+    directory tree in tests.
     """
     for directory in start.resolve().parents:
         if (directory / '.git').exists():
@@ -327,40 +330,106 @@ def _chimera_repo(start: Path = Path(__file__)) -> Path | None:
     return None
 
 
+def _is_ancestor(git: Git, ancestor: str, descendant: str) -> bool:
+    """Whether ancestor's history is fully contained in descendant — a true fast-forward."""
+    try:
+        git('merge-base', '--is-ancestor', ancestor, descendant)
+        return True
+    except GitError:
+        return False
+
+
+def _repoint(git: Git, branch_name: str, target: str) -> str | None:
+    """Force branch_name to target via ``git branch -f``; its new sha, None if blocked.
+
+    None means git refused — the branch is checked out somewhere (this repo or another
+    worktree of it), so moving it could strand that checkout. Never raises: that's a routine,
+    expected outcome here, not a bug.
+    """
+    try:
+        git('branch', '-f', branch_name, target)
+    except GitError:
+        return None
+    return git.rev_parse(branch_name, short=False)
+
+
 class ChimeraUpToDateCheck:
     """Chimera's own checkout is current with origin, and any deploy branch tracks main.
 
     Skipped entirely when chimera isn't running from a git checkout. ``git fetch`` always
-    runs, even on a plain check — it's read-only. Whether the default branch matches its
-    remote-tracking ref is report-only: never auto-fast-forwarded, since that could need a
-    merge or clobber local commits. Only a ``deploy`` branch, when one exists, is ever
-    repointed by ``--fix``, and only once the default branch is confirmed current.
+    runs, even on a plain check — it's read-only. ``--fix`` fast-forwards the default branch
+    to ``origin/<default>`` once ancestry confirms it's a true fast-forward — local already
+    containing everything origin has needs no action, and a divergent history needs a human,
+    so both are left untouched (reported, not fixed, in the divergent case). Only once the
+    default branch is confirmed current does a ``deploy`` branch, if one exists, get checked
+    — and if needed, repointed — against it.
     """
 
     name = 'chimera-up-to-date'
 
     def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
-        repo = _chimera_repo()
+        repo = chimera_repo()
+        logger.bind(repo=str(repo) if repo else None).info(f'{self.name}: checkout')
         if repo is None:
             return
         git = Git(repo)
         fetch_origin(git)
         default = default_branch(git)
-        remote = f'origin/{default}'
         try:
             local_sha = git.rev_parse(default, short=False)
-            remote_sha = git.rev_parse(remote, short=False)
+            remote_sha = git.rev_parse(f'origin/{default}', short=False)
         except GitError:
             return  # no local/remote-tracking branch to compare — nothing to verify
-        if local_sha != remote_sha:
+        current = yield from self._sync_default(git, repo, default, local_sha, remote_sha, fix)
+        if current is None:
+            return  # default branch needs a human before deploy can be trusted against it
+        yield from self._sync_deploy(git, repo, default, current, fix)
+
+    def _sync_default(
+        self, git: Git, repo: Path, default: str, local_sha: str, remote_sha: str, fix: bool
+    ) -> Iterator[Finding]:
+        """Findings about the default branch; returns its sha once confirmed current."""
+        if local_sha == remote_sha:
+            return local_sha
+        remote = f'origin/{default}'
+        if _is_ancestor(git, remote_sha, local_sha):
+            return local_sha  # local already contains everything origin has — nothing to catch up
+        if not _is_ancestor(git, local_sha, remote_sha):
             yield Finding(
                 self.name,
-                f'{repo} {default} is not up to date with {remote}',
+                f'{repo} {default} has diverged from {remote} — needs a human to merge',
                 resolved=False,
                 fixable=False,
             )
-            return
-        if 'deploy' not in git.branches() or git.rev_parse('deploy', short=False) == local_sha:
+            return None
+        if not fix:
+            yield Finding(
+                self.name, f'{repo} {default} is behind {remote}', resolved=False, fixable=True
+            )
+            return None
+        new_sha = _repoint(git, default, remote)
+        if new_sha is None:
+            yield Finding(
+                self.name,
+                f'{repo} {default} is behind {remote} — '
+                'could not fast-forward, branch checked out elsewhere',
+                resolved=False,
+                fixable=True,
+            )
+            return None
+        logger.bind(git={'before': {default: local_sha}, 'after': {default: new_sha}}).info(
+            f'{self.name}: refs'
+        )
+        yield Finding(
+            self.name, f'{repo} {default} fast-forwarded to {remote}', resolved=True, fixable=True
+        )
+        return new_sha
+
+    def _sync_deploy(
+        self, git: Git, repo: Path, default: str, current: str, fix: bool
+    ) -> Iterator[Finding]:
+        deploy_sha = git.rev_parse('deploy', short=False) if 'deploy' in git.branches() else None
+        if deploy_sha is None or deploy_sha == current:
             return
         if not fix:
             yield Finding(
@@ -370,10 +439,8 @@ class ChimeraUpToDateCheck:
                 fixable=True,
             )
             return
-        before = ref_shas(git, 'deploy')
-        try:
-            git('branch', '-f', 'deploy', default)
-        except GitError:
+        new_sha = _repoint(git, 'deploy', default)
+        if new_sha is None:
             yield Finding(
                 self.name,
                 f'{repo} deploy does not point at {default} — '
@@ -382,7 +449,7 @@ class ChimeraUpToDateCheck:
                 fixable=True,
             )
             return
-        logger.bind(git={'before': before, 'after': ref_shas(git, 'deploy')}).info(
+        logger.bind(git={'before': {'deploy': deploy_sha}, 'after': {'deploy': new_sha}}).info(
             f'{self.name}: refs'
         )
         yield Finding(

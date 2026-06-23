@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from giterator.testing import Repo
 from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare, not_there
 
 from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
@@ -21,7 +22,7 @@ def _no_chimera_checkout(replace: Replacer) -> None:
     these tests don't control and shouldn't depend on. The check itself is covered in
     tests/commands/doctor/test_checks.py.
     """
-    replace.in_module(doctor_checks._chimera_repo, lambda: None)
+    replace.in_module(doctor_checks.chimera_repo, lambda: None)
 
 
 def _env_not_set(workspace: Path) -> str:
@@ -127,7 +128,7 @@ def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Comma
             f'note: resolved workspace root: {ws.resolve()}\n'
             'All checks passed! (ch doctor -v lists the 10 checks run)'
         ),
-        logging=[('INFO', 'doctor')],
+        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
     )
 
 
@@ -154,7 +155,44 @@ def test_doctor_cli_verbose_lists_every_check(
                 'All checks passed!',
             ]
         ),
-        logging=[('INFO', 'doctor')],
+        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+    )
+
+
+def test_doctor_cli_verbose_notes_the_chimera_checkout(
+    tmpdir: TempDir, replace: Replacer, command: Command, git_repo: Repo
+) -> None:
+    ws = _ws(tmpdir)
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    # the autouse fixture above already patched chimera_repo via this same Replacer,
+    # so its live attribute is no longer the original function in_module keys off of —
+    # name the container/attr explicitly instead.
+    replace(
+        target=doctor_checks,
+        container=doctor_checks,
+        name='chimera_repo',
+        replacement=lambda: git_repo.path,
+    )
+    command.run('doctor', '--verbose').check(
+        output='\n'.join(
+            [
+                f'note: resolved workspace root: {ws.resolve()}',
+                f'note: chimera checkout: {git_repo.path}',
+                '[workspace-config] (ok)',
+                '[gitignore] (ok)',
+                '[project-config] (ok)',
+                '[human-worktrees] (ok)',
+                '[worktree-separator] (ok)',
+                '[worktree-branch] (ok)',
+                '[orphaned-worktrees] (ok)',
+                '[chimera-up-to-date] (ok)',
+                '[workspace-env] (ok)',
+                '[shell-completion] (ok)',
+                'All checks passed!',
+            ]
+        ),
+        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
     )
 
 
@@ -168,7 +206,7 @@ def test_doctor_cli_flags_unset_workspace_env(
     command.run('doctor').check(
         output=_env_not_set(ws.resolve()) + '\n(+9 checks passed — ch doctor -v to list)',
         return_code=1,
-        logging=[('INFO', 'doctor')],
+        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
     )
 
 
@@ -184,7 +222,7 @@ def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command)
             ]
         ),
         return_code=1,
-        logging=[('INFO', 'doctor')],
+        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
     )
     assert (ws / 'config.yaml').exists() is False  # report only, nothing written
 
@@ -199,7 +237,7 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
             f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing\n'
             '(+9 checks passed — ch doctor -v to list)'
         ),
-        logging=[('INFO', 'doctor')],
+        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
     )
     compare(tmpdir.parse('lycia/config.yaml'), expected={'kind': 'workspace'})
 
@@ -217,7 +255,7 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Co
             ]
         ),
         return_code=1,
-        logging=[('INFO', 'doctor')],
+        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
     )
 
 
@@ -236,7 +274,7 @@ def test_doctor_cli_navigates_from_a_project(
                 '(+9 checks passed — ch doctor -v to list)',
             ]
         ),
-        logging=[('INFO', 'doctor')],
+        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
     )
     # fixed, not corrupted
     compare(
