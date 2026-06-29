@@ -355,6 +355,37 @@ def _repoint(git: Git, branch_name: str, target: str) -> str | None:
     return git.rev_parse(branch_name, short=False)
 
 
+def _worktree_on(git: Git, branch_name: str) -> Path | None:
+    """The worktree (of git's repo) that has branch_name checked out, None if none does."""
+    here: Path | None = None
+    for line in git('worktree', 'list', '--porcelain').splitlines():
+        if line.startswith('worktree '):
+            here = Path(line.removeprefix('worktree '))
+        elif line == f'branch refs/heads/{branch_name}':
+            return here
+    return None
+
+
+def _advance_checkout(git: Git, branch_name: str, target: str) -> str | None:
+    """Fast-forward branch_name's own checkout up to target; its new sha, None if blocked.
+
+    The fallback when ``_repoint`` (``git branch -f``) refuses because branch_name is checked
+    out — a checkout can't be force-moved, but a clean one can ``merge --ff-only`` to advance
+    both its branch and its working tree. None if no worktree holds it, that worktree is dirty,
+    or target isn't a fast-forward of branch_name (a diverged branch needs a human). Never
+    raises: a blocked move is a routine, expected outcome here.
+    """
+    worktree = _worktree_on(git, branch_name)
+    if worktree is None or is_dirty(worktree):
+        return None
+    checkout = Git(worktree)
+    try:
+        checkout('merge', '--ff-only', target)
+    except GitError:
+        return None
+    return checkout.rev_parse('HEAD', short=False)
+
+
 class ChimeraUpToDateCheck:
     """Chimera's own checkout is current with origin, and any deploy branch tracks main.
 
@@ -364,7 +395,9 @@ class ChimeraUpToDateCheck:
     containing everything origin has needs no action, and a divergent history needs a human,
     so both are left untouched (reported, not fixed, in the divergent case). Only once the
     default branch is confirmed current does a ``deploy`` branch, if one exists, get checked
-    — and if needed, repointed — against it.
+    — and if needed, repointed — against it. A deploy branch checked out somewhere (the normal
+    state of a dedicated deploy clone, where ``git branch -f`` can't move it) is instead
+    fast-forwarded in place, provided that checkout is clean and the move is a true fast-forward.
     """
 
     name = 'chimera-up-to-date'
@@ -442,11 +475,13 @@ class ChimeraUpToDateCheck:
             )
             return
         new_sha = _repoint(git, 'deploy', default)
+        if new_sha is None:  # deploy is checked out — branch -f can't move it, ff its checkout
+            new_sha = _advance_checkout(git, 'deploy', default)
         if new_sha is None:
             yield Finding(
                 self.name,
-                f'{repo} deploy does not point at {default} — '
-                'could not repoint, branch checked out elsewhere',
+                f'{repo} deploy does not point at {default} — could not repoint; its checkout '
+                'has uncommitted changes or has diverged from main, needs a human',
                 resolved=False,
                 fixable=True,
             )

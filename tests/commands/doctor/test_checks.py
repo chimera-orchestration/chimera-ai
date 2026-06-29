@@ -916,7 +916,39 @@ class TestChimeraUpToDate:
             ),
         )
 
-    def test_deploy_checked_out_elsewhere_left_in_place(
+    def test_deploy_checked_out_clean_fast_forwarded(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        origin, local = _chimera_clone(tmpdir, replace)
+        first = origin.rev_parse('main', short=False)
+        origin.commit_content('second')
+        local('fetch', 'origin')
+        local('checkout', 'origin/main', '-B', 'main')
+        local('branch', 'deploy', first)
+        local('worktree', 'add', str(tmpdir / 'deploy-wt'), 'deploy')  # deploy is checked out
+        second = local.rev_parse('main', short=False)
+        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+            compare(
+                _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
+                expected=[
+                    Finding(
+                        'chimera-up-to-date',
+                        f'{local.path} deploy repointed to main',
+                        resolved=True,
+                        fixable=True,
+                    )
+                ],
+            )
+        compare(local.rev_parse('deploy', short=False), expected=second)  # ff'd in its checkout
+        log.check(
+            ('chimera-up-to-date: checkout', {'repo': str(local.path)}),
+            (
+                'chimera-up-to-date: refs',
+                {'git': {'before': {'deploy': first}, 'after': {'deploy': second}}},
+            ),
+        )
+
+    def test_deploy_checked_out_dirty_left_in_place(
         self, tmpdir: TempDir, replace: Replacer
     ) -> None:
         origin, local = _chimera_clone(tmpdir, replace)
@@ -926,19 +958,51 @@ class TestChimeraUpToDate:
         local('checkout', 'origin/main', '-B', 'main')
         local('branch', 'deploy', first)
         local('worktree', 'add', str(tmpdir / 'deploy-wt'), 'deploy')
+        (tmpdir / 'deploy-wt' / 'scratch.txt').write_text('wip')  # checkout has uncommitted work
         compare(
             _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
             expected=[
                 Finding(
                     'chimera-up-to-date',
-                    f'{local.path} deploy does not point at main — '
-                    'could not repoint, branch checked out elsewhere',
+                    f'{local.path} deploy does not point at main — could not repoint; its '
+                    'checkout has uncommitted changes or has diverged from main, needs a human',
                     resolved=False,
                     fixable=True,
                 )
             ],
         )
         compare(local.rev_parse('deploy', short=False), expected=first)  # left in place
+
+    def test_deploy_checked_out_diverged_left_in_place(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        origin, local = _chimera_clone(tmpdir, replace)
+        first = origin.rev_parse('main', short=False)
+        origin.commit_content('second')
+        local('fetch', 'origin')
+        local('checkout', 'origin/main', '-B', 'main')
+        local('worktree', 'add', '-b', 'deploy', str(tmpdir / 'deploy-wt'), first)
+        Repo(tmpdir / 'deploy-wt').commit_content('deploy-only')  # deploy now diverges from main
+        diverged = Git(tmpdir / 'deploy-wt').rev_parse('deploy', short=False)
+        compare(
+            _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
+            expected=[
+                Finding(
+                    'chimera-up-to-date',
+                    f'{local.path} deploy does not point at main — could not repoint; its '
+                    'checkout has uncommitted changes or has diverged from main, needs a human',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        compare(local.rev_parse('deploy', short=False), expected=diverged)  # left in place
+
+    def test_advance_checkout_none_when_branch_not_checked_out(self, tmpdir: TempDir) -> None:
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('branch', 'deploy')  # exists, but no worktree has it checked out
+        compare(doctor_checks._advance_checkout(Git(repo.path), 'deploy', 'main'), expected=None)
 
 
 def _shell_home(tmpdir: TempDir, replace: Replacer, shell: str):

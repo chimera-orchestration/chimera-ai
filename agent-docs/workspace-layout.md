@@ -119,7 +119,10 @@ add/retire via the `CHECKS` tuple). Current checks:
   a human, so it's reported and left; a local branch already ahead is fine and silent. A branch
   `--fix` can't move because it's checked out somewhere is reported, not forced. Only once the
   default branch is confirmed current does a local `deploy` branch, if one exists, get checked
-  against it — `--fix` repoints `deploy` to match (same checked-out-elsewhere caveat)
+  against it — `--fix` repoints `deploy` to match. A `deploy` that's checked out somewhere (the
+  normal state of a dedicated deploy clone, where `git branch -f` can't move it) is instead
+  fast-forwarded in place via `merge --ff-only`, provided that checkout is clean and the move is a
+  true fast-forward; a dirty or diverged deploy checkout is reported for a human
 - **workspace-env** — `$CHIMERA_WORKSPACE` is set and points at this workspace; not auto-fixable
   (never touches your shell profile) — the finding prints the `export …` line to add to
   `~/.zshrc`/`~/.bashrc`/`~/.profile`
