@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 
 import yaml
 from giterator import Git
@@ -15,13 +16,15 @@ from chimera.commands.doctor.checks import (
     ProjectConfigCheck,
     ShellCompletionCheck,
     StaleHumanWorktreeCheck,
+    WorkspaceCommitCheck,
     WorkspaceConfigCheck,
     WorkspaceEnvCheck,
     WorktreeBranchCheck,
+    commit_message,
 )
 from chimera.commands.doctor.core import Check, Finding
 from chimera.commands.init import TEMPLATE
-from chimera.worktrees import registered_worktrees
+from chimera.worktrees import is_dirty, registered_worktrees
 
 
 def _ws(tmpdir: TempDir):
@@ -1008,3 +1011,142 @@ class TestShellCompletion:
                 )
             ],
         )
+
+
+def _git_ws(tmpdir: TempDir) -> Repo:
+    """A healthy workspace that is also its own committed git repo (``.path`` is the root)."""
+    repo = Repo.make(tmpdir / 'lycia')
+    (repo.path / 'processes').mkdir()
+    shutil.copy(TEMPLATE / '.gitignore', repo.path / '.gitignore')
+    repo('add', '-A')
+    repo('commit', '-m', 'seed')
+    return repo
+
+
+class TestWorkspaceClean:
+    def test_not_a_git_repo_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(WorkspaceCommitCheck(), _ws(tmpdir)), expected=[])
+
+    def test_clean_repo_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(WorkspaceCommitCheck(), _git_ws(tmpdir).path), expected=[])
+
+    def test_dirty_reported_without_fix(self, tmpdir: TempDir) -> None:
+        ws = _git_ws(tmpdir).path
+        (ws / 'knowledge.md').write_text('a jotting')
+        compare(
+            _run(WorkspaceCommitCheck(), ws),
+            expected=[
+                Finding(
+                    'workspace-clean',
+                    f'{ws} has uncommitted changes',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        compare(is_dirty(ws), expected=True)  # reported only, nothing committed
+
+    def test_fix_stages_commits_and_logs(self, tmpdir: TempDir, replace: Replacer) -> None:
+        repo = _git_ws(tmpdir)
+        ws = repo.path
+        (ws / 'knowledge.md').write_text('a jotting')  # untracked content makes the ws dirty
+        replace.in_module(doctor_checks.commit_message, lambda diff: 'Add a knowledge note')
+        head = repo('rev-parse', '--abbrev-ref', 'HEAD').strip()
+        before = repo.rev_parse(head, short=False)
+        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+            compare(
+                _run(WorkspaceCommitCheck(), ws, fix=True),
+                expected=[
+                    Finding(
+                        'workspace-clean',
+                        f'{ws} committed: Add a knowledge note',
+                        resolved=True,
+                        fixable=True,
+                    )
+                ],
+            )
+        compare(is_dirty(ws), expected=False)
+        compare(repo('log', '-1', '--format=%s').strip(), expected='Add a knowledge note')
+        log.check(
+            (
+                'workspace-clean: refs',
+                {
+                    'git': {
+                        'before': {head: before},
+                        'after': {head: repo.rev_parse(head, short=False)},
+                    }
+                },
+            )
+        )
+
+    def test_fix_falls_back_to_the_real_model_when_unmocked(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        repo = _git_ws(tmpdir)
+        (repo.path / 'knowledge.md').write_text('a jotting')
+        replace.in_module(subprocess.run, _no_claude)  # claude absent → generic subject
+        compare(
+            _run(WorkspaceCommitCheck(), repo.path, fix=True),
+            expected=[
+                Finding(
+                    'workspace-clean',
+                    f'{repo.path} committed: Snapshot workspace changes',
+                    resolved=True,
+                    fixable=True,
+                )
+            ],
+        )
+
+
+def _no_claude(cmd, **kw):
+    """A subprocess.run stub that errors on claude but runs every other command for real."""
+    if cmd[0] == 'claude':
+        raise FileNotFoundError('claude')
+    return _real_run(cmd, **kw)
+
+
+_real_run = subprocess.run
+
+
+class TestCommitMessage:
+    def test_uses_the_models_reply(self, replace: Replacer) -> None:
+        seen: dict[str, object] = {}
+
+        def fake_run(cmd, *, input, capture_output, text, check):
+            seen.update(cmd=cmd, input=input, capture_output=capture_output, text=text, check=check)
+            return subprocess.CompletedProcess(cmd, 0, stdout='Tidy the notes\n', stderr='')
+
+        replace.in_module(subprocess.run, fake_run)
+        compare(commit_message('a staged diff'), expected='Tidy the notes')
+        compare(
+            seen,
+            expected={
+                'cmd': ['claude', '-p', doctor_checks._COMMIT_PROMPT, '--model', 'haiku'],
+                'input': 'a staged diff',
+                'capture_output': True,
+                'text': True,
+                'check': True,
+            },
+        )
+
+    def test_empty_reply_falls_back(self, replace: Replacer) -> None:
+        replace.in_module(
+            subprocess.run,
+            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout='  \n', stderr=''),
+        )
+        compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
+
+    def test_claude_missing_falls_back(self, replace: Replacer) -> None:
+        replace.in_module(subprocess.run, _raise(FileNotFoundError('claude')))
+        compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
+
+    def test_nonzero_exit_falls_back(self, replace: Replacer) -> None:
+        replace.in_module(subprocess.run, _raise(subprocess.CalledProcessError(1, 'claude')))
+        compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
+
+
+def _raise(error: Exception):
+    def run(cmd, **kw):
+        raise error
+
+    return run

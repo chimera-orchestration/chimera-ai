@@ -1,4 +1,5 @@
 import os
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from chimera.worktrees import (
     fetch_origin,
     is_dirty,
     is_merged,
+    ref_shas,
     registered_worktrees,
     worktree_path,
 )
@@ -518,6 +520,70 @@ class ShellCompletionCheck:
         )
 
 
+# The lightweight model `commit_message` asks to summarise a workspace's staged changes,
+# and the message it falls back to when claude can't be reached (so the fix still commits —
+# leaving nothing uncommitted is the point, a perfect subject line is not).
+_COMMIT_MODEL = 'haiku'
+_COMMIT_PROMPT = (
+    'Write a single-line git commit message (max 72 chars, imperative mood, no trailing '
+    'period, no type prefix) summarising the staged changes in this Chimera workspace, '
+    'which tracks config, knowledge notes, principles and processes. The staged diff is on '
+    'stdin. Output only the message.'
+)
+_COMMIT_FALLBACK = 'Snapshot workspace changes'
+
+
+def commit_message(diff: str) -> str:
+    """A one-line commit message for a staged diff, from a lightweight model.
+
+    Shells out to ``claude -p`` with a small model, feeding it the diff on stdin. Any failure
+    (claude absent, non-zero exit, empty reply) falls back to a generic subject so ``--fix``
+    still commits — its job is to leave nothing uncommitted, not to write the perfect message.
+    """
+    try:
+        result = subprocess.run(
+            ['claude', '-p', _COMMIT_PROMPT, '--model', _COMMIT_MODEL],
+            input=diff,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return _COMMIT_FALLBACK
+    return result.stdout.strip() or _COMMIT_FALLBACK
+
+
+class WorkspaceCommitCheck:
+    """The workspace's own git repo has no uncommitted or untracked content.
+
+    Skipped when the workspace isn't a git repo. ``--fix`` stages everything and commits it
+    with a message from a lightweight model (see ``commit_message``); the branch's before/after
+    shas are logged for recovery. Runs last so it sweeps up the config/gitignore edits the
+    earlier fixes made in the same pass.
+    """
+
+    name = 'workspace-clean'
+
+    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+        if not (workspace / '.git').exists():
+            return  # not a git repo — nothing to commit
+        git = Git(workspace)
+        if not is_dirty(workspace):
+            return
+        if not fix:
+            yield Finding(
+                self.name, f'{workspace} has uncommitted changes', resolved=False, fixable=True
+            )
+            return
+        head = git('rev-parse', '--abbrev-ref', 'HEAD').strip()  # branch name, or 'HEAD' detached
+        before = ref_shas(git, head)
+        git('add', '-A')
+        message = commit_message(git('diff', '--cached'))
+        git('commit', '-m', message)
+        logger.bind(git={'before': before, 'after': ref_shas(git, head)}).info(f'{self.name}: refs')
+        yield Finding(self.name, f'{workspace} committed: {message}', resolved=True, fixable=True)
+
+
 CHECKS: tuple[Check, ...] = (
     WorkspaceConfigCheck(),
     GitignoreCheck(),
@@ -529,4 +595,5 @@ CHECKS: tuple[Check, ...] = (
     ChimeraUpToDateCheck(),
     WorkspaceEnvCheck(),
     ShellCompletionCheck(),
+    WorkspaceCommitCheck(),
 )

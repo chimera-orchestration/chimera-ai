@@ -127,6 +127,13 @@ add/retire via the `CHECKS` tuple). Current checks:
   unset shells are skipped): either the `ch --install-completion` artifact (`~/.zfunc/_ch` /
   `~/.bash_completions/ch.sh`) or a `_CH_COMPLETE` eval line in a shell startup file; not
   auto-fixable (same no-profile-edits rule) — the finding prints both fixes
+- **workspace-clean** — the workspace's own git repo has no uncommitted or untracked content
+  (skipped when the workspace isn't a git repo; `*/repo/` and `*/worktrees/` are gitignored, so
+  only tracked workspace files count). Runs last, so it sweeps up the config/gitignore edits the
+  earlier `--fix` checks just made. `--fix` stages everything (`git add -A`) and commits it with a
+  one-line message written by a lightweight model (`claude -p --model haiku` fed the staged diff);
+  if claude can't be reached it falls back to a generic subject so the commit still happens. The
+  committed branch's before/after shas are logged for recovery
 
 Reports findings and exits non-zero while any remain unresolved.
 
