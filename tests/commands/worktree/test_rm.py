@@ -126,6 +126,58 @@ def test_remove_force_discards_unsaved_work(tmpdir: TempDir, git_repo: Repo) -> 
     compare(Git(git_repo.path).branches(), expected=['main'])
 
 
+def test_remove_sweeps_a_stray_branch_only_actor(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Git(git_repo.path)('branch', 'g/reviewer', 'main')  # an extra actor, bare branch, no worktree
+    remove(git_repo.path, worktrees, 'g')
+    tmpdir.compare(path='worktrees', expected=())
+    compare(Git(git_repo.path).branches(), expected=['main'])  # reviewer swept too
+
+
+def test_remove_sweeps_a_stray_worktree_actor(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    add(git_repo.path, worktrees, 'g', actors=('scout',))  # an extra actor with its own worktree
+    compare(
+        remove(git_repo.path, worktrees, 'g'),
+        expected=[worktrees / 'g@agent', worktrees / 'g@scout'],  # both worktrees, sorted
+    )
+    tmpdir.compare(path='worktrees', expected=())
+    compare(Git(git_repo.path).branches(), expected=['main'])
+
+
+def test_remove_refuses_an_unmerged_stray_actor(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    add(git_repo.path, worktrees, 'g', actors=('scout',))
+    Repo(worktrees / 'g@scout').commit_content('work')  # scout ahead of main
+    with ShouldRaise(
+        RuntimeError(
+            'refusing to clean up (use --force to discard):\n  branch g/scout has unmerged commits'
+        )
+    ):
+        remove(git_repo.path, worktrees, 'g')
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'g/scout', 'main'])
+
+
+def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    add(git_repo.path, worktrees, 'g', actors=('scout',))
+    scout = worktrees / 'g@scout'
+    replace.in_module(
+        live_sessions,
+        lambda worktree: [{'sessionId': 'x'}] if worktree == scout else [],
+        module=worktree_rm,
+    )
+    with ShouldRaise(
+        RuntimeError(
+            f'an agent is live in {scout}:\n  pid ?\nfind its terminal or kill the pid, then re-run'
+        )
+    ):
+        remove(git_repo.path, worktrees, 'g')
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'g/scout', 'main'])
+
+
 def test_remove_allows_a_squash_merged_branch(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('work')  # g/agent ahead of main

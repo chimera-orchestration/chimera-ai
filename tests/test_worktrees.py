@@ -10,6 +10,7 @@ from chimera.worktrees import (
     branch,
     default_branch,
     fetch_origin,
+    goal_actors,
     goals,
     is_dirty,
     is_merged,
@@ -53,6 +54,30 @@ def test_goals_are_derived_from_agent_worktrees(tmpdir: TempDir) -> None:
     for name in ('g1@agent', 'g2@agent', 'g1@reviewer'):  # reviewer rides g1's agent
         tmpdir.makedir(name)
     compare(goals(tmpdir.path), expected={'g1', 'g2'})
+
+
+class TestGoalActors:
+    def test_unions_branch_and_worktree_actors(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        for actor in ('agent', 'human', 'reviewer'):  # human has a branch but no worktree dir
+            git('branch', branch('g', actor), 'main')
+        for name in ('g@agent', 'g@reviewer', 'g@scout'):  # scout has a worktree but no branch
+            tmpdir.makedir(f'worktrees/{name}')
+        compare(
+            goal_actors(git, tmpdir / 'worktrees', 'g'),
+            expected={'agent', 'human', 'reviewer', 'scout'},
+        )
+
+    def test_scoped_to_the_goal_namespace(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        git('branch', 'g/agent', 'main')
+        git('branch', 'g-other/agent', 'main')  # a different goal — must not leak in
+        tmpdir.makedir('worktrees/g@agent')
+        tmpdir.makedir('worktrees/g-other@agent')
+        compare(goal_actors(git, tmpdir / 'worktrees', 'g'), expected={'agent'})
+
+    def test_empty_for_an_unknown_goal(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        compare(goal_actors(Git(git_repo.path), tmpdir / 'worktrees', 'ghost'), expected=set())
 
 
 def test_registered_worktrees_lists_repo_and_added(tmpdir: TempDir, git_repo: Repo) -> None:

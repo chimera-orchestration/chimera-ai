@@ -3,9 +3,11 @@ from pathlib import Path
 
 import yaml
 
-from chimera.commands.worktree.rm import refuse_if_agent_running
+from giterator import Git
+
+from chimera.commands.worktree.rm import refuse_if_agents_running
 from chimera.commands.worktree.rm import remove as remove_worktrees
-from chimera.worktrees import AGENT, goals, worktree_path
+from chimera.worktrees import goal_actors, goals, worktree_path
 
 
 def remove(workspace: Path, name: str, force: bool = False) -> Path | None:
@@ -33,8 +35,13 @@ def remove(workspace: Path, name: str, force: bool = False) -> Path | None:
             f'{name} still has goals ({joined}); run `ch goal finish` on each or use --force'
         )
     repo = Path(yaml.safe_load(config.read_text())['repo'])
-    for goal in sorted(existing):  # check every goal before touching any of them
-        refuse_if_agent_running(worktree_path(worktrees_root, goal, AGENT))
+    git = Git(repo)
+    for goal in sorted(existing):  # check every goal's worktrees before touching any of them
+        refuse_if_agents_running(
+            wt
+            for actor in sorted(goal_actors(git, worktrees_root, goal))
+            if (wt := worktree_path(worktrees_root, goal, actor)).is_dir()
+        )
     for goal in sorted(existing):
         remove_worktrees(repo, worktrees_root, goal, force=True)
     shutil.rmtree(project)

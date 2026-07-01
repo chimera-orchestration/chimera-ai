@@ -44,6 +44,24 @@ def goals(root: Path) -> set[str]:
     return {d.name.removesuffix(suffix) for d in worktree_dirs(root) if d.name.endswith(suffix)}
 
 
+def goal_actors(git: Git, root: Path, goal: str) -> set[str]:
+    """Every actor in a goal's namespace: those of its ``<goal>/<actor>`` branches
+    unioned with those of its ``<goal>@<actor>`` worktree dirs.
+
+    So cleanup sweeps up any actor beyond the default ``human``/``agent`` pair — a
+    branch with no worktree (a human-style actor) and a worktree whose branch is gone
+    both surface. Empty for a goal that doesn't exist.
+    """
+    branch_prefix, dir_prefix = f'{goal}/', f'{goal}{SEP}'
+    return {
+        b.removeprefix(branch_prefix) for b in git.branches() if b.startswith(branch_prefix)
+    } | {
+        d.name.removeprefix(dir_prefix)
+        for d in worktree_dirs(root)
+        if d.name.startswith(dir_prefix)
+    }
+
+
 def registered_worktrees(git: Git) -> set[Path]:
     """The worktree paths git knows about for repo, resolved."""
     out = git('worktree', 'list', '--porcelain')

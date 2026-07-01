@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -6,11 +7,10 @@ from loguru import logger
 
 from chimera.commands.agent import live_sessions
 from chimera.worktrees import (
-    ACTORS,
-    AGENT,
     base_ref,
     branch,
     fetch_origin,
+    goal_actors,
     is_dirty,
     is_merged,
     ref_shas,
@@ -24,24 +24,29 @@ def remove(
 ) -> list[Path]:
     """Remove the goal's worktrees and branches; refuse on unsaved work unless force.
 
-    Only touches worktrees/branches that actually exist, so re-running — or removing
-    a goal that was never fully created — is a safe no-op. Refuses if a claude agent
-    is live in the agent worktree, unless force. ``fetch`` (the default) refreshes
-    ``origin`` first so a branch merged upstream is recognised as merged. The deleted
-    branches and the commits they pointed at are logged first (see ``agent-docs/logging.md``),
-    so a force-discarded branch can still be recovered from the log. Returns removed worktrees.
+    Every actor in the goal's namespace is swept, not just the default human/agent pair
+    (see :func:`goal_actors`) — any stray ``<goal>/<actor>`` branch or ``<goal>@<actor>``
+    worktree goes too. Only touches worktrees/branches that actually exist, so re-running —
+    or removing a goal that was never fully created — is a safe no-op. Refuses if a claude
+    agent is live in any of the goal's worktrees, unless force. ``fetch`` (the default)
+    refreshes ``origin`` first so a branch merged upstream is recognised as merged. The
+    deleted branches and the commits they pointed at are logged first (see
+    ``agent-docs/logging.md``), so a force-discarded branch can still be recovered from the
+    log. Returns removed worktrees.
     """
     git = Git(repo)
-    if not force:
-        refuse_if_agent_running(worktree_path(worktrees_root, goal, AGENT))
     registered = registered_worktrees(git)
     branches = set(git.branches())
-    worktrees = {actor: worktree_path(worktrees_root, goal, actor) for actor in ACTORS}
+    worktrees = {
+        actor: worktree_path(worktrees_root, goal, actor)
+        for actor in sorted(goal_actors(git, worktrees_root, goal))
+    }
     if not force:
+        refuse_if_agents_running(wt for wt in worktrees.values() if wt.resolve() in registered)
         if fetch:
             fetch_origin(git)
         _refuse_if_unsafe(git, goal, worktrees, registered, branches)
-    refs = tuple(branch(goal, actor) for actor in ACTORS)
+    refs = tuple(branch(goal, actor) for actor in worktrees)
     before = ref_shas(git, *refs)
     removed: list[Path] = []
     for actor, worktree in worktrees.items():
@@ -59,14 +64,14 @@ def remove(
     return removed
 
 
-def refuse_if_agent_running(agent_worktree: Path) -> None:
-    if sessions := live_sessions(agent_worktree):
-        described = '\n  '.join(_describe(session) for session in sessions)
-        raise RuntimeError(
-            f'an agent is live in {agent_worktree}:\n'
-            f'  {described}\n'
-            f'find its terminal or kill the pid, then re-run'
-        )
+def refuse_if_agents_running(worktrees: Iterable[Path]) -> None:
+    blocks: list[str] = []
+    for worktree in worktrees:
+        if sessions := live_sessions(worktree):
+            described = '\n  '.join(_describe(session) for session in sessions)
+            blocks.append(f'an agent is live in {worktree}:\n  {described}')
+    if blocks:
+        raise RuntimeError('\n'.join(blocks) + '\nfind its terminal or kill the pid, then re-run')
 
 
 def _describe(session: dict[str, object]) -> str:
