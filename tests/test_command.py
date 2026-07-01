@@ -1,7 +1,10 @@
+from types import FunctionType
+
 import pytest
 from testfixtures import Replacer, TempDir
 from typer.main import get_command
 
+from chimera import __main__ as main
 from chimera.__main__ import LoggingCommand, app
 from chimera.commands.init import init
 from tests.cli import Command, action_logs
@@ -29,6 +32,31 @@ def test_every_command_logs_its_action(path: str) -> None:
     # LoggingCommand silently skips the chokepoint. Adding one without cls=LoggingCommand
     # (directly or via PassthroughCommand) fails here.
     assert isinstance(_leaf_commands()[path], LoggingCommand) is True
+
+
+def _tagged_wrappers() -> dict[str, FunctionType]:
+    """The command wrappers carrying a ``@logs(delegate)`` tag, keyed by function name."""
+    return {
+        name: fn
+        for name, fn in vars(main).items()
+        if isinstance(fn, FunctionType) and 'delegate' in fn.__dict__
+    }
+
+
+@pytest.mark.parametrize('name', sorted(_tagged_wrappers()))
+def test_logged_delegate_is_called_in_its_wrapper(name: str) -> None:
+    # Guards against the @logs(delegate) tag drifting from the function the body actually
+    # calls: the logged `function` is a second reference to the delegate, so a body change
+    # that forgets to update the tag would silently log a lie. Here the delegate's dotted
+    # path must be among the functions the wrapper references — change the call, forget the
+    # tag, and it drops out of co_names → red.
+    wrapper = _tagged_wrappers()[name]
+    referenced = {
+        f'{fn.__module__}.{fn.__qualname__}'
+        for global_name in wrapper.__code__.co_names
+        if isinstance(fn := vars(main).get(global_name), FunctionType)
+    }
+    assert (wrapper.__dict__['delegate'] in referenced) is True
 
 
 def test_command_logs_the_action(command: Command, tmpdir: TempDir, replace: Replacer) -> None:
