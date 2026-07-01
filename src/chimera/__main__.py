@@ -19,6 +19,8 @@ from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.goal.start import start as _goal_start
+from chimera.commands.goal.sync import Outcome, SyncResult
+from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.init import init as _init
 from chimera.commands.ls import Board, board
 from chimera.commands.project.add import add as _project_add
@@ -39,7 +41,7 @@ from chimera.context import (
 )
 from chimera.dry import Dry
 from chimera.help import command_index, render_json, render_text
-from chimera.worktrees import ACTORS, AGENT, session_name, worktree_path
+from chimera.worktrees import AGENT, DEFAULT_ACTORS, HUMAN, session_name, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -76,6 +78,18 @@ OfflineOpt = Annotated[
 PromptArg = Annotated[
     str | None,
     typer.Argument(help='Prompt; its presence runs the agent in background'),
+]
+MoveOpt = Annotated[
+    str,
+    typer.Option(
+        '--move', help='Actor branch to move (default: human)', autocompletion=complete_actor
+    ),
+]
+ToOpt = Annotated[
+    str,
+    typer.Option(
+        '--to', help='Actor branch to catch up to (default: agent)', autocompletion=complete_actor
+    ),
 ]
 ForceOpt = Annotated[bool, typer.Option('--force')]
 DryOpt = Annotated[
@@ -469,7 +483,12 @@ def worktree_add(
 ) -> None:
     p = _project(ctx, project)
     for created in _worktree_add(
-        p.repo, p.worktrees, goal, tuple(actors) if actors else ACTORS, frm, fetch=not offline
+        p.repo,
+        p.worktrees,
+        goal,
+        tuple(actors) if actors else DEFAULT_ACTORS,
+        frm,
+        fetch=not offline,
     ):
         typer.echo(f'Created {created}')
 
@@ -562,6 +581,39 @@ def goal_adopt(
         dangerous,
     )
     typer.echo(f'Adopted {goal} in {worktree}')
+
+
+@goal_app.command(
+    'sync',
+    cls=LoggingCommand,
+    help='Fast-forward one actor branch up to another, creating it if absent (default: human←agent).',
+)
+@logs(_goal_sync)
+def goal_sync(
+    ctx: typer.Context,
+    goal: Annotated[str | None, typer.Argument(autocompletion=complete_goal)] = None,
+    move: MoveOpt = HUMAN,
+    to: ToOpt = AGENT,
+    project: ProjectOpt = None,
+) -> None:
+    overrides = _overrides(ctx)
+    p = _project(ctx, project)
+    g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
+    typer.echo(_sync_line(_goal_sync(p.repo, g, move, to)))
+
+
+def _sync_line(result: SyncResult) -> str:
+    """One line describing what ``goal sync`` did, keyed on its outcome."""
+    mover, target, sha = result.mover, result.target, result.sha
+    match result.outcome:
+        case Outcome.CREATED:
+            return f'Created {mover} at {target} ({sha})'
+        case Outcome.NOOP:
+            return f'{mover} already at {target} ({sha})'
+        case Outcome.FASTFORWARDED:
+            return f'Fast-forwarded {mover} to {target} ({sha})'
+        case Outcome.AHEAD:
+            return f'{mover} leads {target} by {result.ahead_by} — nothing to sync'
 
 
 @goal_app.command('finish', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")

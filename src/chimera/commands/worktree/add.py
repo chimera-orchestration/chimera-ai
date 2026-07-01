@@ -3,22 +3,24 @@ from pathlib import Path
 from giterator import Git, GitError
 
 from chimera.config import UserError
-from chimera.worktrees import ACTORS, HUMAN, base_ref, branch, fetch_origin, worktree_path
+from chimera.worktrees import DEFAULT_ACTORS, HUMAN, base_ref, branch, fetch_origin, worktree_path
 
 
 def add(
     repo: Path,
     worktrees_root: Path,
     goal: str,
-    actors: tuple[str, ...] = ACTORS,
+    actors: tuple[str, ...] = DEFAULT_ACTORS,
     frm: str | None = None,
     fetch: bool = True,
 ) -> list[Path]:
     """Create branch ``<goal>/<actor>`` per actor and a worktree for each non-human actor.
 
-    The human actor gets a bare branch, checked out on demand; every other actor
-    gets a worktree at ``<goal>@<actor>`` on its branch. Branches and worktrees are
-    created with no upstream tracking. Returns the created worktree paths.
+    By default only the agent is created (``DEFAULT_ACTORS``); ``human`` and any ad-hoc actors are
+    materialised on demand by ``goal sync``. When ``human`` is named explicitly it gets a bare
+    branch, checked out on demand; every other actor gets a worktree at ``<goal>@<actor>`` on its
+    branch. Branches and worktrees are created with no upstream tracking. Returns the created
+    worktree paths.
 
     ``frm`` is the start point for the new branches. When omitted, it defaults to the
     most recently committed of the repo's default branch and its ``origin/`` tracking ref

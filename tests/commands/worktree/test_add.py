@@ -18,11 +18,12 @@ def _branch(repo_path: Path, name: str) -> str:
     return Git(repo_path).rev_parse(name, short=False)
 
 
-def test_add_creates_agent_worktree_and_both_branches(tmpdir: TempDir, git_repo: Repo) -> None:
+def test_add_creates_only_the_agent_by_default(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = tmpdir / 'worktrees'
     compare(add(git_repo.path, worktrees, 'my-goal'), expected=[worktrees / 'my-goal@agent'])
-    tmpdir.compare(['my-goal@agent'], path='worktrees', recursive=False)  # human gets no worktree
-    compare(Git(git_repo.path).branches(), expected=['main', 'my-goal/agent', 'my-goal/human'])
+    tmpdir.compare(['my-goal@agent'], path='worktrees', recursive=False)
+    # no my-goal/human — it's materialised on demand by `goal sync`, not up front
+    compare(Git(git_repo.path).branches(), expected=['main', 'my-goal/agent'])
 
 
 def test_add_creates_extra_named_actors(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -38,8 +39,7 @@ def test_add_checks_out_the_agent_branch_in_its_worktree(tmpdir: TempDir, git_re
     add(git_repo.path, worktrees, 'g')
     agent = Git(worktrees / 'g@agent')('rev-parse', '--abbrev-ref', 'HEAD').strip()
     compare(agent, expected='g/agent')
-    # g/human exists, but is checked out nowhere
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_add_branches_from_main_not_checked_out_branch(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -50,7 +50,7 @@ def test_add_branches_from_main_not_checked_out_branch(tmpdir: TempDir, git_repo
     worktrees = tmpdir / 'worktrees'
     [created] = add(git_repo.path, worktrees, 'g')
     compare(_head(created), expected=main)
-    compare(_branch(git_repo.path, 'g/human'), expected=main)
+    compare(_branch(git_repo.path, 'g/agent'), expected=main)
 
 
 def test_add_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
@@ -64,7 +64,7 @@ def test_add_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
     worktrees = tmpdir / 'worktrees'
     [created] = add(local.path, worktrees, 'g')
     compare(_head(created), expected=expected)
-    compare(_branch(local.path, 'g/human'), expected=expected)
+    compare(_branch(local.path, 'g/agent'), expected=expected)
 
 
 def test_add_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
@@ -77,7 +77,7 @@ def test_add_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
     worktrees = tmpdir / 'worktrees'
     [created] = add(local.path, worktrees, 'g')
     compare(_head(created), expected=expected)
-    compare(_branch(local.path, 'g/human'), expected=expected)
+    compare(_branch(local.path, 'g/agent'), expected=expected)
 
 
 def test_add_branches_have_no_upstream_tracking(tmpdir: TempDir) -> None:
@@ -88,11 +88,8 @@ def test_add_branches_have_no_upstream_tracking(tmpdir: TempDir) -> None:
     local('fetch', 'origin')  # base resolves to origin/main, a remote-tracking branch
     worktrees = tmpdir / 'worktrees'
     add(local.path, worktrees, 'g')
-    upstreams = {
-        ref: local('for-each-ref', '--format=%(upstream)', f'refs/heads/{ref}').strip()
-        for ref in ('g/human', 'g/agent')
-    }
-    compare(upstreams, expected={'g/human': '', 'g/agent': ''})
+    upstream = local('for-each-ref', '--format=%(upstream)', 'refs/heads/g/agent').strip()
+    compare(upstream, expected='')
 
 
 def test_add_uses_explicit_from_start_point(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -102,7 +99,7 @@ def test_add_uses_explicit_from_start_point(tmpdir: TempDir, git_repo: Repo) -> 
     worktrees = tmpdir / 'worktrees'
     [created] = add(git_repo.path, worktrees, 'g', frm='release')
     compare(_head(created), expected=release)
-    compare(_branch(git_repo.path, 'g/human'), expected=release)
+    compare(_branch(git_repo.path, 'g/agent'), expected=release)
 
 
 def test_add_branches_from_a_master_style_default(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -112,7 +109,7 @@ def test_add_branches_from_a_master_style_default(tmpdir: TempDir, git_repo: Rep
     git_repo.commit_content('feature-work')  # park the repo elsewhere
     [created] = add(git_repo.path, tmpdir / 'worktrees', 'g')
     compare(_head(created), expected=master)  # the default branch, not the checked-out feature
-    compare(_branch(git_repo.path, 'g/human'), expected=master)
+    compare(_branch(git_repo.path, 'g/agent'), expected=master)
 
 
 def test_add_offline_uses_already_present_refs(tmpdir: TempDir) -> None:
@@ -151,7 +148,7 @@ def test_add_from_rescues_a_repo_without_a_default_branch(tmpdir: TempDir, git_r
     trunk = _head(git_repo.path)
     [created] = add(git_repo.path, tmpdir / 'worktrees', 'g', frm='trunk')
     compare(_head(created), expected=trunk)
-    compare(_branch(git_repo.path, 'g/human'), expected=trunk)
+    compare(_branch(git_repo.path, 'g/agent'), expected=trunk)
 
 
 def test_add_refuses_repo_without_commits(tmpdir: TempDir) -> None:
@@ -183,7 +180,7 @@ def test_worktree_add_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> 
         ),
     )
     tmpdir.compare(['feature-x@agent'], path='worktrees', recursive=False)  # human gets no worktree
-    compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'main'])
 
 
 def test_worktree_add_cli_from_option(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
@@ -222,7 +219,7 @@ def test_worktree_add_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Comm
             {'goal': 'feature-x', 'actors': (), 'frm': None, 'project': None, 'offline': True},
         ),
     )
-    compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'main'])
 
 
 def test_worktree_ls_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:

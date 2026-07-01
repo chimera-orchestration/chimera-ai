@@ -42,7 +42,7 @@ def test_start_creates_worktrees_then_launches_the_agent(
     calls = _stub_agent(replace)
     compare(start(git_repo.path, worktrees, 'g', 'proj@g@agent'), expected=worktrees / 'g@agent')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])  # human is lazy
     # foreground (no prompt), not dangerous
     compare(calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', None, (), False)])
 

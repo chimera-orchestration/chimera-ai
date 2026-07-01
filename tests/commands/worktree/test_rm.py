@@ -65,7 +65,7 @@ def test_remove_aborts_when_an_agent_is_running(
     ):
         remove(git_repo.path, worktrees, 'g')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_remove_force_bypasses_the_liveness_check(
@@ -91,6 +91,16 @@ def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir, git_repo: Repo
     compare(Git(git_repo.path).branches(), expected=['main'])
 
 
+def test_remove_takes_out_on_demand_actor_branches(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    git('branch', '--no-track', 'g/human', 'g/agent')  # materialised later by `goal sync`
+    git('branch', '--no-track', 'g/reviewer', 'g/agent')
+    compare(remove(git_repo.path, worktrees, 'g'), expected=[worktrees / 'g@agent'])
+    tmpdir.compare(path='worktrees', expected=())
+    compare(git.branches(), expected=['main'])  # every g/* branch gone, not just agent
+
+
 def test_remove_refuses_uncommitted_changes(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')
@@ -102,7 +112,7 @@ def test_remove_refuses_uncommitted_changes(tmpdir: TempDir, git_repo: Repo) -> 
     ):
         remove(git_repo.path, worktrees, 'g')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_remove_refuses_unmerged_branch(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -115,7 +125,7 @@ def test_remove_refuses_unmerged_branch(tmpdir: TempDir, git_repo: Repo) -> None
     ):
         remove(git_repo.path, worktrees, 'g')
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_remove_force_discards_unsaved_work(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -228,7 +238,7 @@ def test_remove_recognises_an_upstream_merge_only_after_fetch(tmpdir: TempDir) -
 def test_remove_logs_the_refs_it_deletes(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     git = Git(git_repo.path)
-    tip = git.rev_parse('main', short=False)  # both actor branches start at main
+    tip = git.rev_parse('main', short=False)  # the agent branch starts at main
     with LogCapture(LoguruSource(('message', 'extra'))) as log:
         remove(git_repo.path, worktrees, 'g')
     log.check(
@@ -236,7 +246,7 @@ def test_remove_logs_the_refs_it_deletes(tmpdir: TempDir, git_repo: Repo) -> Non
             'worktree rm: refs',
             {
                 'goal': 'g',
-                'git': {'before': {'g/human': tip, 'g/agent': tip}, 'after': {}},
+                'git': {'before': {'g/agent': tip}, 'after': {}},
                 'force': False,
             },
         ),
@@ -246,8 +256,6 @@ def test_remove_logs_the_refs_it_deletes(tmpdir: TempDir, git_repo: Repo) -> Non
 def test_remove_force_logs_the_discarded_refs(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     agent_tip = Repo(worktrees / 'g@agent').commit_content('work', short=False)  # unmerged
-    git = Git(git_repo.path)
-    human_tip = git.rev_parse('g/human', short=False)
     with LogCapture(LoguruSource(('message', 'extra'))) as log:
         remove(git_repo.path, worktrees, 'g', force=True)
     log.check(
@@ -256,7 +264,7 @@ def test_remove_force_logs_the_discarded_refs(tmpdir: TempDir, git_repo: Repo) -
             {
                 'goal': 'g',
                 # the unmerged agent commit is recorded by sha before being discarded
-                'git': {'before': {'g/human': human_tip, 'g/agent': agent_tip}, 'after': {}},
+                'git': {'before': {'g/agent': agent_tip}, 'after': {}},
                 'force': True,
             },
         ),
@@ -288,7 +296,7 @@ def _rm_refs(cli: str, goal: str, base: str, *, offline: bool = False) -> list[d
     start, end = action_logs(
         cli, WR, {'goal': goal, 'force': False, 'offline': offline, 'dry': False, 'project': None}
     )
-    refs = {f'{goal}/agent': base, f'{goal}/human': base}
+    refs = {f'{goal}/agent': base}
     event = {
         'level': 'INFO',
         'goal': goal,

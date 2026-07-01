@@ -6,7 +6,12 @@ from giterator import Git, GitError
 AGENT = 'agent'
 HUMAN = 'human'
 ACTORS = (HUMAN, AGENT)
-"""The default actor set: ``human`` works on a bare branch, ``agent`` in a worktree."""
+"""The known actor names (completion candidates): ``human`` on a bare branch, ``agent`` in a worktree."""
+
+DEFAULT_ACTORS = (AGENT,)
+"""Actors created for a new goal. Only the agent gets a branch+worktree up front; ``human`` (and any
+ad-hoc ``reviewer``/``pr``) are materialised on demand by ``goal sync`` — a spike never accrues a dead
+branch."""
 
 SEP = '@'
 """Joins goal and actor in a flat worktree dir / session name.
@@ -77,6 +82,23 @@ def registered_worktrees(git: Git) -> set[Path]:
         for line in out.splitlines()
         if line.startswith('worktree ')
     }
+
+
+def checkout_of(git: Git, ref: str) -> Path | None:
+    """The worktree that currently has branch ``ref`` checked out, or ``None`` if none does.
+
+    Parses ``git worktree list --porcelain`` (sibling to :func:`registered_worktrees`): a
+    fast-forward of a checked-out branch must move its work tree too, not just the ref, so sync
+    needs to know where — and a bare (never-checked-out) branch returns ``None`` so it can be
+    repointed directly with ``git branch -f``.
+    """
+    current: Path | None = None
+    for line in git('worktree', 'list', '--porcelain').splitlines():
+        if line.startswith('worktree '):
+            current = Path(line.removeprefix('worktree ')).resolve()
+        elif line == f'branch refs/heads/{ref}':
+            return current
+    return None
 
 
 def _patch_ids(diffs: str) -> set[str]:

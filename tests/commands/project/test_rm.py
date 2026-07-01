@@ -56,7 +56,7 @@ def test_remove_refuses_while_goals_exist(tmpdir: TempDir, git_repo: Repo) -> No
     ):
         remove(workspace, 'myproj')
     tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_remove_force_finishes_goals_then_removes_the_project(

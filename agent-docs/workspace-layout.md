@@ -18,7 +18,8 @@ The workspace is the project working space for Chimera (default name: `lycia`).
     repo/                       # gitignored — clone managed by Chimera (ch project add only)
     worktrees/                  # gitignored — one worktree per goal (agent only)
       {goal}@agent/             # git worktree on branch {goal}/agent
-                                # branch {goal}/human exists but has no worktree
+                                # {goal}/human (and any reviewer/pr) is materialised on demand
+                                # by `ch goal sync`, never up front — no worktree
 ```
 
 ## Project types
@@ -27,7 +28,7 @@ Three types, all with the same layout above — difference is where the repo liv
 
 | Type | Description | repo/ |
 |---|---|---|
-| **working** | Actively developed; agent worktree per goal (+ a bare {goal}/human branch) | `{project}/repo/` (ch project add <url>) or external path (ch project add <path>) |
+| **working** | Actively developed; agent worktree per goal ({goal}/human materialised on demand) | `{project}/repo/` (ch project add <url>) or external path (ch project add <path>) |
 | **knowledge** | Source repo checked out for knowledge extraction | same as working |
 | **reference** | No live checkout; only extracted knowledge tracked in the workspace | absent |
 
@@ -176,13 +177,16 @@ tracked projects.
 
 Naming pattern (see core concepts): each actor gets branch `{goal}/{actor}`; agents additionally get worktree `{goal}@{actor}`. The dir uses `@` (not the branch's `/`, which would nest, nor a dash, which blurs the boundary against kebab-case goals); `@` can't appear in a goal or actor, so the pair always splits cleanly.
 
-`ch worktree add <goal> [actor…]` (the primitive; repo read from `config.yaml`) creates a branch `{goal}/{actor}` for each actor (default `human`, `agent`), but only a worktree for non-human actors:
-1. `git branch --no-track {goal}/human <base>` — a bare branch, no worktree (the human checks it out where they like)
-2. `git worktree add --no-track worktrees/{goal}@agent -b {goal}/agent <base>` from the project repo
+`ch worktree add <goal> [actor…]` (the primitive; repo read from `config.yaml`) creates a branch `{goal}/{actor}` for each actor (default: just `agent`), but only a worktree for non-human actors:
+1. `git worktree add --no-track worktrees/{goal}@agent -b {goal}/agent <base>` from the project repo
+
+Only the agent is created up front. The `human` branch (and any ad-hoc `reviewer`/`pr`) is **lazy** — materialised on demand by `ch goal sync`, so a short-lived spike never accrues a dead branch. Naming actors explicitly (`ch worktree add <goal> human agent`) still creates them: `human` gets a bare branch (`git branch --no-track {goal}/human <base>`, checked out where the human likes), every other named actor gets a worktree.
 
 `<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out), falling back to `HEAD` if neither exists. Branches are created with no upstream tracking.
 
 `ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background when a `[prompt]` positional is given). `ch goal adopt <branch>` is the same orchestrator for *existing* work: it takes a branch already carrying commits and restructures it into the `{branch}/{human,agent}` pair (renaming `{branch}` to `{branch}/human` — git can't hold `refs/heads/{branch}` beside `refs/heads/{branch}/*`, and the rename carries any checkout's HEAD along — then splitting `{branch}/agent` off that tip), creates the agent worktree, and launches the agent. Unlike `start`, the base is the adopted branch's own tip, not main. It is idempotent: the restructure is skipped once both actor branches exist, and the worktree is reused if already checked out, so a re-run only (re)launches the agent. `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches. It sweeps **every** actor in the goal's namespace, not just the default human/agent pair: any `{goal}/{actor}` branch and any `{goal}@{actor}` worktree is discovered (see `goal_actors`) and, if the same cleanup rules hold (clean, merged), removed. It refuses while a claude session is live in *any* of the goal's worktrees, reporting each session's pid/kind/status/start/name (sessions can be invisible — see `research/claude-session-registration.md`); `--force` bypasses the liveness check as well as discarding unsaved work. `ch project rm --force` never bypasses it. `--dry` (on `worktree rm`/`goal finish`, and `project rm`) runs every discovery and safety check but deletes nothing, reporting what *would* go — pair with `--force` to preview a forced teardown. It shares the real code path (`chimera.dry.Dry` guards each mutation), so the preview can't drift from the actual run.
+
+`ch goal sync [<goal>] --move <actor> --to <actor>` fast-forwards one actor branch up to another's tip, materialising it if absent (default: `human`←`agent`). It's the logged, idempotent replacement for repointing the human branch by hand. `--move` is the branch that moves (default `human`), `--to` the branch it catches up to (default `agent`); the goal is a positional or inferred from cwd/`-g`. Total over the mover↔target relationship: **creates** the mover at the target when it doesn't exist; **fast-forwards** it when strictly behind (moving its work tree too when checked out, refusing on uncommitted changes); a **no-op** when already there; leaves it when it **leads** the target; and **refuses** (needs a human) when the two have diverged, when the target is missing, or when `--move` and `--to` name the same branch. The before/after mover sha is logged (`goal sync: refs`) on every actual move.
 
 `ch agent start` launches `claude` in an existing worktree (`--name <project>@<goal>@<actor>`); `ch agent resume` reattaches to that same session label (`claude --resume <name>`). Resume exists because `claude` has no `--cwd`: Chimera knows the worktree and sets it, so a dead session is revived in the right place from anywhere. Both run foreground, or background (`--bg`) when a `[prompt]` is given, and both refuse if a session is already live in the worktree.
 

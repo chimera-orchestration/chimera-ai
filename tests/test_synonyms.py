@@ -71,7 +71,7 @@ def test_cleanup_dispatches_to_finish(
                 'level': 'INFO',
                 'goal': 'feature-x',
                 'git': {
-                    'before': {'feature-x/agent': base, 'feature-x/human': base},
+                    'before': {'feature-x/agent': base},
                     'after': {},
                 },
                 'force': False,
