@@ -5,13 +5,14 @@ from pathlib import Path
 
 import pytest
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare, not_there
+from testfixtures import Replacer, ShouldRaise, TempDir, compare, not_there
 
-from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
 from chimera.commands.doctor import checks as doctor_checks
+from chimera.commands.doctor import doctor, find_workspace_root, resolve_root
 from chimera.commands.doctor.core import Finding
 from chimera.commands.init import TEMPLATE
 from chimera.config import NotInWorkspaceError
+from tests.cli import Command, action_logs
 
 
 @pytest.fixture(autouse=True)
@@ -119,6 +120,19 @@ def test_doctor_aggregates_findings_and_passes_fix_through(tmpdir: TempDir) -> N
     compare(check.seen, expected=[(ws, True)])
 
 
+def _doctor_logs(
+    path: str | None, *, fix: bool, verbose: bool = False, repo: str | None = None
+) -> list[dict[str, object]]:
+    """doctor start / the chimera-up-to-date checkout event / end, with its CLI params."""
+    start, end = action_logs(
+        'doctor',
+        'chimera.commands.doctor.doctor',
+        {'path': path, 'fix': fix, 'verbose': verbose},
+    )
+    checkout = {'level': 'INFO', 'message': 'chimera-up-to-date: checkout', 'repo': repo}
+    return [start, checkout, end]
+
+
 def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _ws(tmpdir)
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
@@ -128,7 +142,7 @@ def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Comma
             f'note: resolved workspace root: {ws.resolve()}\n'
             'All checks passed! (ch doctor -v lists the 11 checks run)'
         ),
-        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+        logging=_doctor_logs(None, fix=False),
     )
 
 
@@ -156,7 +170,7 @@ def test_doctor_cli_verbose_lists_every_check(
                 'All checks passed!',
             ]
         ),
-        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+        logging=_doctor_logs(None, fix=False, verbose=True),
     )
 
 
@@ -194,7 +208,7 @@ def test_doctor_cli_verbose_notes_the_chimera_checkout(
                 'All checks passed!',
             ]
         ),
-        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+        logging=_doctor_logs(None, fix=False, verbose=True, repo=str(git_repo.path)),
     )
 
 
@@ -208,7 +222,7 @@ def test_doctor_cli_flags_unset_workspace_env(
     command.run('doctor').check(
         output=_env_not_set(ws.resolve()) + '\n(+10 checks passed — ch doctor -v to list)',
         return_code=1,
-        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+        logging=_doctor_logs(None, fix=False),
     )
 
 
@@ -224,7 +238,7 @@ def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command)
             ]
         ),
         return_code=1,
-        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+        logging=_doctor_logs(None, fix=False),
     )
     assert (ws / 'config.yaml').exists() is False  # report only, nothing written
 
@@ -239,7 +253,7 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
             f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing\n'
             '(+10 checks passed — ch doctor -v to list)'
         ),
-        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+        logging=_doctor_logs(str(ws), fix=True),
     )
     compare(tmpdir.parse('lycia/config.yaml'), expected={'kind': 'workspace'})
 
@@ -257,7 +271,7 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Co
             ]
         ),
         return_code=1,
-        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+        logging=_doctor_logs(str(ws), fix=True),
     )
 
 
@@ -276,7 +290,7 @@ def test_doctor_cli_navigates_from_a_project(
                 '(+10 checks passed — ch doctor -v to list)',
             ]
         ),
-        logging=[('INFO', 'doctor'), ('INFO', 'chimera-up-to-date: checkout')],
+        logging=_doctor_logs(None, fix=True),
     )
     # fixed, not corrupted
     compare(

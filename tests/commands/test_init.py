@@ -1,6 +1,7 @@
-from testfixtures import Command, ShouldRaise, TempDir, compare
+from testfixtures import ShouldRaise, TempDir, compare
 
 from chimera.commands.init import init
+from tests.cli import Command, action_logs
 
 
 def test_init_creates_workspace(tmpdir: TempDir) -> None:
@@ -27,7 +28,8 @@ def test_init_existing_path_raises(tmpdir: TempDir) -> None:
 def test_init_cli(tmpdir: TempDir, command: Command) -> None:
     path = tmpdir / 'ws'
     command.run('init', str(path)).check(
-        output=f'Initialized workspace at {path}', logging=[('INFO', 'init')]
+        output=f'Initialized workspace at {path}',
+        logging=action_logs('init', 'chimera.commands.init.init', {'path': str(path)}),
     )
     assert (path / '.git').is_dir() is True
 

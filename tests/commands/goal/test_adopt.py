@@ -4,12 +4,13 @@ from pathlib import Path
 
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, LogCapture, Replacer, ShouldRaise, TempDir, compare
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.commands.agent import agent
 from chimera.commands.goal import adopt as goal_adopt
 from chimera.commands.goal.adopt import adopt
+from tests.cli import Command, action_logs
 
 
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
@@ -164,16 +165,37 @@ def test_adopt_restructures_a_branch_checked_out_elsewhere(
     compare(Git(git_repo.path).branches(), expected=['feature/agent', 'feature/human', 'main'])
 
 
+def _adopt_logs(base: str, worktree: object, *, dangerous: bool = False) -> list[dict[str, object]]:
+    """start / `goal adopt: refs` event / end for adopting the `feature-x` branch."""
+    start, end = action_logs(
+        'goal adopt',
+        'chimera.commands.goal.adopt.adopt',
+        {'goal': 'feature-x', 'prompt': None, 'project': None, 'dangerous': dangerous},
+    )
+    event = {
+        'level': 'INFO',
+        'goal': 'feature-x',
+        'git': {
+            'before': {'feature-x': base},
+            'after': {'feature-x/agent': base, 'feature-x/human': base},
+        },
+        'worktree': str(worktree),
+        'message': 'goal adopt: refs',
+    }
+    return [start, event, end]
+
+
 def test_goal_adopt_cli(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
 ) -> None:
     _project(tmpdir, git_repo)
     git_repo('branch', 'feature-x')
     calls = _stub_agent(replace)
+    base = Git(git_repo.path)('rev-parse', 'feature-x').strip()
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'adopt', 'feature-x').check(
         output=f'Adopted feature-x in {expected}',
-        logging=[('INFO', 'goal adopt'), ('INFO', 'goal adopt: refs')],
+        logging=_adopt_logs(base, expected),
     )
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
@@ -186,10 +208,11 @@ def test_goal_adopt_cli_passes_extra_flags_through(
     _project(tmpdir, git_repo)
     git_repo('branch', 'feature-x')
     calls = _stub_agent(replace)
+    base = Git(git_repo.path)('rev-parse', 'feature-x').strip()
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'adopt', 'feature-x', '--', '--model', 'opus').check(
         output=f'Adopted feature-x in {expected}',
-        logging=[('INFO', 'goal adopt'), ('INFO', 'goal adopt: refs')],
+        logging=_adopt_logs(base, expected),
     )
     compare(
         calls, expected=[(expected, 'project@feature-x@agent', None, ['--model', 'opus'], False)]
@@ -202,9 +225,10 @@ def test_goal_adopt_cli_dangerous(
     _project(tmpdir, git_repo)
     git_repo('branch', 'feature-x')
     calls = _stub_agent(replace)
+    base = Git(git_repo.path)('rev-parse', 'feature-x').strip()
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'adopt', 'feature-x', '--dangerous').check(
         output=f'Adopted feature-x in {expected}',
-        logging=[('INFO', 'goal adopt'), ('INFO', 'goal adopt: refs')],
+        logging=_adopt_logs(base, expected, dangerous=True),
     )
     compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], True)])

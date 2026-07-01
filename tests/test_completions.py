@@ -2,9 +2,9 @@ import os
 from pathlib import Path
 
 from testfixtures import TempDir, compare
+from typer._click.shell_completion import get_completion_class
 from typer.completion import completion_init
 from typer.main import get_command
-from typer._click.shell_completion import get_completion_class
 
 from chimera.__main__ import app
 from chimera.completions import complete_actor

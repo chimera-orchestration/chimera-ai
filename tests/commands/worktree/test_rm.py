@@ -4,13 +4,14 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, LogCapture, Replacer, ShouldRaise, TempDir, compare
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.commands.agent import live_sessions
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
 from chimera.commands.worktree.rm import remove
+from tests.cli import Command, action_logs
 
 
 @pytest.fixture(autouse=True)
@@ -209,13 +210,33 @@ def test_remove_uses_the_repos_default_branch(tmpdir: TempDir) -> None:
     compare(Git(repo.path).branches(), expected=['master'])
 
 
+WR = 'chimera.commands.worktree.rm.remove'
+
+
+def _rm_refs(cli: str, goal: str, base: str, *, offline: bool = False) -> list[dict[str, object]]:
+    """start / `worktree rm: refs` event / end — the lines a rm or finish logs."""
+    start, end = action_logs(
+        cli, WR, {'goal': goal, 'force': False, 'project': None, 'offline': offline}
+    )
+    refs = {f'{goal}/agent': base, f'{goal}/human': base}
+    event = {
+        'level': 'INFO',
+        'goal': goal,
+        'git': {'before': refs, 'after': {}},
+        'force': False,
+        'message': f'{cli}: refs' if cli == 'worktree rm' else 'worktree rm: refs',
+    }
+    return [start, event, end]
+
+
 def test_worktree_rm_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     project = _project(tmpdir, git_repo)
     command.run('worktree', 'add', 'g')
+    base = Git(git_repo.path)('rev-parse', 'g/agent').strip()
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('worktree', 'rm', 'g').check(
         output=f'Removed {worktree}',
-        logging=[('INFO', 'worktree rm'), ('INFO', 'worktree rm: refs')],
+        logging=_rm_refs('worktree rm', 'g', base),
     )
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])
@@ -226,17 +247,21 @@ def test_worktree_rm_cli_reports_nothing_to_remove(
 ) -> None:
     _project(tmpdir, git_repo)
     command.run('worktree', 'rm', 'ghost').check(
-        output='Nothing to remove for ghost', logging=[('INFO', 'worktree rm')]
+        output='Nothing to remove for ghost',
+        logging=action_logs(
+            'worktree rm', WR, {'goal': 'ghost', 'force': False, 'project': None, 'offline': False}
+        ),
     )
 
 
 def test_goal_finish_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     project = _project(tmpdir, git_repo)
     command.run('worktree', 'add', 'g')
+    base = Git(git_repo.path)('rev-parse', 'g/agent').strip()
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('goal', 'finish', 'g', '--offline').check(
         output=f'Removed {worktree}',
-        logging=[('INFO', 'goal finish'), ('INFO', 'worktree rm: refs')],
+        logging=_rm_refs('goal finish', 'g', base, offline=True),
     )
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])
@@ -245,11 +270,12 @@ def test_goal_finish_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Comma
 def test_goal_finish_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     project = _project(tmpdir, git_repo)
     command.run('worktree', 'add', 'g')
+    base = Git(git_repo.path)('rev-parse', 'g/agent').strip()
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     # finish is the lifecycle name for rm
     command.run('goal', 'finish', 'g').check(
         output=f'Removed {worktree}',
-        logging=[('INFO', 'goal finish'), ('INFO', 'worktree rm: refs')],
+        logging=_rm_refs('goal finish', 'g', base),
     )
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])

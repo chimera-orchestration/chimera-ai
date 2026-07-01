@@ -4,11 +4,12 @@ from pathlib import Path
 
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, TempDir, compare
+from testfixtures import Replacer, TempDir, compare
 
 from chimera.commands.agent import agent
 from chimera.commands.goal import start as goal_start
 from chimera.commands.goal.start import start
+from tests.cli import Command, action_logs
 
 
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
@@ -71,7 +72,19 @@ def test_goal_start_cli(
     calls = _stub_agent(replace)  # stub the agent so real git runs but no claude launches
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'start', 'feature-x').check(
-        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+        output=f'Started feature-x in {expected}',
+        logging=action_logs(
+            'goal start',
+            'chimera.commands.goal.start.start',
+            {
+                'goal': 'feature-x',
+                'prompt': None,
+                'frm': None,
+                'project': None,
+                'dangerous': False,
+                'offline': False,
+            },
+        ),
     )
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False)])
@@ -84,7 +97,19 @@ def test_goal_start_cli_with_prompt(
     calls = _stub_agent(replace)
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'start', 'feature-x', 'go build it').check(
-        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+        output=f'Started feature-x in {expected}',
+        logging=action_logs(
+            'goal start',
+            'chimera.commands.goal.start.start',
+            {
+                'goal': 'feature-x',
+                'prompt': 'go build it',
+                'frm': None,
+                'project': None,
+                'dangerous': False,
+                'offline': False,
+            },
+        ),
     )
     compare(calls, expected=[(expected, 'project@feature-x@agent', 'go build it', [], False)])
 
@@ -96,7 +121,19 @@ def test_goal_start_cli_dangerous(
     calls = _stub_agent(replace)
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'start', 'feature-x', '--dangerous').check(
-        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+        output=f'Started feature-x in {expected}',
+        logging=action_logs(
+            'goal start',
+            'chimera.commands.goal.start.start',
+            {
+                'goal': 'feature-x',
+                'prompt': None,
+                'frm': None,
+                'project': None,
+                'dangerous': True,
+                'offline': False,
+            },
+        ),
     )
     compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], True)])
 
@@ -108,7 +145,19 @@ def test_goal_start_cli_offline(
     calls = _stub_agent(replace)
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'start', 'feature-x', '--offline').check(
-        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+        output=f'Started feature-x in {expected}',
+        logging=action_logs(
+            'goal start',
+            'chimera.commands.goal.start.start',
+            {
+                'goal': 'feature-x',
+                'prompt': None,
+                'frm': None,
+                'project': None,
+                'dangerous': False,
+                'offline': True,
+            },
+        ),
     )
     compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False)])
 
@@ -120,7 +169,19 @@ def test_goal_start_cli_passes_extra_flags_through(
     calls = _stub_agent(replace)
     expected = Path.cwd() / 'worktrees' / 'feature-x@agent'
     command.run('goal', 'start', 'feature-x', '--', '--model', 'opus').check(
-        output=f'Started feature-x in {expected}', logging=[('INFO', 'goal start')]
+        output=f'Started feature-x in {expected}',
+        logging=action_logs(
+            'goal start',
+            'chimera.commands.goal.start.start',
+            {
+                'goal': 'feature-x',
+                'prompt': None,
+                'frm': None,
+                'project': None,
+                'dangerous': False,
+                'offline': False,
+            },
+        ),
     )
     compare(
         calls, expected=[(expected, 'project@feature-x@agent', None, ['--model', 'opus'], False)]

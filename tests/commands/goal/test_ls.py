@@ -2,10 +2,11 @@ import os
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import Command, TempDir, compare
+from testfixtures import TempDir, compare
 
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.context import Scope, resolve_project
+from tests.cli import Command, action_logs
 
 
 def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
@@ -41,7 +42,12 @@ def test_goal_ls_cli_prints_bare_names_inside_a_project(
 ) -> None:
     project = _project(tmpdir, workspace_with_env, 'alpha', 'y', 'x')
     os.chdir(project)  # standing in the project → bare goal names
-    command.run('goal', 'ls').check(output='x\ny', logging=[('INFO', 'goal ls')])
+    command.run('goal', 'ls').check(
+        output='x\ny',
+        logging=action_logs(
+            'goal ls', 'chimera.commands.goal.ls.goals_in_scope', {'project': None}
+        ),
+    )
 
 
 def test_goal_ls_cli_qualifies_names_when_widened(
@@ -49,7 +55,12 @@ def test_goal_ls_cli_qualifies_names_when_widened(
 ) -> None:
     _project(tmpdir, workspace_with_env, 'alpha', 'x')
     _project(tmpdir, workspace_with_env, 'beta', 'z')
-    command.run('goal', 'ls').check(output='alpha  x\nbeta  z', logging=[('INFO', 'goal ls')])
+    command.run('goal', 'ls').check(
+        output='alpha  x\nbeta  z',
+        logging=action_logs(
+            'goal ls', 'chimera.commands.goal.ls.goals_in_scope', {'project': None}
+        ),
+    )
 
 
 def test_goal_ls_cli_reflects_real_worktrees(
@@ -60,4 +71,9 @@ def test_goal_ls_cli_reflects_real_worktrees(
     os.chdir(project)  # worktree add + goal ls both infer the project from cwd
     command.run('worktree', 'add', 'alpha')
     command.run('worktree', 'add', 'beta')
-    command.run('goal', 'ls').check(output='alpha\nbeta', logging=[('INFO', 'goal ls')])
+    command.run('goal', 'ls').check(
+        output='alpha\nbeta',
+        logging=action_logs(
+            'goal ls', 'chimera.commands.goal.ls.goals_in_scope', {'project': None}
+        ),
+    )

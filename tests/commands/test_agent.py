@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
 
-from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera import __main__ as chimera_main
 from chimera.commands.agent import (
@@ -22,6 +22,7 @@ from chimera.commands.agent import (
 )
 from chimera.config import ProjectConfig
 from chimera.context import Project, Scope
+from tests.cli import Command, action_logs
 
 
 def _project_obj(directory: Path) -> Project:
@@ -213,7 +214,12 @@ def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'  # cwd resolves symlinks like the wrapper
     command.run('agent', 'start', '-g', 'g').check(
-        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+        ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent']  # no bypass flag by default
     compare(calls, expected=[(claude_cmd, expected, True)])
@@ -226,7 +232,12 @@ def test_agent_start_cli_dangerous_makes_bypass_reachable(
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     command.run('agent', 'start', '-g', 'g', '--dangerous').check(
-        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': True},
+        ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent', '--allow-dangerously-skip-permissions']
     compare(calls, expected=[(claude_cmd, expected, True)])
@@ -237,7 +248,12 @@ def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     command.run('agent', 'start', 'do it', '-g', 'g').check(
-        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {'prompt': 'do it', 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+        ),
     )
     claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', 'do it']
     compare(calls, expected=[(claude_cmd, expected, True)])
@@ -249,7 +265,12 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command:
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@reviewer'
     command.run('agent', 'start', '-g', 'g', '-a', 'reviewer').check(
-        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {'prompt': None, 'goal': 'g', 'actor': 'reviewer', 'project': None, 'dangerous': False},
+        ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@reviewer']
     compare(calls, expected=[(claude_cmd, expected, True)])
@@ -263,7 +284,12 @@ def test_agent_start_cli_forwards_flags_after_dashdash(
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     # no prompt, only passthrough: the flag must not be mistaken for the prompt
     command.run('agent', 'start', '-g', 'g', '--', '--dangerously-skip-permissions').check(
-        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+        ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent', '--dangerously-skip-permissions']
     compare(calls, expected=[(claude_cmd, expected, True)])
@@ -276,7 +302,12 @@ def test_agent_start_cli_with_prompt_and_passthrough(
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     command.run('agent', 'start', 'do it', '-g', 'g', '--', '--model', 'opus').check(
-        output=f'Launched agent in {expected}', logging=[('INFO', 'agent start')]
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {'prompt': 'do it', 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+        ),
     )
     claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', '--model', 'opus', 'do it']
     compare(calls, expected=[(claude_cmd, expected, True)])
@@ -287,7 +318,12 @@ def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) 
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     command.run('agent', 'resume', '-g', 'g').check(
-        output=f'Resumed agent in {expected}', logging=[('INFO', 'agent resume')]
+        output=f'Resumed agent in {expected}',
+        logging=action_logs(
+            'agent resume',
+            'chimera.commands.agent.resume',
+            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+        ),
     )
     claude_cmd = ['claude', '--resume', 'myproject@g@agent']  # no bypass flag by default
     compare(calls, expected=[(claude_cmd, expected, True)])
@@ -300,7 +336,12 @@ def test_agent_resume_cli_with_passthrough(
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     command.run('agent', 'resume', '-g', 'g', '--', '--dangerously-skip-permissions').check(
-        output=f'Resumed agent in {expected}', logging=[('INFO', 'agent resume')]
+        output=f'Resumed agent in {expected}',
+        logging=action_logs(
+            'agent resume',
+            'chimera.commands.agent.resume',
+            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+        ),
     )
     claude_cmd = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
     compare(calls, expected=[(claude_cmd, expected, True)])
@@ -545,7 +586,9 @@ def test_agent_ls_cli_unpinned_lists_every_agent(
                 'ddd       stray         idle  x',
             ]
         ),
-        logging=[('INFO', 'agent ls')],
+        logging=action_logs(
+            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+        ),
     )
 
 
@@ -562,7 +605,9 @@ def test_agent_ls_cli_trims_long_detail(
     )
     command.run('agent', 'ls').check(
         output='scope: all agents\naaa  named  busy  ' + 'x' * 79 + '…',
-        logging=[('INFO', 'agent ls')],
+        logging=action_logs(
+            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+        ),
     )
 
 
@@ -580,7 +625,10 @@ def test_agent_ls_cli_pinned_to_project_filters_strays(
         module=chimera_main,
     )
     command.run('agent', 'ls', '-p', 'proj').check(
-        output='scope: proj\naaa  proj@g@agent  busy  fix it', logging=[('INFO', 'agent ls')]
+        output='scope: proj\naaa  proj@g@agent  busy  fix it',
+        logging=action_logs(
+            'agent ls', 'chimera.commands.agent.scoped', {'project': 'proj', 'goal': None}
+        ),
     )
 
 
@@ -590,5 +638,8 @@ def test_agent_ls_cli_when_nothing_running(
     _scoped_cli(tmpdir, replace)
     replace.in_module(agents, list, module=chimera_main)
     command.run('agent', 'ls').check(
-        output='scope: all agents\nNo agents running', logging=[('INFO', 'agent ls')]
+        output='scope: all agents\nNo agents running',
+        logging=action_logs(
+            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+        ),
     )

@@ -1,11 +1,12 @@
 import json
 
 import typer
-from testfixtures import Command, compare
+from testfixtures import compare
 from typer.main import get_command
 
 from chimera.__main__ import app
 from chimera.help import HelpEntry, command_index, render_json, render_text
+from tests.cli import Command, action_logs
 
 
 def _index() -> list[HelpEntry]:
@@ -94,15 +95,26 @@ def test_json_includes_synonyms() -> None:
 
 def test_help_cli(command: Command) -> None:
     command.run('help').check(
-        output=render_text(_index(), verbose=False), logging=[('INFO', 'help')]
+        output=render_text(_index(), verbose=False),
+        logging=action_logs(
+            'help', 'chimera.help.command_index', {'verbose': False, 'as_json': False}
+        ),
     )
 
 
 def test_help_cli_verbose(command: Command) -> None:
     command.run('help', '-v').check(
-        output=render_text(_index(), verbose=True), logging=[('INFO', 'help')]
+        output=render_text(_index(), verbose=True),
+        logging=action_logs(
+            'help', 'chimera.help.command_index', {'verbose': True, 'as_json': False}
+        ),
     )
 
 
 def test_help_cli_json(command: Command) -> None:
-    command.run('help', '--json').check(output=render_json(_index()), logging=[('INFO', 'help')])
+    command.run('help', '--json').check(
+        output=render_json(_index()),
+        logging=action_logs(
+            'help', 'chimera.help.command_index', {'verbose': False, 'as_json': True}
+        ),
+    )

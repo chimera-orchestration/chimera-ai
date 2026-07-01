@@ -3,10 +3,11 @@ from pathlib import Path
 
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, ShouldRaise, TempDir, compare
+from testfixtures import ShouldRaise, TempDir, compare
 
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
+from tests.cli import Command, action_logs
 
 
 def _head(path: Path) -> str:
@@ -174,7 +175,12 @@ def test_worktree_add_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> 
     tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
     command.run('worktree', 'add', 'feature-x').check(
-        output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
+        output=f'Created {worktree}',
+        logging=action_logs(
+            'worktree add',
+            'chimera.commands.worktree.add.add',
+            {'goal': 'feature-x', 'actors': (), 'frm': None, 'project': None, 'offline': False},
+        ),
     )
     tmpdir.compare(['feature-x@agent'], path='worktrees', recursive=False)  # human gets no worktree
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
@@ -188,7 +194,18 @@ def test_worktree_add_cli_from_option(tmpdir: TempDir, git_repo: Repo, command: 
     tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
     command.run('worktree', 'add', 'feature-x', '--from', 'release').check(
-        output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
+        output=f'Created {worktree}',
+        logging=action_logs(
+            'worktree add',
+            'chimera.commands.worktree.add.add',
+            {
+                'goal': 'feature-x',
+                'actors': (),
+                'frm': 'release',
+                'project': None,
+                'offline': False,
+            },
+        ),
     )
     compare(_head(project / 'worktrees' / 'feature-x@agent'), expected=release)
 
@@ -198,7 +215,12 @@ def test_worktree_add_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Comm
     tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
     command.run('worktree', 'add', 'feature-x', '--offline').check(
-        output=f'Created {worktree}', logging=[('INFO', 'worktree add')]
+        output=f'Created {worktree}',
+        logging=action_logs(
+            'worktree add',
+            'chimera.commands.worktree.add.add',
+            {'goal': 'feature-x', 'actors': (), 'frm': None, 'project': None, 'offline': True},
+        ),
     )
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
 
@@ -208,4 +230,7 @@ def test_worktree_ls_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> N
     tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
     command.run('worktree', 'add', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
-    command.run('worktree', 'ls').check(output=str(worktree), logging=[('INFO', 'worktree ls')])
+    command.run('worktree', 'ls').check(
+        output=str(worktree),
+        logging=action_logs('worktree ls', 'chimera.commands.worktree.ls.ls', {'project': None}),
+    )

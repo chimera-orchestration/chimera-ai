@@ -1,12 +1,13 @@
 import os
 from pathlib import Path
 
-from testfixtures import Command, Replacer, TempDir, compare
+from testfixtures import Replacer, TempDir, compare
 
 from chimera import __main__ as chimera_main
 from chimera.commands.agent import Agent, agents
 from chimera.commands.ls import Board, GoalBoard, ProjectBoard, board
 from chimera.context import Scope, resolve_project
+from tests.cli import Command, action_logs
 
 
 def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
@@ -73,7 +74,7 @@ def test_ls_cli_renders_the_tree(
                 '      012a9550  alpha@g@agent  busy  fix the bug',
             ]
         ),
-        logging=[('INFO', 'ls')],
+        logging=action_logs('ls', 'chimera.commands.ls.board', {'project': None, 'goal': None}),
     )
 
 
@@ -101,7 +102,7 @@ def test_ls_cli_renders_loose_agents(
                 f'  · 39d68dfa  stray  idle  {stray}',
             ]
         ),
-        logging=[('INFO', 'ls')],
+        logging=action_logs('ls', 'chimera.commands.ls.board', {'project': None, 'goal': None}),
     )
 
 
@@ -122,7 +123,7 @@ def test_ls_cli_stays_global_from_inside_a_project(
                 '    (no goals)',
             ]
         ),
-        logging=[('INFO', 'ls')],
+        logging=action_logs('ls', 'chimera.commands.ls.board', {'project': None, 'goal': None}),
     )
 
 
@@ -142,5 +143,5 @@ def test_ls_cli_marks_empty_goals_and_projects(
                 '    (no goals)',
             ]
         ),
-        logging=[('INFO', 'ls')],
+        logging=action_logs('ls', 'chimera.commands.ls.board', {'project': None, 'goal': None}),
     )

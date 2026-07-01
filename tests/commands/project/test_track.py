@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.commands.project.track import track
+from tests.cli import Command, action_logs
 
 
 def test_track_creates_project_layout(tmpdir: TempDir) -> None:
@@ -48,7 +49,10 @@ def test_track_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None
     repo = tmpdir.makedir('myrepo')
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
     command.run('project', 'add', str(repo)).check(
-        output=f'Added {workspace / "myrepo"}', logging=[('INFO', 'project add')]
+        output=f'Added {workspace / "myrepo"}',
+        logging=action_logs(
+            'project add', 'chimera.commands.project.add.add', {'source': str(repo)}
+        ),
     )
     assert (workspace / 'myrepo' / 'config.yaml').is_file() is True
 
@@ -59,6 +63,11 @@ def test_track_cli_outside_a_workspace(tmpdir: TempDir, command: Command) -> Non
     command.run('project', 'add', str(repo)).check(
         output=f'Error: {Path.cwd()} is not inside a Chimera workspace',
         return_code=1,
-        logging=[('INFO', 'project add')],
+        logging=action_logs(
+            'project add',
+            'chimera.commands.project.add.add',
+            {'source': str(repo)},
+            error=f'NotInWorkspaceError: {Path.cwd()} is not inside a Chimera workspace',
+        ),
     )
     tmpdir.compare(path='myrepo', expected=())  # nothing written into the repo dir

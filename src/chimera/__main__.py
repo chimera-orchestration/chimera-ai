@@ -1,4 +1,5 @@
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -9,11 +10,9 @@ from typer._click.shell_completion import CompletionItem
 from typer.core import TyperCommand, TyperGroup
 
 from chimera import logging
-from chimera.commands.agent import Agent
+from chimera.commands.agent import Agent, agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
-from chimera.commands.agent import agents
 from chimera.commands.agent import resume as _resume
-from chimera.commands.agent import scope_line, scoped
 from chimera.commands.doctor import CHECKS, Finding, resolve_root
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
@@ -28,9 +27,8 @@ from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
-from chimera.config import UserError
 from chimera.completions import complete_actor, complete_goal, complete_project
-from chimera.help import command_index, render_json, render_text
+from chimera.config import UserError
 from chimera.context import (
     Project,
     Scope,
@@ -39,6 +37,7 @@ from chimera.context import (
     resolve_scope,
     resolve_workspace,
 )
+from chimera.help import command_index, render_json, render_text
 from chimera.worktrees import ACTORS, AGENT, session_name, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
@@ -152,25 +151,55 @@ def alias_group(aliases: dict[str, str]) -> type[TyperGroup]:
     return AliasGroup
 
 
-class LoggingCommand(TyperCommand):
-    """A command that logs the action it is about to run before running it.
+def logs[F: Callable[..., object]](function: Callable[..., object]) -> Callable[[F], F]:
+    """Tag a command wrapper with the pure function it delegates to, so the start line can
+    log that function's dotted path. The wrapper alone only ever resolves to
+    ``chimera.__main__.*``; apply this *under* the command decorator so the tag is set before
+    typer copies the wrapper's ``__dict__``. A test asserts every command carries one.
+    """
 
-    The chokepoint for the *"every CLI action must be logged"* principle: it configures
-    the loguru sink and records the canonical command path plus parsed params, then runs
-    the command. Synonyms are already resolved to their canonical command by the time
-    ``invoke`` is reached, so the logged name is always the canonical one.
+    def decorate(wrapper: F) -> F:
+        qualname = getattr(function, '__qualname__')  # every command delegate is a function
+        wrapper.__dict__['delegate'] = f'{function.__module__}.{qualname}'
+        return wrapper
+
+    return decorate
+
+
+class LoggingCommand(TyperCommand):
+    """A command that logs a start/end pair around the action it runs.
+
+    The chokepoint for the *"every CLI action must be logged"* principle: it configures the
+    loguru sink, logs a start line (the canonical command path, the delegate's dotted path —
+    see :func:`logs` — and the parsed params), runs the command, then an end line with the
+    duration. A crash makes the end line an ERROR carrying the traceback; an expected
+    ``UserError`` gets a one-line message (not typer's rich traceback) and an ERROR end line
+    with the message but no traceback; a ``typer.Exit``/``Abort`` is normal control flow, so it
+    still ends cleanly. Synonyms are already resolved to their canonical command by the time
+    ``invoke`` is reached, so the logged name is always canonical.
     """
 
     def invoke(self, ctx: Context) -> object:
         logging.configure()
-        logging.log_action(_action(ctx), dict(ctx.params))
+        command = _action(ctx)
+        started = logging.log_start(
+            command, getattr(ctx.command.callback, 'delegate'), dict(ctx.params)
+        )
         try:
-            return super().invoke(ctx)
+            result = super().invoke(ctx)
         except UserError as error:
-            # Expected faults (a bad name, the wrong directory) get a one-line message,
-            # not the rich traceback typer's excepthook renders for an escaping exception.
             typer.echo(f'Error: {error}', err=True)
+            logging.log_user_error(command, started, error)
             raise typer.Exit(1) from error
+        except (typer.Exit, typer.Abort):
+            logging.log_finish(command, started)  # a non-zero exit is an outcome, not a crash
+            raise
+        except Exception:
+            logging.log_failure(command, started)
+            raise
+        else:
+            logging.log_finish(command, started)
+            return result
 
 
 def _action(ctx: Context) -> str:
@@ -235,6 +264,7 @@ app = typer.Typer(
 
 
 @app.command(cls=LoggingCommand, help='Create a Chimera workspace at PATH.')
+@logs(_init)
 def init(path: Annotated[Path, typer.Argument()]) -> None:
     typer.echo(f'Initialized workspace at {_init(path)}')
 
@@ -242,6 +272,7 @@ def init(path: Annotated[Path, typer.Argument()]) -> None:
 @app.command(
     'help', cls=LoggingCommand, help='List every command in one chunk (derived from the live tree).'
 )
+@logs(command_index)
 def help_(
     ctx: typer.Context,
     verbose: Annotated[
@@ -254,6 +285,7 @@ def help_(
 
 
 @app.command(cls=LoggingCommand, help='Check and (with --fix) repair workspace health.')
+@logs(_doctor)
 def doctor(
     path: Annotated[Path | None, typer.Argument()] = None,
     fix: Annotated[
@@ -303,6 +335,7 @@ def _tag(finding: Finding) -> str:
 @app.command(
     'ls', cls=LoggingCommand, help='Show the workspace dashboard (projects → goals → agents).'
 )
+@logs(board)
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     _render_board(board(_scope(ctx, project, goal, infer=False), agents()))
 
@@ -352,6 +385,7 @@ app.add_typer(project_app, name='project')
 @project_app.command(
     'add', cls=LoggingCommand, help='Track a project — clone a git URL or register a local path.'
 )
+@logs(_project_add)
 def project_add(
     source: Annotated[str, typer.Argument(help='Git URL to clone, or local path to track')],
 ) -> None:
@@ -361,6 +395,7 @@ def project_add(
 @project_app.command(
     'rm', cls=LoggingCommand, help='Remove a tracked project (refuses while it has goals).'
 )
+@logs(_project_remove)
 def project_rm(
     name: Annotated[str, typer.Argument(autocompletion=complete_project)], force: ForceOpt = False
 ) -> None:
@@ -369,6 +404,7 @@ def project_rm(
 
 
 @project_app.command('ls', cls=LoggingCommand, help='List tracked projects.')
+@logs(_projects)
 def project_ls() -> None:
     for name in _projects(resolve_workspace(Path.cwd())):
         typer.echo(name)
@@ -385,6 +421,7 @@ app.add_typer(worktree_app, name='worktree')
 @worktree_app.command(
     'add', cls=LoggingCommand, help="Create each actor's branch and the agent worktree for a goal."
 )
+@logs(_worktree_add)
 def worktree_add(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
@@ -404,6 +441,7 @@ def worktree_add(
 
 
 @worktree_app.command('rm', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")
+@logs(_worktree_remove)
 def worktree_rm(
     ctx: typer.Context,
     goal: ExistingGoalArg,
@@ -416,6 +454,7 @@ def worktree_rm(
 
 
 @worktree_app.command('ls', cls=LoggingCommand, help="List a project's worktrees.")
+@logs(_worktree_ls)
 def worktree_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
     for worktree in _worktree_ls(_project(ctx, project).worktrees):
         typer.echo(worktree)
@@ -434,6 +473,7 @@ app.add_typer(goal_app, name='goal')
     cls=PassthroughCommand,
     help="Branch, create the worktree, and launch the goal's agent.",
 )
+@logs(_goal_start)
 def goal_start(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument()],
@@ -463,6 +503,7 @@ def goal_start(
     cls=PassthroughCommand,
     help='Bring an existing branch under goal management and launch its agent.',
 )
+@logs(_goal_adopt)
 def goal_adopt(
     ctx: typer.Context,
     goal: Annotated[str, typer.Argument(help='Existing branch to adopt as a goal')],
@@ -484,6 +525,7 @@ def goal_adopt(
 
 
 @goal_app.command('finish', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")
+@logs(_worktree_remove)
 def goal_finish(
     ctx: typer.Context,
     goal: ExistingGoalArg,
@@ -496,6 +538,7 @@ def goal_finish(
 
 
 @goal_app.command('ls', cls=LoggingCommand, help='List goals.')
+@logs(goals_in_scope)
 def goal_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
     scope = _scope(ctx, project, None)
     for proj, goal in goals_in_scope(scope):
@@ -511,6 +554,7 @@ app.add_typer(agent_app, name='agent')
 @agent_app.command(
     'start', cls=PassthroughCommand, help='Launch an agent session in a goal worktree.'
 )
+@logs(_agent)
 def agent_start(
     ctx: typer.Context,
     prompt: PromptArg = None,
@@ -529,6 +573,7 @@ def agent_start(
 
 
 @agent_app.command('resume', cls=PassthroughCommand, help="Reattach to an agent's session.")
+@logs(_resume)
 def agent_resume(
     ctx: typer.Context,
     prompt: PromptArg = None,
@@ -547,6 +592,7 @@ def agent_resume(
 
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')
+@logs(scoped)
 def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     scope = _scope(ctx, project, goal)
     typer.echo(scope_line(scope))

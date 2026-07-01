@@ -4,6 +4,7 @@ from giterator import Git
 from giterator.testing import Repo
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
+from chimera.commands.worktree.add import add
 from chimera.config import NotInWorkspaceError, ProjectConfig
 from chimera.context import (
     CannotIdentifyProjectError,
@@ -18,7 +19,6 @@ from chimera.context import (
     resolve_scope,
     resolve_workspace,
 )
-from chimera.commands.worktree.add import add
 
 
 def _project(tmpdir: TempDir, parent: Path, name: str = 'proj', repo: str = '/r') -> Path:

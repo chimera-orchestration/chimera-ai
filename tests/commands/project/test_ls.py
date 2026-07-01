@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from testfixtures import Command, TempDir, compare
+from testfixtures import TempDir, compare
 
 from chimera.commands.project.ls import projects
+from tests.cli import Command, action_logs
 
 
 def _projects(tmpdir: TempDir, workspace: Path) -> None:
@@ -21,4 +22,7 @@ def test_projects_lists_tracked_projects_sorted(tmpdir: TempDir, workspace: Path
 
 def test_project_ls_cli(tmpdir: TempDir, workspace_with_env: Path, command: Command) -> None:
     _projects(tmpdir, workspace_with_env)
-    command.run('project', 'ls').check(output='alpha\nbeta', logging=[('INFO', 'project ls')])
+    command.run('project', 'ls').check(
+        output='alpha\nbeta',
+        logging=action_logs('project ls', 'chimera.commands.project.ls.projects', {}),
+    )

@@ -3,12 +3,13 @@ from pathlib import Path
 import pytest
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Command, Replacer, ShouldRaise, TempDir, compare
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.commands.agent import live_sessions
 from chimera.commands.project.rm import remove
-from chimera.commands.worktree.add import add
 from chimera.commands.worktree import rm as worktree_rm
+from chimera.commands.worktree.add import add
+from tests.cli import Command, action_logs
 
 
 @pytest.fixture(autouse=True)
@@ -94,7 +95,10 @@ def test_project_rm_cli(
     workspace, project = _project(tmpdir, git_repo)
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
     command.run('project', 'rm', 'myproj').check(
-        output=f'Removed {project}', logging=[('INFO', 'project rm')]
+        output=f'Removed {project}',
+        logging=action_logs(
+            'project rm', 'chimera.commands.project.rm.remove', {'name': 'myproj', 'force': False}
+        ),
     )
     assert project.exists() is False
 
@@ -106,5 +110,8 @@ def test_project_rm_cli_reports_nothing_to_remove(
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
     command.run('project', 'rm', 'ghost').check(
-        output='No project named ghost to remove', logging=[('INFO', 'project rm')]
+        output='No project named ghost to remove',
+        logging=action_logs(
+            'project rm', 'chimera.commands.project.rm.remove', {'name': 'ghost', 'force': False}
+        ),
     )

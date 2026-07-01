@@ -9,7 +9,6 @@ from chimera.service_config import (
     load_services_config,
 )
 
-
 FULL_YAML = """\
 services:
   - type: docker

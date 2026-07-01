@@ -1,16 +1,13 @@
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from giterator.testing import Repo
-from testfixtures import Command, LogCapture, Replacer, TempDir, not_there
-from testfixtures.command import AbstractRun
-from testfixtures.loguru import LoguruSource
-from testfixtures.mock import Mock, call
+from testfixtures import LogCapture, Replacer, TempDir, not_there
 
 from chimera.__main__ import app
 from chimera.commands.init import init
-from chimera.logging import configure
+from tests.cli import Command, Run, full_capture
 
 
 @pytest.fixture()
@@ -50,44 +47,11 @@ def workspace_with_env(workspace: Path, replace: Replacer) -> Path:
 
 
 @pytest.fixture()
-def logs() -> Iterator[LogCapture]:
-    with LogCapture(LoguruSource()) as captured:
+def full_logs() -> Iterator[LogCapture]:
+    with full_capture() as captured:
         yield captured
 
 
-class Run(AbstractRun):
-    """A run of the ``ch`` CLI, tailored to how Chimera logs.
-
-    Logging is loguru, captured via :class:`LoguruSource`. The sink setup
-    (:func:`chimera.logging.configure`) is mocked away — it's one call to one file, so
-    we just assert it happened on every run rather than restating it in each test.
-    """
-
-    @classmethod
-    def setup_logging(cls) -> LogCapture:
-        return LogCapture(LoguruSource())
-
-    @classmethod
-    def setup_mocks(cls, replace: Replacer) -> Mock:
-        mocks = Mock()
-        replace.in_module(configure, mocks.configure)
-        return mocks
-
-    def check(
-        self,
-        logging: Sequence[tuple[str, str]],
-        output: str = '',
-        return_code: int = 0,
-    ) -> None:
-        __tracebackhide__ = True
-        self.check_results(
-            self.check_output(output, self.output),
-            self.check_return_code(return_code, self.return_code),
-            self.check_logging(logging, self.logging),
-            self.check_mock_calls([call.configure()], self.mocks),
-        )
-
-
 @pytest.fixture()
-def command() -> Command[Run]:
+def command() -> Command:
     return Command(app, runner=Run)
