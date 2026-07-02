@@ -51,10 +51,17 @@ def goal_actors(git: Git, root: Path, goal: str) -> set[str]:
     So cleanup sweeps up any actor beyond the default ``human``/``agent`` pair — a
     branch with no worktree (a human-style actor) and a worktree whose branch is gone
     both surface. Empty for a goal that doesn't exist.
+
+    An actor is a single branch segment, so a nested goal is never mistaken for an
+    actor of its parent: cleaning up ``parent`` sees ``parent/agent`` (actor ``agent``)
+    but not ``parent/child/agent`` (that is goal ``parent/child``'s, not an actor
+    ``child/agent`` of ``parent``).
     """
     branch_prefix, dir_prefix = f'{goal}/', f'{goal}{SEP}'
     return {
-        b.removeprefix(branch_prefix) for b in git.branches() if b.startswith(branch_prefix)
+        actor
+        for b in git.branches()
+        if b.startswith(branch_prefix) and '/' not in (actor := b.removeprefix(branch_prefix))
     } | {
         d.name.removeprefix(dir_prefix)
         for d in worktree_dirs(root)

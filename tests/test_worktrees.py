@@ -76,6 +76,14 @@ class TestGoalActors:
         tmpdir.makedir('worktrees/g-other@agent')
         compare(goal_actors(git, tmpdir / 'worktrees', 'g'), expected={'agent'})
 
+    def test_a_nested_goal_is_not_an_actor_of_its_parent(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        git = Git(git_repo.path)
+        git('branch', 'parent/agent', 'main')
+        git('branch', 'parent/child/agent', 'main')  # a nested goal, not actor 'child/agent'
+        compare(goal_actors(git, tmpdir / 'worktrees', 'parent'), expected={'agent'})
+
     def test_empty_for_an_unknown_goal(self, tmpdir: TempDir, git_repo: Repo) -> None:
         compare(goal_actors(Git(git_repo.path), tmpdir / 'worktrees', 'ghost'), expected=set())
 
