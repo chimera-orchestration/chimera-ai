@@ -7,10 +7,11 @@ from giterator import Git
 
 from chimera.commands.worktree.rm import refuse_if_agents_running
 from chimera.commands.worktree.rm import remove as remove_worktrees
+from chimera.dry import Dry
 from chimera.worktrees import goal_actors, goals, worktree_path
 
 
-def remove(workspace: Path, name: str, force: bool = False) -> Path | None:
+def remove(workspace: Path, name: str, force: bool = False, dry: Dry = Dry()) -> Path | None:
     """Remove a tracked project from the workspace; return the removed dir, or None.
 
     A no-op returning None if the project is already gone. Refuses while the
@@ -19,7 +20,9 @@ def remove(workspace: Path, name: str, force: bool = False) -> Path | None:
     A live agent in any worktree always aborts, even with ``force`` (unlike goal
     finish, whose --force bypasses the liveness check for a single goal). Only the
     workspace's project directory is removed; a tracked repo living outside it is
-    left untouched.
+    left untouched. Under ``dry`` the same checks run but nothing is deleted — the
+    goal teardown and the directory removal are both previewed — and the return is
+    still the dir that *would* be removed.
     """
     project = workspace / name
     if not project.exists():
@@ -43,6 +46,6 @@ def remove(workspace: Path, name: str, force: bool = False) -> Path | None:
             if (wt := worktree_path(worktrees_root, goal, actor)).is_dir()
         )
     for goal in sorted(existing):
-        remove_worktrees(repo, worktrees_root, goal, force=True)
-    shutil.rmtree(project)
+        remove_worktrees(repo, worktrees_root, goal, force=True, dry=dry)
+    dry(shutil.rmtree, project)
     return project

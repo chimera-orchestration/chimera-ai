@@ -9,6 +9,7 @@ from chimera.commands.agent import live_sessions
 from chimera.commands.project.rm import remove
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
+from chimera.dry import Dry
 from tests.cli import Command, action_logs
 
 
@@ -89,6 +90,15 @@ def test_remove_force_aborts_when_an_agent_is_running(
     tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)
 
 
+def test_remove_dry_previews_the_whole_teardown(tmpdir: TempDir, git_repo: Repo) -> None:
+    workspace, project = _project(tmpdir, git_repo, with_goal=True)
+    Repo(project / 'worktrees' / 'g@agent').commit_content('work')  # unmerged, would need force
+    compare(remove(workspace, 'myproj', force=True, dry=Dry(on=True)), expected=project)
+    assert project.is_dir() is True  # nothing removed
+    tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)  # goal intact
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+
+
 def test_project_rm_cli(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
 ) -> None:
@@ -97,10 +107,28 @@ def test_project_rm_cli(
     command.run('project', 'rm', 'myproj').check(
         output=f'Removed {project}',
         logging=action_logs(
-            'project rm', 'chimera.commands.project.rm.remove', {'name': 'myproj', 'force': False}
+            'project rm',
+            'chimera.commands.project.rm.remove',
+            {'name': 'myproj', 'force': False, 'dry': False},
         ),
     )
     assert project.exists() is False
+
+
+def test_project_rm_cli_dry_previews(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    workspace, project = _project(tmpdir, git_repo)
+    replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
+    command.run('project', 'rm', 'myproj', '--dry').check(
+        output=f'Would remove {project}',
+        logging=action_logs(
+            'project rm',
+            'chimera.commands.project.rm.remove',
+            {'name': 'myproj', 'force': False, 'dry': True},
+        ),
+    )
+    assert project.is_dir() is True  # untouched
 
 
 def test_project_rm_cli_reports_nothing_to_remove(
@@ -112,6 +140,8 @@ def test_project_rm_cli_reports_nothing_to_remove(
     command.run('project', 'rm', 'ghost').check(
         output='No project named ghost to remove',
         logging=action_logs(
-            'project rm', 'chimera.commands.project.rm.remove', {'name': 'ghost', 'force': False}
+            'project rm',
+            'chimera.commands.project.rm.remove',
+            {'name': 'ghost', 'force': False, 'dry': False},
         ),
     )

@@ -11,6 +11,7 @@ from chimera.commands.agent import live_sessions
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
 from chimera.commands.worktree.rm import remove
+from chimera.dry import Dry
 from tests.cli import Command, action_logs
 
 
@@ -178,6 +179,23 @@ def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'g/scout', 'main'])
 
 
+def test_remove_dry_previews_without_touching_anything(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    compare(
+        remove(git_repo.path, worktrees, 'g', dry=Dry(on=True)),
+        expected=[worktrees / 'g@agent'],  # what would be removed
+    )
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # still present
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+
+
+def test_remove_dry_logs_no_refs(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        remove(git_repo.path, worktrees, 'g', dry=Dry(on=True))
+    log.check()  # nothing deleted → no ref record
+
+
 def test_remove_allows_a_squash_merged_branch(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('work')  # g/agent ahead of main
@@ -268,7 +286,7 @@ WR = 'chimera.commands.worktree.rm.remove'
 def _rm_refs(cli: str, goal: str, base: str, *, offline: bool = False) -> list[dict[str, object]]:
     """start / `worktree rm: refs` event / end — the lines a rm or finish logs."""
     start, end = action_logs(
-        cli, WR, {'goal': goal, 'force': False, 'project': None, 'offline': offline}
+        cli, WR, {'goal': goal, 'force': False, 'offline': offline, 'dry': False, 'project': None}
     )
     refs = {f'{goal}/agent': base, f'{goal}/human': base}
     event = {
@@ -294,6 +312,22 @@ def test_worktree_rm_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> N
     compare(Git(git_repo.path).branches(), expected=['main'])
 
 
+def test_worktree_rm_cli_dry_previews(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    project = _project(tmpdir, git_repo)
+    command.run('worktree', 'add', 'g')
+    worktree = (project / 'worktrees' / 'g@agent').resolve()
+    command.run('worktree', 'rm', 'g', '--dry').check(
+        output=f'Would remove {worktree}',
+        logging=action_logs(
+            'worktree rm',
+            WR,
+            {'goal': 'g', 'force': False, 'offline': False, 'dry': True, 'project': None},
+        ),
+    )
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+
+
 def test_worktree_rm_cli_reports_nothing_to_remove(
     tmpdir: TempDir, git_repo: Repo, command: Command
 ) -> None:
@@ -301,7 +335,9 @@ def test_worktree_rm_cli_reports_nothing_to_remove(
     command.run('worktree', 'rm', 'ghost').check(
         output='Nothing to remove for ghost',
         logging=action_logs(
-            'worktree rm', WR, {'goal': 'ghost', 'force': False, 'project': None, 'offline': False}
+            'worktree rm',
+            WR,
+            {'goal': 'ghost', 'force': False, 'offline': False, 'dry': False, 'project': None},
         ),
     )
 

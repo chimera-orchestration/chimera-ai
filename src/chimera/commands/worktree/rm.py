@@ -6,6 +6,7 @@ from giterator import Git
 from loguru import logger
 
 from chimera.commands.agent import live_sessions
+from chimera.dry import Dry
 from chimera.worktrees import (
     base_ref,
     branch,
@@ -20,7 +21,12 @@ from chimera.worktrees import (
 
 
 def remove(
-    repo: Path, worktrees_root: Path, goal: str, force: bool = False, fetch: bool = True
+    repo: Path,
+    worktrees_root: Path,
+    goal: str,
+    force: bool = False,
+    fetch: bool = True,
+    dry: Dry = Dry(),
 ) -> list[Path]:
     """Remove the goal's worktrees and branches; refuse on unsaved work unless force.
 
@@ -32,7 +38,9 @@ def remove(
     refreshes ``origin`` first so a branch merged upstream is recognised as merged. The
     deleted branches and the commits they pointed at are logged first (see
     ``agent-docs/logging.md``), so a force-discarded branch can still be recovered from the
-    log. Returns removed worktrees.
+    log. Under ``dry`` the same discovery and safety checks run but nothing is deleted (so
+    no refs change and no ref line is logged); the return is still what *would* be removed.
+    Returns removed worktrees.
     """
     git = Git(repo)
     registered = registered_worktrees(git)
@@ -51,12 +59,12 @@ def remove(
     removed: list[Path] = []
     for actor, worktree in worktrees.items():
         if worktree.resolve() in registered:
-            git('worktree', 'remove', *(('--force',) if force else ()), str(worktree))
+            dry(git, 'worktree', 'remove', *(('--force',) if force else ()), str(worktree))
             removed.append(worktree)
         if (ref := branch(goal, actor)) in branches:
             # -D not -d: _refuse_if_unsafe is the authority on what's safe to drop (it sees
             # squash/rebase merges that git's ancestry-only -d would wrongly call unmerged).
-            git('branch', '-D', ref)
+            dry(git, 'branch', '-D', ref)
     if (after := ref_shas(git, *refs)) != before:
         logger.bind(goal=goal, git={'before': before, 'after': after}, force=force).info(
             'worktree rm: refs'

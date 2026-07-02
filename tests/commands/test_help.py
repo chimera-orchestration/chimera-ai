@@ -29,7 +29,7 @@ def test_finish_entry_is_fully_derived() -> None:
             path='goal finish',
             usage='GOAL',
             summary="Remove a goal's worktrees and branches.",
-            options=('--force', '--offline', '--project/-p TEXT'),
+            options=('--force', '--offline', '--dry', '--project/-p TEXT'),
             synonyms=('cleanup',),
         ),
     )

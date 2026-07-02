@@ -61,7 +61,7 @@ def test_cleanup_dispatches_to_finish(
     start, end = action_logs(
         'goal finish',
         'chimera.commands.worktree.rm.remove',
-        {'goal': 'feature-x', 'force': False, 'project': None, 'offline': False},
+        {'goal': 'feature-x', 'force': False, 'offline': False, 'dry': False, 'project': None},
     )
     command.run('goal', 'cleanup', 'feature-x').check(
         output=f'Removed {worktree}',

@@ -37,6 +37,7 @@ from chimera.context import (
     resolve_scope,
     resolve_workspace,
 )
+from chimera.dry import Dry
 from chimera.help import command_index, render_json, render_text
 from chimera.worktrees import ACTORS, AGENT, session_name, worktree_path
 
@@ -77,6 +78,9 @@ PromptArg = Annotated[
     typer.Argument(help='Prompt; its presence runs the agent in background'),
 ]
 ForceOpt = Annotated[bool, typer.Option('--force')]
+DryOpt = Annotated[
+    bool, typer.Option('--dry', help='Preview what would be removed; change nothing')
+]
 DangerousOpt = Annotated[
     bool,
     typer.Option(
@@ -397,10 +401,16 @@ def project_add(
 )
 @logs(_project_remove)
 def project_rm(
-    name: Annotated[str, typer.Argument(autocompletion=complete_project)], force: ForceOpt = False
+    name: Annotated[str, typer.Argument(autocompletion=complete_project)],
+    force: ForceOpt = False,
+    dry: DryOpt = False,
 ) -> None:
-    removed = _project_remove(resolve_workspace(Path.cwd()), name, force)
-    typer.echo(f'Removed {removed}' if removed else f'No project named {name} to remove')
+    dry_run = Dry(dry)
+    removed = _project_remove(resolve_workspace(Path.cwd()), name, force, dry_run)
+    if removed:
+        typer.echo(f'{dry_run.verb("Removed", "Would remove")} {removed}')
+    else:
+        typer.echo(f'No project named {name} to remove')
 
 
 @project_app.command('ls', cls=LoggingCommand, help='List tracked projects.')
@@ -447,10 +457,16 @@ def worktree_rm(
     goal: ExistingGoalArg,
     force: ForceOpt = False,
     offline: OfflineOpt = False,
+    dry: DryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
-    _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline), goal)
+    dry_run = Dry(dry)
+    _report_removed(
+        _worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline, dry=dry_run),
+        goal,
+        dry_run,
+    )
 
 
 @worktree_app.command('ls', cls=LoggingCommand, help="List a project's worktrees.")
@@ -531,10 +547,16 @@ def goal_finish(
     goal: ExistingGoalArg,
     force: ForceOpt = False,
     offline: OfflineOpt = False,
+    dry: DryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
-    _report_removed(_worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline), goal)
+    dry_run = Dry(dry)
+    _report_removed(
+        _worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline, dry=dry_run),
+        goal,
+        dry_run,
+    )
 
 
 @goal_app.command('ls', cls=LoggingCommand, help='List goals.')
@@ -608,9 +630,10 @@ def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = Non
         typer.echo(row.rstrip())
 
 
-def _report_removed(removed: list[Path], goal: str) -> None:
+def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
+    verb = dry.verb('Removed', 'Would remove')
     for worktree in removed:
-        typer.echo(f'Removed {worktree}')
+        typer.echo(f'{verb} {worktree}')
     if not removed:
         typer.echo(f'Nothing to remove for {goal}')
 
