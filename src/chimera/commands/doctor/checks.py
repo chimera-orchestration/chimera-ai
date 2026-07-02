@@ -17,12 +17,15 @@ from chimera.commands.doctor.core import (
 )
 from chimera.commands.init import TEMPLATE
 from chimera.worktrees import (
+    AGENT,
     HUMAN,
     SEP,
     base_ref,
     branch,
+    checkout_of,
     default_branch,
     fetch_origin,
+    goals,
     is_dirty,
     is_merged,
     ref_shas,
@@ -176,6 +179,68 @@ class StaleHumanWorktreeCheck:
                 if fixing:
                     git('worktree', 'remove', str(worktree))
                 yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
+class InertBranchCheck:
+    """A goal's non-agent actor branch sitting at an already-integrated commit is dead weight.
+
+    The agent branch always has a worktree and keeps advancing; a ``human`` (or ad-hoc
+    ``reviewer``/``pr``) branch is lazy in the current layout — but earlier ``goal start`` created
+    ``<goal>/human`` up front, most commonly parked at the branch point. Such a branch carries
+    nothing not already recoverable elsewhere, so it's inert: ``--fix`` deletes it (the human can
+    re-materialise it any time with ``goal sync``), logging the sha first for recovery.
+
+    Inert means the tip is either pushed (contained in a remote-tracking ref) or an ancestor of the
+    local default branch — nothing unique to the branch is lost. Only branches of a *known* goal
+    (one with a ``<goal>@agent`` worktree) are considered, and a branch checked out anywhere is left
+    alone (git won't force-delete it, and it may be where a human is standing).
+    """
+
+    name = 'inert-branches'
+
+    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+        for project in iter_project_dirs(workspace):
+            repo = project_repo(project)
+            worktrees_dir = project / 'worktrees'
+            if repo is None or not repo.is_dir() or not worktrees_dir.is_dir():
+                continue
+            git = Git(repo)
+            branches = set(git.branches())
+            default = default_branch(git)
+            default_ref = default if default in branches else None
+            for goal in sorted(goals(worktrees_dir)):
+                for ref in sorted(b for b in branches if b.startswith(f'{goal}/')):
+                    actor = ref.removeprefix(f'{goal}/')
+                    if actor == AGENT or '/' in actor:
+                        continue  # the agent has a worktree; anything nested isn't an actor branch
+                    if checkout_of(git, ref) is not None:
+                        continue  # checked out somewhere — never force-delete under a checkout
+                    if not _is_inert(git, ref, default_ref):
+                        continue
+                    if fix:
+                        before = ref_shas(git, ref)
+                        git('branch', '-D', ref)
+                        logger.bind(git={'before': before, 'after': ref_shas(git, ref)}).info(
+                            f'{self.name}: refs'
+                        )
+                    yield Finding(
+                        self.name,
+                        f'{ref} points at an already-integrated commit — inert',
+                        resolved=fix,
+                        fixable=True,
+                    )
+
+
+def _is_inert(git: Git, ref: str, default_ref: str | None) -> bool:
+    """Whether ``ref``'s tip is recoverable elsewhere — pushed, or an ancestor of the default branch.
+
+    Either guarantee means deleting the branch loses nothing: the commit lives on a remote, or on
+    the local default branch it was taken from. Without a remote and without the default branch,
+    neither can be proven, so the branch is treated as *not* inert (never deleted).
+    """
+    if git('branch', '--remotes', '--contains', ref).strip():
+        return True  # pushed — recoverable from a remote
+    return default_ref is not None and _is_ancestor(git, ref, default_ref)
 
 
 class LegacyWorktreeSeparatorCheck:
@@ -679,6 +744,7 @@ CHECKS: tuple[Check, ...] = (
     GitignoreCheck(),
     ProjectConfigCheck(),
     StaleHumanWorktreeCheck(),
+    InertBranchCheck(),
     LegacyWorktreeSeparatorCheck(),
     WorktreeBranchCheck(),
     OrphanedWorktreeCheck(),

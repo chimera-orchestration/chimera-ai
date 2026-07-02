@@ -108,6 +108,14 @@ add/retire via the `CHECKS` tuple). Current checks:
   Reconciles workspaces created before a template entry was added
 - **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
+- **inert-branches** — delete a known goal's non-agent actor branch (`{goal}/human`, `reviewer`, `pr`,
+  …) that's dead weight: its tip is already recoverable elsewhere — pushed (contained in a
+  remote-tracking ref) or an ancestor of the local default branch — so nothing unique is lost. Most
+  often the branch point an old eager `goal start` created. `--fix` deletes it (the human can
+  re-materialise it any time with `ch goal sync`), logging the sha first for recovery. A branch that's
+  checked out anywhere is left alone (git won't force-delete it, and it may be where a human stands),
+  as is a branch with unique unpushed commits; a goal is "known" only when it has a `{goal}@agent`
+  worktree, so a stray feature branch is never mistaken for a goal actor branch
 - **worktree-separator** — rename legacy dash-joined `{goal}-{actor}` worktree dirs to `{goal}@{actor}`
   via `git worktree move` (keyed off each worktree's `{goal}/{actor}` branch, so the boundary is never
   guessed; a branch that isn't exactly `<goal>/<actor>` — e.g. a nested `parked/…` prefix — is left

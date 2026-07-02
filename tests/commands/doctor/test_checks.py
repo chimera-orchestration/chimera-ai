@@ -11,6 +11,7 @@ from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor.checks import (
     ChimeraUpToDateCheck,
     GitignoreCheck,
+    InertBranchCheck,
     LegacyWorktreeSeparatorCheck,
     OrphanedWorktreeCheck,
     ProjectConfigCheck,
@@ -783,6 +784,133 @@ class TestWorktreeBranch:
         ws = _ws(tmpdir)
         _project(tmpdir, ws, ws / 'proj' / 'repo')  # repo path doesn't exist
         compare(_run(WorktreeBranchCheck(), ws), expected=[])
+
+
+def _cloned_project(tmpdir, ws):
+    """A project whose repo is a clone of an origin (so `main` is pushed)."""
+    origin = Repo.make(tmpdir / 'origin')
+    origin.commit_content('seed')
+    local = Repo.clone(origin.path, tmpdir / 'repo')
+    return local, _project(tmpdir, ws, local.path)
+
+
+def _bare_branch(repo, ref, base='main'):
+    Git(repo.path)('branch', '--no-track', ref, base)
+
+
+class TestInertBranch:
+    def test_pushed_branch_deleted(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        repo, project = _cloned_project(tmpdir, ws)
+        _agent_worktree(repo, project, 'g')  # makes 'g' a known goal
+        _bare_branch(repo, 'g/human')  # sits at main, which is on origin/main
+        seed = Git(repo.path).rev_parse('g/human', short=False)
+        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+            compare(
+                _run(InertBranchCheck(), ws, fix=True),
+                expected=[
+                    Finding(
+                        'inert-branches',
+                        'g/human points at an already-integrated commit — inert',
+                        resolved=True,
+                        fixable=True,
+                    )
+                ],
+            )
+        compare('g/human' in set(Git(repo.path).branches()), expected=False)
+        log.check(('inert-branches: refs', {'git': {'before': {'g/human': seed}, 'after': {}}}))
+
+    def test_report_only_leaves_it(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        repo, project = _cloned_project(tmpdir, ws)
+        _agent_worktree(repo, project, 'g')
+        _bare_branch(repo, 'g/human')
+        compare(
+            _run(InertBranchCheck(), ws),
+            expected=[
+                Finding(
+                    'inert-branches',
+                    'g/human points at an already-integrated commit — inert',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        compare('g/human' in set(Git(repo.path).branches()), expected=True)
+
+    def test_ancestor_of_local_default_deleted_without_a_remote(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)  # no origin at all
+        _agent_worktree(git_repo, project, 'g')
+        _bare_branch(git_repo, 'g/human')  # == main tip → ancestor of local main
+        compare(
+            _run(InertBranchCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'inert-branches',
+                    'g/human points at an already-integrated commit — inert',
+                    resolved=True,
+                    fixable=True,
+                )
+            ],
+        )
+        compare('g/human' in set(Git(git_repo.path).branches()), expected=False)
+
+    def test_branch_with_unique_unpushed_work_kept(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        _agent_worktree(git_repo, project, 'g')
+        temp = project / 'worktrees' / 'g@human'  # commit on human, then drop the worktree
+        Git(git_repo.path)('worktree', 'add', '-b', 'g/human', str(temp), 'main')
+        Repo(temp).commit_content('unpushed human work')
+        Git(git_repo.path)('worktree', 'remove', str(temp))  # g/human now bare and ahead of main
+        compare(_run(InertBranchCheck(), ws), expected=[])  # unique work, not integrated → kept
+
+    def test_checked_out_branch_left_alone(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        _agent_worktree(git_repo, project, 'g')
+        Git(git_repo.path)('worktree', 'add', '-b', 'g/human', str(tmpdir / 'human'), 'main')
+        compare(_run(InertBranchCheck(), ws), expected=[])  # checked out → never force-deleted
+
+    def test_agent_branch_never_flagged(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        _agent_worktree(git_repo, project, 'g')  # only g/agent, sitting at main
+        compare(_run(InertBranchCheck(), ws), expected=[])
+
+    def test_custom_actor_flagged(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        repo, project = _cloned_project(tmpdir, ws)
+        _agent_worktree(repo, project, 'g')
+        _bare_branch(repo, 'g/reviewer')  # not human-specific
+        compare(
+            _run(InertBranchCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'inert-branches',
+                    'g/reviewer points at an already-integrated commit — inert',
+                    resolved=True,
+                    fixable=True,
+                )
+            ],
+        )
+        compare('g/reviewer' in set(Git(repo.path).branches()), expected=False)
+
+    def test_ignores_a_branch_whose_goal_has_no_agent_worktree(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        ws = _ws(tmpdir)
+        _project(tmpdir, ws, git_repo.path)
+        _bare_branch(git_repo, 'g/human')  # no g@agent worktree → 'g' isn't a known goal
+        compare(_run(InertBranchCheck(), ws), expected=[])
+
+    def test_skips_project_without_a_live_repo(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        _project(tmpdir, ws, ws / 'proj' / 'repo')  # repo path doesn't exist
+        compare(_run(InertBranchCheck(), ws), expected=[])
 
 
 class TestOrphanedWorktree:
