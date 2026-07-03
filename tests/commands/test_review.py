@@ -15,6 +15,7 @@ from chimera.commands import review as review_mod
 from chimera.commands.agent import agent
 from chimera.commands.review import (
     GUARDRAIL,
+    _check_pr_repo,
     _default_template,
     _pr_metadata,
     _prompt,
@@ -223,6 +224,50 @@ def test_wire_upstream_leaves_config_clean_when_the_pr_ref_is_missing(tmpdir: Te
     # the failed fetch must not have persisted a dead refspec that bricks future fetches
     compare(git('config', '--get-all', 'remote.origin.fetch'), expected=before)
     git('fetch', '--prune', 'origin')  # proves origin is still fetchable
+
+
+def _repo_with_origin(tmpdir: TempDir, origin_url: str) -> Git:
+    git = Git(Repo.make(tmpdir / 'r').path)
+    git('remote', 'add', 'origin', origin_url)
+    return git
+
+
+def test_check_pr_repo_refuses_a_url_for_another_repo(tmpdir: TempDir) -> None:
+    git = _repo_with_origin(tmpdir, 'https://github.com/chimera-orchestration/chimera-ai.git')
+    with ShouldRaise(
+        UserError(
+            "PR is on simplistix/giterator, but project 'chimera' tracks "
+            'chimera-orchestration/chimera-ai — run ch review from the project '
+            'tracking simplistix/giterator (or pass -p).'
+        )
+    ):
+        _check_pr_repo(git, 'https://github.com/simplistix/giterator/pull/2', 'chimera')
+
+
+def test_check_pr_repo_passes_when_the_scp_origin_matches(tmpdir: TempDir) -> None:
+    git = _repo_with_origin(tmpdir, 'git@github.com:simplistix/giterator.git')
+    compare(
+        _check_pr_repo(git, 'https://github.com/simplistix/giterator/pull/2', 'proj'), expected=None
+    )
+
+
+def test_check_pr_repo_skips_a_local_path_origin(tmpdir: TempDir) -> None:
+    git = _repo_with_origin(tmpdir, str(tmpdir / 'somewhere' / 'origin'))
+    compare(
+        _check_pr_repo(git, 'https://github.com/simplistix/giterator/pull/2', 'proj'), expected=None
+    )
+
+
+def test_check_pr_repo_skips_without_an_origin(tmpdir: TempDir) -> None:
+    compare(
+        _check_pr_repo(Git(Repo.make(tmpdir / 'r').path), 'https://x/o/r/pull/1', 'p'),
+        expected=None,
+    )
+
+
+def test_check_pr_repo_skips_an_unparseable_pr_url(tmpdir: TempDir) -> None:
+    git = _repo_with_origin(tmpdir, 'https://github.com/o/r.git')
+    compare(_check_pr_repo(git, '', 'proj'), expected=None)  # number-only PR: no comparable URL
 
 
 def test_wire_upstream_refuses_a_mismatched_head(tmpdir: TempDir) -> None:

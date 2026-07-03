@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from importlib.resources import files
 from pathlib import Path
 from string import Template
+from urllib.parse import urlsplit
 
 from giterator import Git, GitError
 from loguru import logger
@@ -59,6 +60,7 @@ def review(
     """
     git = Git(repo)
     meta = _pr_metadata(repo, pr)
+    _check_pr_repo(git, meta['url'], project)
     number, head_oid = int(str(meta['number'])), str(meta['headRefOid'])
     goal = f'pr-{number}'
     tracking = _wire_upstream(git, number, head_oid)
@@ -87,6 +89,47 @@ def _pr_metadata(repo: Path, pr: str) -> dict[str, object]:
     if result.returncode != 0:
         raise UserError(f'gh pr view {pr} failed: {result.stderr.strip()}')
     return json.loads(result.stdout)
+
+
+def _check_pr_repo(git: Git, url: object, project: str) -> None:
+    """Refuse when the PR's repo isn't the project's origin — a URL pointing at a different repo.
+
+    ``ch review`` resolves the project from cwd but takes git refs from *that* project's repo, so
+    a URL for another repo would try to fetch a PR ref this origin doesn't have (poisoning nothing
+    now, but still failing against the wrong repo). When both the PR URL and the origin carry a
+    github identity, a mismatch is refused up front with a clear message instead of a confusing
+    fetch failure. Skipped when either side has no comparable identity — a local-path origin, or a
+    number-only PR argument whose metadata URL doesn't parse.
+    """
+    try:
+        origin = git('remote', 'get-url', 'origin').strip()
+    except GitError:
+        return  # no origin to compare against — the fetch itself will surface any problem
+    if (
+        (want := _repo_slug(urlsplit(str(url)).path))
+        and (have := _origin_slug(origin))
+        and want != have
+    ):
+        raise UserError(
+            f"PR is on {want}, but project '{project}' tracks {have} — "
+            f'run ch review from the project tracking {want} (or pass -p).'
+        )
+
+
+def _repo_slug(path: str) -> str:
+    """``owner/repo`` (lowercased) from a URL path like ``/owner/repo/pull/<n>``; '' if too short."""
+    parts = path.strip('/').split('/')
+    return '/'.join(parts[:2]).lower() if len(parts) >= 2 else ''
+
+
+def _origin_slug(url: str) -> str:
+    """``owner/repo`` from a github-style origin (https/ssh/scp); '' for a bare local path."""
+    text = url.removesuffix('.git')
+    if '://' in text:
+        return _repo_slug(urlsplit(text).path)
+    if ':' in text and '/' not in text.split(':', 1)[0]:  # scp-like git@host:owner/repo
+        return _repo_slug(text.split(':', 1)[1])
+    return ''  # a local-path origin has no remote identity to compare
 
 
 def _wire_upstream(git: Git, number: int, head_oid: str) -> str:
