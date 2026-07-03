@@ -1,11 +1,11 @@
 import os
 import shutil
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 
 import pytest
 from giterator.testing import Repo
-from testfixtures import Replacer, ShouldRaise, TempDir, compare, not_there
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare, not_there
 
 from chimera.commands.doctor import (
     CHECKS,
@@ -34,13 +34,18 @@ def _no_chimera_checkout(replace: Replacer) -> None:
     replace.in_module(doctor_checks.chimera_repo, lambda: None)
 
 
-def _env_not_set(workspace: Path) -> str:
-    """The workspace-env finding's exact text when $CHIMERA_WORKSPACE is unset."""
+def _env_not_set_message(workspace: Path) -> str:
+    """The workspace-env finding's raw message when $CHIMERA_WORKSPACE is unset."""
     return (
-        '[workspace-env] (needs attention) $CHIMERA_WORKSPACE is not set — '
+        '$CHIMERA_WORKSPACE is not set — '
         'add to your shell profile (~/.zshrc, ~/.bashrc, ~/.profile):\n'
         f'    export CHIMERA_WORKSPACE="{workspace}"'
     )
+
+
+def _env_not_set(workspace: Path) -> str:
+    """The same finding as doctor's CLI output renders it."""
+    return f'[workspace-env] (needs attention) {_env_not_set_message(workspace)}'
 
 
 class _FakeCheck:
@@ -173,6 +178,43 @@ def test_select_checks_unknown_name_raises() -> None:
         select_checks(['bogus', 'gitignore'])
 
 
+def test_doctor_logs_a_clean_check(tmpdir: TempDir, full_logs: LogCapture) -> None:
+    doctor(_ws(tmpdir), checks=(_FakeCheck(),))
+    full_logs.check({'level': 'INFO', 'message': 'fake: checked', 'findings': 0})
+
+
+def test_doctor_logs_each_finding_at_its_level(tmpdir: TempDir, full_logs: LogCapture) -> None:
+    check = _FakeCheck(
+        Finding('fake', 'left broken', resolved=False, fixable=True),
+        Finding('fake', 'now fixed', resolved=True, fixable=True),
+    )
+    doctor(_ws(tmpdir), fix=True, checks=(check,))
+    full_logs.check(
+        {'level': 'INFO', 'message': 'fake: checked', 'findings': 2},
+        {'level': 'ERROR', 'message': 'fake: left broken', 'fixable': True, 'resolved': False},
+        {'level': 'INFO', 'message': 'fake: now fixed', 'fixable': True, 'resolved': True},
+    )
+
+
+def _check_line(name: str, findings: int) -> dict[str, object]:
+    return {'level': 'INFO', 'message': f'{name}: checked', 'findings': findings}
+
+
+def _finding_line(
+    check: str, message: str, *, fixable: bool, resolved: bool = False
+) -> dict[str, object]:
+    return {
+        'level': 'INFO' if resolved else 'ERROR',
+        'message': f'{check}: {message}',
+        'fixable': fixable,
+        'resolved': resolved,
+    }
+
+
+def _env_finding(workspace: Path) -> dict[str, object]:
+    return _finding_line('workspace-env', _env_not_set_message(workspace), fixable=False)
+
+
 def _doctor_logs(
     path: str | None,
     *,
@@ -181,21 +223,30 @@ def _doctor_logs(
     repo: str | None = None,
     check: tuple[str, ...] = (),
     exclude: tuple[str, ...] = (),
+    findings: Mapping[str, Sequence[dict[str, object]]] = {},
+    excluded: Mapping[str, Sequence[dict[str, object]]] = {},
 ) -> list[dict[str, object]]:
-    """doctor start / the chimera-up-to-date checkout event / end, with its CLI params.
+    """doctor start / per-check lines with their findings / end, with its CLI params.
 
-    The checkout event only appears when the chimera-up-to-date check actually runs —
-    a ``-c`` selection that leaves it out doesn't log it.
+    Lines appear only for the checks a ``-c`` selection actually runs (so the
+    chimera-up-to-date checkout event vanishes with the check); ``excluded`` lines land
+    before their check's checked line, mirroring the driver's order.
     """
     start, end = action_logs(
         'doctor',
         'chimera.commands.doctor.doctor',
         {'path': path, 'fix': fix, 'check': check, 'exclude': exclude, 'verbose': verbose},
     )
-    if check and 'chimera-up-to-date' not in check:
-        return [start, end]
-    checkout = {'level': 'INFO', 'message': 'chimera-up-to-date: checkout', 'repo': repo}
-    return [start, checkout, end]
+    lines: list[dict[str, object]] = [start]
+    for selected in select_checks(check):
+        if selected.name == 'chimera-up-to-date':
+            lines.append({'level': 'INFO', 'message': 'chimera-up-to-date: checkout', 'repo': repo})
+        lines.extend(excluded.get(selected.name, ()))
+        found = findings.get(selected.name, ())
+        lines.append(_check_line(selected.name, len(found)))
+        lines.extend(found)
+    lines.append(end)
+    return lines
 
 
 def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -289,7 +340,9 @@ def test_doctor_cli_flags_unset_workspace_env(
     command.run('doctor').check(
         output=_env_not_set(ws.resolve()) + '\n(+11 checks passed — ch doctor -v to list)',
         return_code=1,
-        logging=_doctor_logs(None, fix=False),
+        logging=_doctor_logs(
+            None, fix=False, findings={'workspace-env': [_env_finding(ws.resolve())]}
+        ),
     )
 
 
@@ -305,7 +358,18 @@ def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command)
             ]
         ),
         return_code=1,
-        logging=_doctor_logs(None, fix=False),
+        logging=_doctor_logs(
+            None,
+            fix=False,
+            findings={
+                'workspace-config': [
+                    _finding_line(
+                        'workspace-config', f'{ws.resolve()}/config.yaml missing', fixable=True
+                    )
+                ],
+                'workspace-env': [_env_finding(ws.resolve())],
+            },
+        ),
     )
     assert (ws / 'config.yaml').exists() is False  # report only, nothing written
 
@@ -320,7 +384,20 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
             f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing\n'
             '(+11 checks passed — ch doctor -v to list)'
         ),
-        logging=_doctor_logs(str(ws), fix=True),
+        logging=_doctor_logs(
+            str(ws),
+            fix=True,
+            findings={
+                'workspace-config': [
+                    _finding_line(
+                        'workspace-config',
+                        f'{ws.resolve()}/config.yaml missing',
+                        fixable=True,
+                        resolved=True,
+                    )
+                ]
+            },
+        ),
     )
     compare(tmpdir.parse('lycia/config.yaml'), expected={'kind': 'workspace'})
 
@@ -338,7 +415,20 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Co
             ]
         ),
         return_code=1,
-        logging=_doctor_logs(str(ws), fix=True),
+        logging=_doctor_logs(
+            str(ws),
+            fix=True,
+            findings={
+                'workspace-config': [
+                    _finding_line(
+                        'workspace-config',
+                        f'{ws.resolve()}/config.yaml has kind: nonsense at the workspace root',
+                        fixable=False,
+                    )
+                ],
+                'workspace-env': [_env_finding(ws.resolve())],
+            },
+        ),
     )
 
 
@@ -352,7 +442,18 @@ def test_doctor_cli_check_runs_only_the_named_checks(
             f'[workspace-config] (would fix — run with --fix) {ws.resolve()}/config.yaml missing'
         ),
         return_code=1,
-        logging=_doctor_logs(str(ws), fix=False, check=('workspace-config',)),
+        logging=_doctor_logs(
+            str(ws),
+            fix=False,
+            check=('workspace-config',),
+            findings={
+                'workspace-config': [
+                    _finding_line(
+                        'workspace-config', f'{ws.resolve()}/config.yaml missing', fixable=True
+                    )
+                ]
+            },
+        ),
     )
 
 
@@ -369,7 +470,22 @@ def test_doctor_cli_check_fixes_only_the_named_checks(
         output='\n'.join(
             f'[gitignore] (fixed) {ws.resolve()}/.gitignore missing {entry!r}' for entry in entries
         ),
-        logging=_doctor_logs(str(ws), fix=True, check=('gitignore',)),
+        logging=_doctor_logs(
+            str(ws),
+            fix=True,
+            check=('gitignore',),
+            findings={
+                'gitignore': [
+                    _finding_line(
+                        'gitignore',
+                        f'{ws.resolve()}/.gitignore missing {entry!r}',
+                        fixable=True,
+                        resolved=True,
+                    )
+                    for entry in entries
+                ]
+            },
+        ),
     )
     assert (ws / 'config.yaml').exists() is False  # the unselected check touched nothing
 
@@ -405,16 +521,12 @@ def test_doctor_cli_exclude_mutes_a_finding(
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', not_there)  # workspace-env would flag and exit 1
     os.chdir(ws)
-    start, checkout, end = _doctor_logs(None, fix=False, exclude=('workspace-env',))
-    dropped = _excluded_log(
-        'workspace-env',
-        '$CHIMERA_WORKSPACE is not set — '
-        'add to your shell profile (~/.zshrc, ~/.bashrc, ~/.profile):\n'
-        f'    export CHIMERA_WORKSPACE="{ws.resolve()}"',
-    )
+    dropped = _excluded_log('workspace-env', _env_not_set_message(ws.resolve()))
     command.run('doctor', '-x', 'workspace-env').check(
         output=('(+12 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
-        logging=[start, checkout, dropped, end],
+        logging=_doctor_logs(
+            None, fix=False, exclude=('workspace-env',), excluded={'workspace-env': [dropped]}
+        ),
     )
 
 
@@ -423,11 +535,15 @@ def test_doctor_cli_exclude_prevents_the_fix(
 ) -> None:
     ws = _ws(tmpdir)  # missing root config.yaml → a fixable workspace-config finding
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    start, checkout, end = _doctor_logs(str(ws), fix=True, exclude=('workspace-config',))
     dropped = _excluded_log('workspace-config', f'{ws.resolve()}/config.yaml missing')
     command.run('doctor', str(ws), '--fix', '-x', 'workspace-config').check(
         output=('(+12 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
-        logging=[start, dropped, checkout, end],
+        logging=_doctor_logs(
+            str(ws),
+            fix=True,
+            exclude=('workspace-config',),
+            excluded={'workspace-config': [dropped]},
+        ),
     )
     assert (ws / 'config.yaml').exists() is False  # excluded, so --fix never wrote it
 
@@ -462,7 +578,20 @@ def test_doctor_cli_navigates_from_a_project(
                 '(+11 checks passed — ch doctor -v to list)',
             ]
         ),
-        logging=_doctor_logs(None, fix=True),
+        logging=_doctor_logs(
+            None,
+            fix=True,
+            findings={
+                'project-config': [
+                    _finding_line(
+                        'project-config',
+                        f'{ws.resolve()}/chimera/config.yaml missing kind: project',
+                        fixable=True,
+                        resolved=True,
+                    )
+                ]
+            },
+        ),
     )
     # fixed, not corrupted
     compare(
