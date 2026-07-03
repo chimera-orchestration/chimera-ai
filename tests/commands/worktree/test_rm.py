@@ -166,7 +166,7 @@ def test_remove_refuses_an_unmerged_stray_actor(tmpdir: TempDir, git_repo: Repo)
         )
     ):
         remove(git_repo.path, worktrees, 'g')
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'g/scout', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/scout', 'main'])
 
 
 def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
@@ -186,7 +186,7 @@ def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
         )
     ):
         remove(git_repo.path, worktrees, 'g')
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'g/scout', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/scout', 'main'])
 
 
 def test_remove_dry_previews_without_touching_anything(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -196,7 +196,7 @@ def test_remove_dry_previews_without_touching_anything(tmpdir: TempDir, git_repo
         expected=[worktrees / 'g@agent'],  # what would be removed
     )
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # still present
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_remove_dry_logs_no_refs(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -333,7 +333,7 @@ def test_worktree_rm_cli_dry_previews(tmpdir: TempDir, git_repo: Repo, command: 
         ),
     )
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_worktree_rm_cli_reports_nothing_to_remove(

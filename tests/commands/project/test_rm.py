@@ -96,7 +96,7 @@ def test_remove_dry_previews_the_whole_teardown(tmpdir: TempDir, git_repo: Repo)
     compare(remove(workspace, 'myproj', force=True, dry=Dry(on=True)), expected=project)
     assert project.is_dir() is True  # nothing removed
     tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)  # goal intact
-    compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_project_rm_cli(
