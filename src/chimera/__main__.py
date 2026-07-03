@@ -626,7 +626,10 @@ def goal_sync(
     overrides = _overrides(ctx)
     p = _project(ctx, project)
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
-    typer.echo(_sync_line(_goal_sync(p.repo, g, move, to, Path.cwd())))
+    result = _goal_sync(p.repo, g, move, to, Path.cwd())
+    typer.echo(_sync_line(result))
+    if result.outcome is Outcome.CONFLICT:
+        raise typer.Exit(1)  # append left mid-conflict for the human to finish
 
 
 def _sync_line(result: SyncResult) -> str:
@@ -641,6 +644,13 @@ def _sync_line(result: SyncResult) -> str:
             line = f'Fast-forwarded {mover} to {target} ({sha})'
         case Outcome.AHEAD:
             line = f'{mover} leads {target} by {result.ahead_by} — nothing to sync'
+        case Outcome.APPENDED:
+            line = f'Appended {result.appended} commit(s) from {target} onto {mover} ({sha})'
+        case Outcome.CONFLICT:
+            return (
+                f'Conflict appending {target} onto {mover} — resolve in {result.conflict}, '
+                f'`git cherry-pick --continue`, then re-run'
+            )
     if (c := result.checkout) is None:
         return line
     if c.done:

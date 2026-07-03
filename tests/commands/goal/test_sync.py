@@ -6,7 +6,7 @@ from testfixtures import LogCapture, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.__main__ import _sync_line
-from chimera.commands.goal.sync import Outcome, SyncResult, sync
+from chimera.commands.goal.sync import Outcome, SyncResult, _exists, sync
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
 from chimera.worktrees import Checkout
@@ -31,6 +31,10 @@ def _refs_log() -> LogCapture:
     return LogCapture(LoguruSource(('message', 'extra')))
 
 
+def _wm(mover: str = 'human') -> str:
+    return f'refs/chimera/synced/g/{mover}'
+
+
 def test_materialises_the_mover_at_the_target(tmpdir: TempDir, git_repo: Repo) -> None:
     _goal(tmpdir, git_repo)
     with _refs_log() as log:
@@ -39,10 +43,11 @@ def test_materialises_the_mover_at_the_target(tmpdir: TempDir, git_repo: Repo) -
         result, expected=SyncResult(Outcome.CREATED, 'human', 'agent', _short(git_repo, 'g/agent'))
     )
     compare(_full(git_repo, 'g/human'), expected=_full(git_repo, 'g/agent'))
+    tip = _full(git_repo, 'g/human')
     log.check(
         (
             'goal sync: refs',
-            {'goal': 'g', 'git': {'before': {}, 'after': {'g/human': _full(git_repo, 'g/human')}}},
+            {'goal': 'g', 'git': {'before': {}, 'after': {'g/human': tip, _wm(): tip}}},
         ),
     )
 
@@ -70,14 +75,15 @@ def test_fast_forwards_a_bare_mover(tmpdir: TempDir, git_repo: Repo) -> None:
         expected=SyncResult(Outcome.FASTFORWARDED, 'human', 'agent', _short(git_repo, 'g/agent')),
     )
     compare(_full(git_repo, 'g/human'), expected=_full(git_repo, 'g/agent'))
+    new = _full(git_repo, 'g/agent')
     log.check(
         (
             'goal sync: refs',
             {
                 'goal': 'g',
                 'git': {
-                    'before': {'g/human': old},
-                    'after': {'g/human': _full(git_repo, 'g/agent')},
+                    'before': {'g/human': old, _wm(): old},
+                    'after': {'g/human': new, _wm(): new},
                 },
             },
         ),
@@ -133,15 +139,173 @@ def test_leaves_a_mover_that_leads_the_target(tmpdir: TempDir, git_repo: Repo) -
     log.check()  # nothing moved
 
 
-def test_refuses_a_diverged_mover(tmpdir: TempDir, git_repo: Repo) -> None:
-    worktrees = _goal(tmpdir, git_repo)
-    sync(git_repo.path, 'g')
+def _squash_human(git_repo: Repo, tmpdir: TempDir) -> Path:
+    """Materialise g/human at the agent tip, then squash agent's work into one commit on it.
+
+    Returns the checkout g/human sits in. ``reset --soft main`` keeps the agent tip's tree while
+    moving the branch back to main, so the follow-up commit is a faithful squash (same tree).
+    """
+    sync(git_repo.path, 'g')  # create g/human at agent tip, watermark recorded
     checkout = tmpdir / 'human'
     Git(git_repo.path)('worktree', 'add', str(checkout), 'g/human')
-    Repo(checkout).commit_content('human-work')  # human diverges…
-    Repo(worktrees / 'g@agent').commit_content('agent-work')  # …from agent
-    with ShouldRaise(UserError('g/human has diverged from g/agent — rebase it first')):
+    Git(checkout)('reset', '--soft', Git(git_repo.path).rev_parse('main'))
+    Git(checkout)('commit', '-qm', 'H1 squash of agent work')
+    return checkout
+
+
+def _case_b(tmpdir: TempDir, git_repo: Repo) -> Path:
+    """A squash-plus-own-edit human whose next agent commit conflicts with the human's edit."""
+    agent_wt = _goal(tmpdir, git_repo) / 'g@agent'
+    (agent_wt / 'shared.txt').write_text('line\n')
+    Git(agent_wt)('add', '-A')
+    Git(agent_wt)('commit', '-qm', 'a1')
+    checkout = _squash_human(git_repo, tmpdir)  # human squash contains shared.txt == 'line'
+    (checkout / 'shared.txt').write_text('line-HUMAN\n')  # the human's own edit
+    Git(checkout)('add', '-A')
+    Git(checkout)('commit', '-qm', 'own edit')
+    (agent_wt / 'shared.txt').write_text('line-AGENT\n')  # agent touches the same line
+    Git(agent_wt)('add', '-A')
+    Git(agent_wt)('commit', '-qm', 'a2')
+    return checkout
+
+
+def _resume(checkout: Path, *args: str) -> None:
+    Git(checkout)('-c', 'core.editor=true', 'cherry-pick', *args)
+
+
+def test_appends_new_agent_commits_onto_a_squash(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    Repo(worktrees / 'g@agent').commit_content('a2')  # agent has real work
+    checkout = _squash_human(git_repo, tmpdir)  # human = one squashed commit
+    a3 = Repo(worktrees / 'g@agent').commit_content('a3', short=False)  # new agent commit
+    result = sync(git_repo.path, 'g')
+    compare(
+        result,
+        expected=SyncResult(
+            Outcome.APPENDED, 'human', 'agent', _short(git_repo, 'g/human'), appended=1
+        ),
+    )
+    # human tip reproduces agent's tree (a3 applied cleanly onto the squash), watermark advanced
+    compare(
+        Git(checkout)('rev-parse', 'HEAD^{tree}').strip(),
+        expected=_full(git_repo, 'g/agent^{tree}'),
+    )
+    compare(_full(git_repo, _wm()), expected=a3)
+    compare(sync(git_repo.path, 'g').outcome, expected=Outcome.NOOP)  # idempotent
+
+
+def test_appends_via_tree_match_without_a_watermark(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    Git(git_repo.path)('update-ref', '-d', _wm())  # legacy: no watermark → tree-match seeds it
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    result = sync(git_repo.path, 'g')
+    compare(result.outcome, expected=Outcome.APPENDED)
+    compare(
+        Git(checkout)('rev-parse', 'HEAD^{tree}').strip(),
+        expected=_full(git_repo, 'g/agent^{tree}'),
+    )
+
+
+def test_diverged_with_no_record_refuses(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    (checkout / 'own.txt').write_text('mine')  # an edit of the human's own → tree matches nothing
+    Git(checkout)('add', '-A')
+    Git(checkout)('commit', '-qm', 'own edit')
+    Git(git_repo.path)('update-ref', '-d', _wm())  # and no watermark to fall back on
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    with ShouldRaise(
+        UserError(
+            'g/human has diverged from g/agent with no integration record — '
+            'rebase or cherry-pick by hand this time'
+        )
+    ):
         sync(git_repo.path, 'g')
+
+
+def test_diverged_append_refuses_a_dirty_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    (checkout / 'scratch.txt').write_text('wip')  # uncommitted work in the human checkout
+    Repo(worktrees / 'g@agent').commit_content('a2')  # a commit to append
+    with ShouldRaise(
+        UserError(
+            f'g/human is checked out with uncommitted changes at {checkout.resolve()} — '
+            f'commit or stash there first'
+        )
+    ):
+        sync(git_repo.path, 'g')
+
+
+def test_bare_diverged_mover_needs_a_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    Git(git_repo.path)('worktree', 'remove', str(checkout))  # g/human now bare
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    with ShouldRaise(
+        UserError('check out g/human to append 1 commit(s) (git checkout g/human …), then re-run')
+    ):
+        sync(git_repo.path, 'g')
+
+
+def test_conflict_leaves_the_cherry_pick_in_the_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
+    checkout = _case_b(tmpdir, git_repo)
+    watermark = _full(git_repo, _wm())
+    result = sync(git_repo.path, 'g')
+    compare(
+        result,
+        expected=SyncResult(
+            Outcome.CONFLICT,
+            'human',
+            'agent',
+            _short(git_repo, 'g/human'),
+            conflict=checkout.resolve(),
+        ),
+    )
+    compare(_exists(Git(checkout), 'CHERRY_PICK_HEAD'), expected=True)  # left mid cherry-pick
+    compare(_full(git_repo, _wm()), expected=watermark)  # watermark NOT advanced
+
+
+def test_in_progress_append_blocks_a_rerun(tmpdir: TempDir, git_repo: Repo) -> None:
+    checkout = _case_b(tmpdir, git_repo)
+    sync(git_repo.path, 'g')  # leaves a conflict
+    with ShouldRaise(
+        UserError(
+            f'an append is in progress at {checkout.resolve()} — resolve and '
+            f'`git cherry-pick --continue`, then re-run'
+        )
+    ):
+        sync(git_repo.path, 'g')
+
+
+def test_finished_append_is_reconciled_on_rerun(tmpdir: TempDir, git_repo: Repo) -> None:
+    checkout = _case_b(tmpdir, git_repo)
+    sync(git_repo.path, 'g')  # conflict
+    (checkout / 'shared.txt').write_text('line-BOTH\n')  # human resolves…
+    Git(checkout)('add', '-A')
+    _resume(checkout, '--continue')  # …and finishes the cherry-pick by hand
+    result = sync(
+        git_repo.path, 'g'
+    )  # reconcile: mover moved → advance watermark, then nothing new
+    compare(result.outcome, expected=Outcome.NOOP)
+    compare(_full(git_repo, _wm()), expected=_full(git_repo, 'g/agent'))
+    compare(sync(git_repo.path, 'g').outcome, expected=Outcome.NOOP)  # marker gone, still clean
+
+
+def test_aborted_append_is_reconciled_and_retried(tmpdir: TempDir, git_repo: Repo) -> None:
+    checkout = _case_b(tmpdir, git_repo)
+    watermark = _full(git_repo, _wm())
+    sync(git_repo.path, 'g')  # conflict
+    _resume(checkout, '--abort')  # human backs out
+    result = sync(git_repo.path, 'g')  # reconcile: mover unchanged → clear marker, retry the append
+    compare(result.outcome, expected=Outcome.CONFLICT)  # same conflict, freshly attempted
+    compare(_full(git_repo, _wm()), expected=watermark)  # still not advanced
 
 
 def test_refuses_when_the_target_is_missing(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -201,6 +365,17 @@ def test_sync_line_renders_each_outcome() -> None:
     compare(
         _sync_line(SyncResult(Outcome.AHEAD, 'human', 'agent', 'abc123', ahead_by=2)),
         expected='human leads agent by 2 — nothing to sync',
+    )
+    compare(
+        _sync_line(SyncResult(Outcome.APPENDED, 'human', 'agent', 'abc123', appended=2)),
+        expected='Appended 2 commit(s) from agent onto human (abc123)',
+    )
+    compare(
+        _sync_line(
+            SyncResult(Outcome.CONFLICT, 'human', 'agent', 'abc123', conflict=Path('/repo'))
+        ),
+        expected='Conflict appending agent onto human — resolve in /repo, '
+        '`git cherry-pick --continue`, then re-run',
     )
 
 
@@ -262,10 +437,28 @@ def test_goal_sync_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> Non
             {
                 'level': 'INFO',
                 'goal': 'g',
-                'git': {'before': {}, 'after': {'g/human': agent}},
+                'git': {'before': {}, 'after': {'g/human': agent, _wm(): agent}},
                 'message': 'goal sync: refs',
             },
             end,
         ],
     )
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
+
+
+def test_goal_sync_cli_conflict_exits_nonzero(
+    tmpdir: TempDir, git_repo: Repo, command: Command
+) -> None:
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    checkout = _case_b(tmpdir, git_repo)
+    command.run('goal', 'sync', 'g').check(
+        output=f'Conflict appending agent onto human — resolve in {checkout.resolve()}, '
+        '`git cherry-pick --continue`, then re-run',
+        # the conflict is on the first new commit, so no ref moves — just the start/end pair
+        logging=action_logs(
+            'goal sync',
+            'chimera.commands.goal.sync.sync',
+            {'goal': 'g', 'move': 'human', 'to': 'agent', 'project': None},
+        ),
+        return_code=1,
+    )

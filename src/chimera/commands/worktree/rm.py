@@ -8,6 +8,7 @@ from loguru import logger
 from chimera.commands.agent import live_sessions
 from chimera.dry import Dry
 from chimera.worktrees import (
+    SEP,
     base_ref,
     branch,
     fetch_origin,
@@ -54,8 +55,9 @@ def remove(
         if fetch:
             fetch_origin(git)
         _refuse_if_unsafe(git, goal, worktrees, registered, branches)
+    sync_refs = _sync_refs(git, goal)  # refs/chimera/synced/<goal>/* `goal sync` watermarks
     refs = tuple(branch(goal, actor) for actor in worktrees)
-    before = ref_shas(git, *refs)
+    before = ref_shas(git, *refs, *sync_refs)
     removed: list[Path] = []
     for actor, worktree in worktrees.items():
         if worktree.resolve() in registered:
@@ -65,11 +67,31 @@ def remove(
             # -D not -d: _refuse_if_unsafe is the authority on what's safe to drop (it sees
             # squash/rebase merges that git's ancestry-only -d would wrongly call unmerged).
             dry(git, 'branch', '-D', ref)
-    if (after := ref_shas(git, *refs)) != before:
+    for ref in sync_refs:
+        dry(git, 'update-ref', '-d', ref)
+    _clear_markers(git, goal, dry)
+    if (after := ref_shas(git, *refs, *sync_refs)) != before:
         logger.bind(goal=goal, git={'before': before, 'after': after}, force=force).info(
             'worktree rm: refs'
         )
     return removed
+
+
+def _sync_refs(git: Git, goal: str) -> tuple[str, ...]:
+    """The goal's ``goal sync`` watermark refs (``refs/chimera/synced/<goal>/*``)."""
+    return tuple(git('for-each-ref', '--format=%(refname)', f'refs/chimera/synced/{goal}/').split())
+
+
+def _clear_markers(git: Git, goal: str, dry: Dry) -> None:
+    """Remove any transient append-in-progress markers the goal left in the shared git dir."""
+    appending = (
+        Path(git('rev-parse', '--path-format=absolute', '--git-common-dir').strip())
+        / 'chimera'
+        / 'appending'
+    )
+    if appending.is_dir():
+        for marker in appending.glob(f'{goal}{SEP}*'):
+            dry(marker.unlink)
 
 
 def refuse_if_agents_running(worktrees: Iterable[Path]) -> None:

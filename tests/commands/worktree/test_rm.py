@@ -101,6 +101,21 @@ def test_remove_takes_out_on_demand_actor_branches(tmpdir: TempDir, git_repo: Re
     compare(git.branches(), expected=['main'])  # every g/* branch gone, not just agent
 
 
+def test_remove_sweeps_the_goals_sync_watermarks(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    git('update-ref', 'refs/chimera/synced/g/human', git.rev_parse('g/agent'))  # a `goal sync` mark
+    common = Path(git('rev-parse', '--path-format=absolute', '--git-common-dir').strip())
+    marker = common / 'chimera' / 'appending' / 'g@human'  # a conflicted-append marker
+    marker.parent.mkdir(parents=True)
+    marker.write_text('before=x\ntarget=y\n')
+    remove(git_repo.path, worktrees, 'g')
+    compare(
+        git('for-each-ref', '--format=%(refname)', 'refs/chimera/synced/g/').strip(), expected=''
+    )
+    assert marker.exists() is False
+
+
 def test_remove_refuses_uncommitted_changes(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')
