@@ -210,7 +210,7 @@ def test_remove_allows_a_squash_merged_branch(tmpdir: TempDir, git_repo: Repo) -
 def test_remove_recognises_an_upstream_merge_only_after_fetch(tmpdir: TempDir) -> None:
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir / 'repo')
+    local = Git.clone(origin, tmpdir / 'repo')
     worktrees = tmpdir / 'worktrees'
     add(local.path, worktrees, 'g', fetch=False)
     Repo(worktrees / 'g@agent').commit_content('work', datetime(2022, 1, 1))  # newer than seed

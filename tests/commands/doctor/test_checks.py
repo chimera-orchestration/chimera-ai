@@ -752,7 +752,7 @@ def _chimera_clone(tmpdir: TempDir, replace: Replacer) -> tuple[Repo, Git]:
     """An origin repo and a clone wired together like a real dev checkout, patched in."""
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed')
-    local = Git.clone(origin.path, tmpdir / 'local')
+    local = Git.clone(origin, tmpdir / 'local')
     replace.in_module(doctor_checks.chimera_repo, lambda: local.path)
     return origin, local
 

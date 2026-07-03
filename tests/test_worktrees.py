@@ -150,7 +150,7 @@ class TestDefaultBranch:
 
     def test_resolves_via_origin_head(self, tmpdir: TempDir) -> None:
         source = _renamed(Repo.make(tmpdir / 'src'), 'trunk')  # neither main nor master
-        compare(default_branch(Git.clone(source.path, tmpdir / 'clone')), expected='trunk')
+        compare(default_branch(Git.clone(source, tmpdir / 'clone')), expected='trunk')
 
     def test_falls_back_to_main(self, tmpdir: TempDir) -> None:
         repo = _renamed(Repo.make(tmpdir / 'x'), 'trunk')  # no main/master, no origin
@@ -159,12 +159,12 @@ class TestDefaultBranch:
 
 class TestBaseRef:
     def test_ties_favour_local(self, tmpdir: TempDir, git_repo: Repo) -> None:
-        compare(base_ref(Git.clone(git_repo.path, tmpdir / 'clone')), expected='main')
+        compare(base_ref(Git.clone(git_repo, tmpdir / 'clone')), expected='main')
 
     def test_prefers_origin_when_newer(self, tmpdir: TempDir) -> None:
         origin = Repo.make(tmpdir / 'origin')
         origin.commit_content('seed', datetime(2020, 1, 1))
-        clone = Git.clone(origin.path, tmpdir / 'clone')
+        clone = Git.clone(origin, tmpdir / 'clone')
         origin.commit_content('remote-ahead', datetime(2022, 1, 1))
         clone('fetch', 'origin')
         compare(base_ref(clone), expected='origin/main')
@@ -185,7 +185,7 @@ class TestFetchOrigin:
         compare(git('remote').split(), expected=[])
 
     def test_updates_remote_tracking_refs(self, tmpdir: TempDir, git_repo: Repo) -> None:
-        clone = Git.clone(git_repo.path, tmpdir / 'clone')
+        clone = Git.clone(git_repo, tmpdir / 'clone')
         git_repo.commit_content('remote-ahead')
         fetch_origin(clone)
         compare(
