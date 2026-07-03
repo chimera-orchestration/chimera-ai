@@ -200,19 +200,20 @@ class LegacyWorktreeSeparatorCheck:
 def _canonical_worktree(worktree: Path) -> Path | None:
     """Where worktree should live given its <goal>/<actor> branch; None if it has none.
 
-    A missing dir (a stale registration) is the orphaned-worktrees check's concern.
-    Human worktrees return None too — the human-worktrees check removes rather than
-    renames them.
+    The branch is trusted only when it is exactly ``<goal>/<actor>`` — neither segment
+    may contain a slash, so a nested-prefix branch (``parked/<goal>/<actor>``) is never
+    misread as goal ``parked/<goal>``, which would "canonicalise" the worktree into a
+    subdirectory. A missing dir (a stale registration) is the orphaned-worktrees check's
+    concern. Human worktrees return None too — the human-worktrees check removes rather
+    than renames them.
     """
     if not worktree.is_dir():
         return None
     branch = Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip()
-    if '/' not in branch:  # detached HEAD or a plain branch — not a managed worktree
-        return None
-    goal, actor = branch.rsplit('/', 1)
-    if actor == HUMAN:
-        return None
-    return worktree_path(worktree.parent, goal, actor)
+    match branch.split('/'):
+        case [goal, actor] if actor != HUMAN:
+            return worktree_path(worktree.parent, goal, actor)
+    return None
 
 
 class WorktreeBranchCheck:

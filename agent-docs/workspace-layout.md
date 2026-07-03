@@ -101,7 +101,8 @@ add/retire via the `CHECKS` tuple). Current checks:
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **worktree-separator** — rename legacy dash-joined `{goal}-{actor}` worktree dirs to `{goal}@{actor}`
   via `git worktree move` (keyed off each worktree's `{goal}/{actor}` branch, so the boundary is never
-  guessed; preserves uncommitted work; humans are left to the human-worktrees check)
+  guessed; a branch that isn't exactly `<goal>/<actor>` — e.g. a nested `parked/…` prefix — is left
+  alone; preserves uncommitted work; humans are left to the human-worktrees check)
 - **worktree-branch** — an agent worktree `{goal}@{actor}` is checked out on the branch its dir name
   implies (`{goal}/{actor}`); catches a git GUI flipping it onto the wrong branch or detaching HEAD (the
   inverse of worktree-separator: it trusts the dir name and fixes the branch). `--fix` checks the right

@@ -510,6 +510,14 @@ class TestLegacyWorktreeSeparator:
         shutil.rmtree(worktree)  # registered but the dir is gone — can't read its branch
         compare(_run(LegacyWorktreeSeparatorCheck(), ws), expected=[])
 
+    def test_ignores_nested_prefix_branch(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = project / 'worktrees' / 'old-goal@A'
+        Git(git_repo.path)('worktree', 'add', '-b', 'parked/new-goal/A', str(worktree), 'main')
+        compare(_run(LegacyWorktreeSeparatorCheck(), ws, fix=True), expected=[])
+        tmpdir.compare(['old-goal@A'], path='lycia/proj/worktrees', recursive=False)
+
 
 def _agent_worktree(repo, project, goal, actor='agent'):
     worktree = project / 'worktrees' / f'{goal}@{actor}'
