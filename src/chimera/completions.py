@@ -14,6 +14,7 @@ from pathlib import Path
 
 from typer._click.core import Context
 
+from chimera.commands.doctor import CHECKS
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.project.ls import projects
 from chimera.context import resolve_scope, resolve_workspace
@@ -54,3 +55,8 @@ def complete_goal(ctx: Context, incomplete: str) -> list[str]:
 def complete_actor(incomplete: str) -> list[str]:
     """Actor names matching the typed prefix."""
     return [actor for actor in ACTORS if actor.startswith(incomplete)]
+
+
+def complete_check(incomplete: str) -> list[str]:
+    """Doctor check names matching the typed prefix."""
+    return [check.name for check in CHECKS if check.name.startswith(incomplete)]

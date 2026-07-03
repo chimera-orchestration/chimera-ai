@@ -3,9 +3,41 @@ from pathlib import Path
 
 from chimera.commands.doctor.checks import CHECKS
 from chimera.commands.doctor.core import Check, Finding, read_raw
-from chimera.config import NotInWorkspaceError
+from chimera.config import NotInWorkspaceError, UserError
 
-__all__ = ['CHECKS', 'Check', 'Finding', 'doctor', 'find_workspace_root', 'resolve_root']
+__all__ = [
+    'CHECKS',
+    'Check',
+    'Finding',
+    'UnknownCheckError',
+    'doctor',
+    'find_workspace_root',
+    'resolve_root',
+    'select_checks',
+]
+
+
+class UnknownCheckError(UserError):
+    def __init__(self, unknown: Sequence[str], valid: Sequence[str]) -> None:
+        plural = 's' if len(unknown) != 1 else ''
+        super().__init__(
+            f'unknown check{plural}: {", ".join(unknown)} (available: {", ".join(valid)})'
+        )
+
+
+def select_checks(names: Sequence[str], checks: Sequence[Check] = CHECKS) -> tuple[Check, ...]:
+    """The checks matching names — all of them for no names.
+
+    Always in registry order, whatever order the names came in: the registry's order is
+    load-bearing (workspace-clean runs last to sweep up earlier fixes' edits).
+    """
+    if not names:
+        return tuple(checks)
+    valid = [check.name for check in checks]
+    if unknown := [name for name in names if name not in valid]:
+        raise UnknownCheckError(unknown, valid)
+    wanted = set(names)
+    return tuple(check for check in checks if check.name in wanted)
 
 
 def doctor(workspace: Path, fix: bool = False, checks: Sequence[Check] = CHECKS) -> list[Finding]:

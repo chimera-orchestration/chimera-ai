@@ -90,6 +90,9 @@ the workspace. Two rules:
 `ch doctor [path]` (default cwd) walks up to the workspace root — skipping project dirs, which it
 spots by the `repo:` key in their `config.yaml` — then reports drift from the current schema/layout;
 `--fix` applies the repairs; `--verbose`/`-v` also prints the checks that pass (`[name] (ok)`).
+`-c/--check <name>` (repeatable, tab-completes) limits the run — and so `--fix` — to the named
+checks, always in registry order (workspace-clean still sweeps last); use it to fix one problem
+while leaving the rest alone.
 It's a registry of independent checks (`chimera.commands.doctor`,
 add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates

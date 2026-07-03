@@ -13,7 +13,7 @@ from chimera import logging
 from chimera.commands.agent import Agent, agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
-from chimera.commands.doctor import CHECKS, Finding, resolve_root
+from chimera.commands.doctor import Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.adopt import adopt as _goal_adopt
@@ -27,7 +27,7 @@ from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
-from chimera.completions import complete_actor, complete_goal, complete_project
+from chimera.completions import complete_actor, complete_check, complete_goal, complete_project
 from chimera.config import UserError
 from chimera.context import (
     Project,
@@ -295,10 +295,20 @@ def doctor(
     fix: Annotated[
         bool, typer.Option('--fix', help='Apply the fixes instead of only reporting')
     ] = False,
+    check: Annotated[
+        list[str] | None,
+        typer.Option(
+            '--check',
+            '-c',
+            help='Run only the named checks (repeatable; default: all)',
+            autocompletion=complete_check,
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option('--verbose', '-v', help='Show every check, including the ones that pass')
     ] = False,
 ) -> None:
+    selected = select_checks(check or ())
     anchor = (path or Path.cwd()).resolve()
     root = resolve_root(path, Path.cwd(), os.environ.get('CHIMERA_WORKSPACE'))
     if root != anchor:
@@ -307,18 +317,18 @@ def doctor(
         repo = doctor_checks.chimera_repo()
         if repo is not None:
             typer.echo(f'note: chimera checkout: {repo}')
-    findings = _doctor(root, fix)
+    findings = _doctor(root, fix, selected)
     by_check: dict[str, list[Finding]] = {}
     for finding in findings:
         by_check.setdefault(finding.check, []).append(finding)
-    for check in CHECKS:
-        reported = by_check.get(check.name)
+    for selected_check in selected:
+        reported = by_check.get(selected_check.name)
         if reported:
             for finding in reported:
                 typer.echo(f'[{finding.check}] ({_tag(finding)}) {finding.message}')
         elif verbose:
-            typer.echo(f'[{check.name}] (ok)')
-    passing = sum(1 for check in CHECKS if check.name not in by_check)
+            typer.echo(f'[{selected_check.name}] (ok)')
+    passing = sum(1 for selected_check in selected if selected_check.name not in by_check)
     if not findings:
         if verbose:
             typer.echo('All checks passed!')

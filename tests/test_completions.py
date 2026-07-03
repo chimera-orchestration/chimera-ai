@@ -7,7 +7,8 @@ from typer.completion import completion_init
 from typer.main import get_command
 
 from chimera.__main__ import app
-from chimera.completions import complete_actor
+from chimera.commands.doctor import CHECKS
+from chimera.completions import complete_actor, complete_check
 
 completion_init()
 
@@ -110,3 +111,15 @@ def test_zsh_and_bash_scripts_emit() -> None:
 def test_complete_actor_directly() -> None:
     compare(complete_actor(''), expected=['human', 'agent'])
     compare(complete_actor('ag'), expected=['agent'])
+
+
+def test_check_option_value() -> None:
+    compare(
+        _complete(['doctor', '-c'], 'worktree-'),
+        expected=['worktree-separator', 'worktree-branch'],
+    )
+
+
+def test_complete_check_directly() -> None:
+    compare(complete_check(''), expected=[check.name for check in CHECKS])
+    compare(complete_check('git'), expected=['gitignore'])
