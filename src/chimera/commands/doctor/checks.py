@@ -225,6 +225,11 @@ class WorktreeBranchCheck:
     branch belongs here. ``--fix`` checks the right branch back out, but only when the
     worktree is clean (a dirty switch could lose uncommitted work); the before/after
     HEAD shas are logged first so the move can be undone (see ``agent-docs/logging.md``).
+
+    When the implied branch is *gone* (its goal was finished after the work moved to
+    another branch — e.g. parked under a prefix), the worktree is a leftover: ``--fix``
+    removes it, but only when it is clean and on a real branch, so every commit stays
+    reachable from the branch it sits on. A dirty or detached leftover needs a human.
     """
 
     name = 'worktree-branch'
@@ -239,9 +244,9 @@ class WorktreeBranchCheck:
             branches = set(git.branches())
             root = worktrees_dir.resolve()
             for worktree in sorted(p for p in registered_worktrees(git) if p.parent == root):
-                yield from self._check(worktree, branches, fix)
+                yield from self._check(git, worktree, branches, fix)
 
-    def _check(self, worktree: Path, branches: set[str], fix: bool) -> Iterator[Finding]:
+    def _check(self, git: Git, worktree: Path, branches: set[str], fix: bool) -> Iterator[Finding]:
         if not worktree.is_dir() or SEP not in worktree.name:
             return  # a stale registration (orphan check's concern) or an unmanaged dir
         goal, actor = worktree.name.rsplit(SEP, 1)
@@ -253,12 +258,7 @@ class WorktreeBranchCheck:
         if actual == expected:
             return
         if expected not in branches:
-            yield Finding(
-                self.name,
-                f'{worktree} is on {actual}, but branch {expected} is gone',
-                resolved=False,
-                fixable=False,
-            )
+            yield from self._leftover(git, wt, worktree, actual, expected, fix)
             return
         if is_dirty(worktree):
             yield Finding(
@@ -278,6 +278,38 @@ class WorktreeBranchCheck:
         yield Finding(
             self.name, f'{worktree} is on {actual}, expected {expected}', resolved=fix, fixable=True
         )
+
+    def _leftover(
+        self, git: Git, wt: Git, worktree: Path, actual: str, expected: str, fix: bool
+    ) -> Iterator[Finding]:
+        """Findings for a worktree whose implied branch no longer exists.
+
+        Removal is only safe when every commit stays reachable afterwards: the worktree
+        must be clean and on a real branch (a detached HEAD's commits may be referenced
+        by nothing else). No ref changes, but the branch and sha the worktree held are
+        logged so it can be recreated (``git worktree add <dir> <branch>``).
+        """
+        gone = f'{worktree} is on {actual}, but branch {expected} is gone'
+        if actual == 'HEAD':
+            yield Finding(
+                self.name, f'{gone} — detached, left in place', resolved=False, fixable=False
+            )
+            return
+        if is_dirty(worktree):
+            yield Finding(
+                self.name,
+                f'{gone} — uncommitted changes, left in place',
+                resolved=False,
+                fixable=False,
+            )
+            return
+        if fix:
+            sha = wt.rev_parse('HEAD', short=False)
+            git('worktree', 'remove', str(worktree))
+            logger.bind(worktree=str(worktree), branch=actual, sha=sha).info(
+                f'{self.name}: removed'
+            )
+        yield Finding(self.name, f'{gone} — leftover worktree', resolved=fix, fixable=True)
 
 
 class OrphanedWorktreeCheck:

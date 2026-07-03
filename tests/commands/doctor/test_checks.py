@@ -602,23 +602,94 @@ class TestWorktreeBranch:
         )
         compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='stray')
 
-    def test_missing_target_branch_not_fixable(self, tmpdir: TempDir, git_repo: Repo) -> None:
+    def test_leftover_worktree_removed(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree, to='parked/g/agent')
+        git = Git(git_repo.path)
+        git('branch', '-D', 'g/agent')  # the goal is finished; the work lives on parked/…
+        sha = git.rev_parse('parked/g/agent', short=False)
+        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+            compare(
+                _run(WorktreeBranchCheck(), ws, fix=True),
+                expected=[
+                    Finding(
+                        'worktree-branch',
+                        f'{worktree} is on parked/g/agent, but branch g/agent is gone '
+                        '— leftover worktree',
+                        resolved=True,
+                        fixable=True,
+                    )
+                ],
+            )
+        tmpdir.compare(path='lycia/proj/worktrees', expected=())
+        compare('parked/g/agent' in git.branches(), expected=True)  # the work survives
+        log.check(
+            (
+                'worktree-branch: removed',
+                {'worktree': str(worktree), 'branch': 'parked/g/agent', 'sha': sha},
+            )
+        )
+
+    def test_leftover_worktree_report_only(self, tmpdir: TempDir, git_repo: Repo) -> None:
         ws = _ws(tmpdir)
         project = _project(tmpdir, ws, git_repo.path)
         worktree = _agent_worktree(git_repo, project, 'g')
         _flip(worktree)
-        Git(git_repo.path)('branch', '-D', 'g/agent')  # nothing left to switch back to
+        Git(git_repo.path)('branch', '-D', 'g/agent')
+        compare(
+            _run(WorktreeBranchCheck(), ws),
+            expected=[
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on stray, but branch g/agent is gone — leftover worktree',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        tmpdir.compare(['g@agent'], path='lycia/proj/worktrees', recursive=False)  # left as-is
+
+    def test_leftover_dirty_left_in_place(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        Git(git_repo.path)('branch', '-D', 'g/agent')
+        (worktree / 'scratch.txt').write_text('wip')
         compare(
             _run(WorktreeBranchCheck(), ws, fix=True),
             expected=[
                 Finding(
                     'worktree-branch',
-                    f'{worktree} is on stray, but branch g/agent is gone',
+                    f'{worktree} is on stray, but branch g/agent is gone '
+                    '— uncommitted changes, left in place',
                     resolved=False,
                     fixable=False,
                 )
             ],
         )
+        compare((worktree / 'scratch.txt').read_text(), expected='wip')
+
+    def test_leftover_detached_left_in_place(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        Git(worktree)('checkout', '--detach')
+        Git(git_repo.path)('branch', '-D', 'g/agent')  # HEAD may be the commits' only anchor
+        compare(
+            _run(WorktreeBranchCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on HEAD, but branch g/agent is gone — detached, left in place',
+                    resolved=False,
+                    fixable=False,
+                )
+            ],
+        )
+        tmpdir.compare(['g@agent'], path='lycia/proj/worktrees', recursive=False)
 
     def test_detached_head_fixed(self, tmpdir: TempDir, git_repo: Repo) -> None:
         ws = _ws(tmpdir)

@@ -107,7 +107,11 @@ add/retire via the `CHECKS` tuple). Current checks:
   implies (`{goal}/{actor}`); catches a git GUI flipping it onto the wrong branch or detaching HEAD (the
   inverse of worktree-separator: it trusts the dir name and fixes the branch). `--fix` checks the right
   branch back out, but only when the worktree is clean — a dirty switch could lose uncommitted work, so
-  it's reported and left. The before/after HEAD shas are logged for recovery
+  it's reported and left. The before/after HEAD shas are logged for recovery. When the implied branch
+  is *gone* (goal finished after the work moved elsewhere, e.g. parked under a prefix), the worktree is
+  a leftover: `--fix` removes it, but only when clean and on a real branch so every commit stays
+  reachable; the branch and sha it held are logged so it can be recreated. A dirty or detached leftover
+  is reported for a human
 - **orphaned-worktrees** — prune stale git worktree registrations; flag untracked dirs under
   `worktrees/`
 - **chimera-up-to-date** — chimera's own dev checkout (found by walking up from the running
