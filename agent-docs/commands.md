@@ -72,6 +72,16 @@ command — but only when it actually withheld something *and* `-v` wasn't given
 hidden exactly when an agent would otherwise have no way to discover it: `ch help` trails
 `ch help -v also lists…`; `ch doctor` reveals the count of passing checks it suppressed.
 
+## Destructive commands preview with --dry
+
+A command that deletes or discards (worktree/branch removal, project removal, …) must offer
+`--dry`: run every discovery and safety check but mutate nothing, reporting what *would* go.
+Thread `chimera.dry.Dry` through the pure function and route each mutation through it
+(`dry(git, 'branch', '-D', ref)`, `dry(shutil.rmtree, path)`), so the preview shares the real
+code path and can't drift from it. `--dry` previews *under whatever other flags are given*, so
+it still reports a refusal on unsafe state and `--dry --force` previews a forced teardown.
+Report with `dry.verb('Removed', 'Would remove')`. Read-only commands never take `--dry`.
+
 ## Testing
 
 - Put logic depth in pure-function tests — assert on return values / raised exceptions.
