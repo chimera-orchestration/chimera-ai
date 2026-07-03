@@ -90,6 +90,14 @@ the workspace. Two rules:
 `ch doctor [path]` (default cwd) walks up to the workspace root — skipping project dirs, which it
 spots by the `repo:` key in their `config.yaml` — then reports drift from the current schema/layout;
 `--fix` applies the repairs; `--verbose`/`-v` also prints the checks that pass (`[name] (ok)`).
+`-c/--check <name>` (repeatable, tab-completes) limits the run — and so `--fix` — to the named
+checks, always in registry order (workspace-clean still sweeps last); use it to fix one problem
+while leaving the rest alone. `-x/--exclude <text>` (repeatable) is the complement: skip findings
+whose check name equals or message contains `<text>` — so `-x <worktree-dir-name>` mutes one
+known in-flight worktree while everything else reports and fixes. An excluded finding is never
+fixed (checks consult the exclusions with the message the plain report shows, before mutating),
+doesn't fail the exit code, and each drop is logged; the output ends with `(N findings excluded
+by -x)` and a token that matched nothing gets a warning line.
 It's a registry of independent checks (`chimera.commands.doctor`,
 add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates
@@ -101,12 +109,17 @@ add/retire via the `CHECKS` tuple). Current checks:
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **worktree-separator** — rename legacy dash-joined `{goal}-{actor}` worktree dirs to `{goal}@{actor}`
   via `git worktree move` (keyed off each worktree's `{goal}/{actor}` branch, so the boundary is never
-  guessed; preserves uncommitted work; humans are left to the human-worktrees check)
+  guessed; a branch that isn't exactly `<goal>/<actor>` — e.g. a nested `parked/…` prefix — is left
+  alone; preserves uncommitted work; humans are left to the human-worktrees check)
 - **worktree-branch** — an agent worktree `{goal}@{actor}` is checked out on the branch its dir name
   implies (`{goal}/{actor}`); catches a git GUI flipping it onto the wrong branch or detaching HEAD (the
   inverse of worktree-separator: it trusts the dir name and fixes the branch). `--fix` checks the right
   branch back out, but only when the worktree is clean — a dirty switch could lose uncommitted work, so
-  it's reported and left. The before/after HEAD shas are logged for recovery
+  it's reported and left. The before/after HEAD shas are logged for recovery. When the implied branch
+  is *gone* (goal finished after the work moved elsewhere, e.g. parked under a prefix), the worktree is
+  a leftover: `--fix` removes it, but only when clean and on a real branch so every commit stays
+  reachable; the branch and sha it held are logged so it can be recreated. A dirty or detached leftover
+  is reported for a human
 - **orphaned-worktrees** — prune stale git worktree registrations; flag untracked dirs under
   `worktrees/`
 - **chimera-up-to-date** — chimera's own dev checkout (found by walking up from the running

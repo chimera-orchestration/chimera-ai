@@ -1,3 +1,4 @@
+from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,12 +17,48 @@ class Finding:
     fixable: bool = field(kw_only=True)  # could --fix handle it at all?
 
 
+@dataclass
+class Exclusions:
+    """The ``-x/--exclude`` tokens for a doctor run, tracking what they matched.
+
+    A token matches a finding when it equals the check's name or appears in the
+    finding's message — so ``-x worktree-branch`` mutes a whole check and
+    ``-x datasets-partitioned@agent`` mutes one worktree's findings. Checks call
+    :meth:`matches` (pure) before *applying* a fix, always with the message the
+    plain report shows — the text the user copied the token from — never a
+    post-fix variant; the doctor driver calls :meth:`drop` (recording) to filter
+    what's reported, so each excluded finding is counted exactly once.
+    """
+
+    tokens: tuple[str, ...] = ()
+    hits: Counter[str] = field(default_factory=Counter)  # token → findings it excluded
+
+    def matches(self, check: str, message: str) -> bool:
+        return any(token == check or token in message for token in self.tokens)
+
+    def drop(self, finding: Finding) -> bool:
+        matched = [t for t in self.tokens if t == finding.check or t in finding.message]
+        for token in matched:
+            self.hits[token] += 1
+        return bool(matched)
+
+    @property
+    def excluded(self) -> int:
+        """How many findings the tokens excluded."""
+        return sum(self.hits.values())
+
+    @property
+    def unmatched(self) -> tuple[str, ...]:
+        """Tokens that excluded nothing — likely typos, surfaced as warnings."""
+        return tuple(token for token in self.tokens if not self.hits[token])
+
+
 class Check(Protocol):
     """A self-contained workspace check; add/retire by editing the CHECKS registry."""
 
     name: str
 
-    def run(self, workspace: Path, fix: bool) -> Iterable[Finding]: ...
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterable[Finding]: ...
 
 
 def read_raw(directory: Path) -> dict[str, Any] | None:

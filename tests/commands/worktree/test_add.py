@@ -56,7 +56,7 @@ def test_add_branches_from_main_not_checked_out_branch(tmpdir: TempDir, git_repo
 def test_add_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir / 'repo')
+    local = Git.clone(origin, tmpdir / 'repo')
     origin.commit_content('remote-ahead', datetime(2022, 1, 1))
     local('fetch', 'origin')
     expected = local.rev_parse('origin/main', short=False)
@@ -70,7 +70,7 @@ def test_add_branches_from_origin_main_when_newer(tmpdir: TempDir) -> None:
 def test_add_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Repo.clone(origin.path, tmpdir / 'repo')
+    local = Repo.clone(origin, tmpdir / 'repo')
     local.commit_content('local-ahead', datetime(2022, 1, 1))
     expected = local.rev_parse('main', short=False)
     assert (expected == local.rev_parse('origin/main', short=False)) is False
@@ -83,7 +83,7 @@ def test_add_branches_from_local_main_when_newer(tmpdir: TempDir) -> None:
 def test_add_branches_have_no_upstream_tracking(tmpdir: TempDir) -> None:
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir / 'repo')
+    local = Git.clone(origin, tmpdir / 'repo')
     origin.commit_content('remote-ahead', datetime(2022, 1, 1))
     local('fetch', 'origin')  # base resolves to origin/main, a remote-tracking branch
     worktrees = tmpdir / 'worktrees'
@@ -118,7 +118,7 @@ def test_add_branches_from_a_master_style_default(tmpdir: TempDir, git_repo: Rep
 def test_add_offline_uses_already_present_refs(tmpdir: TempDir) -> None:
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir / 'repo')
+    local = Git.clone(origin, tmpdir / 'repo')
     origin.commit_content('remote-ahead', datetime(2022, 1, 1))  # never fetched into local
     [created] = add(local.path, tmpdir / 'worktrees', 'g', fetch=False)
     compare(_head(created), expected=local.rev_parse('main', short=False))  # stale local main
@@ -127,7 +127,7 @@ def test_add_offline_uses_already_present_refs(tmpdir: TempDir) -> None:
 def test_add_fetches_origin_by_default(tmpdir: TempDir) -> None:
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed', datetime(2020, 1, 1))
-    local = Git.clone(origin.path, tmpdir / 'repo')
+    local = Git.clone(origin, tmpdir / 'repo')
     origin.commit_content('remote-ahead', datetime(2022, 1, 1))  # not yet in local
     [created] = add(local.path, tmpdir / 'worktrees', 'g')  # fetch=True picks it up
     compare(_head(created), expected=_head(origin.path))

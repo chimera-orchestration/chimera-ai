@@ -22,7 +22,7 @@ from chimera.commands.doctor.checks import (
     WorktreeBranchCheck,
     commit_message,
 )
-from chimera.commands.doctor.core import Check, Finding
+from chimera.commands.doctor.core import Check, Exclusions, Finding
 from chimera.commands.init import TEMPLATE
 from chimera.worktrees import is_dirty, registered_worktrees
 
@@ -53,8 +53,8 @@ def _human_worktree(repo, project, goal, *, ahead=False, dirty=False):
     return worktree
 
 
-def _run(check: Check, ws, fix: bool = False) -> list[Finding]:
-    return list(check.run(ws, fix))
+def _run(check: Check, ws, fix: bool = False, exclude: Exclusions | None = None) -> list[Finding]:
+    return list(check.run(ws, fix, exclude if exclude is not None else Exclusions()))
 
 
 def _config(path):
@@ -114,6 +114,18 @@ class TestWorkspaceConfig:
         )
         compare(_config(ws), expected={'kind': 'workspace', 'name': 'lycia'})
 
+    def test_excluded_fix_reports_without_writing(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        compare(
+            _run(WorkspaceConfigCheck(), ws, fix=True, exclude=Exclusions(('workspace-config',))),
+            expected=[
+                Finding(
+                    'workspace-config', f'{ws}/config.yaml missing', resolved=False, fixable=True
+                )
+            ],
+        )
+        assert (ws / 'config.yaml').exists() is False  # the excluded fix never ran
+
     def test_already_current_is_silent(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
         tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
@@ -169,6 +181,24 @@ class TestGitignore:
                     fixable=True,
                 )
             ],
+        )
+
+    def test_excluded_entry_not_written(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        gitignore = ws / '.gitignore'
+        gitignore.write_text('*.lock\nservices-running.jsonl\n*/worktrees/\n')
+        compare(
+            _run(GitignoreCheck(), ws, fix=True, exclude=Exclusions(('*/repo/',))),
+            expected=[
+                Finding('gitignore', f"{gitignore} missing 'logs/'", resolved=True, fixable=True),
+                Finding(
+                    'gitignore', f"{gitignore} missing '*/repo/'", resolved=False, fixable=True
+                ),
+            ],
+        )
+        compare(  # the excluded entry stays missing; the other was appended
+            gitignore.read_text(),
+            expected='*.lock\nservices-running.jsonl\n*/worktrees/\nlogs/\n',
         )
 
     def test_missing_entry_appended_after_an_unterminated_final_line(self, tmpdir: TempDir) -> None:
@@ -510,6 +540,14 @@ class TestLegacyWorktreeSeparator:
         shutil.rmtree(worktree)  # registered but the dir is gone — can't read its branch
         compare(_run(LegacyWorktreeSeparatorCheck(), ws), expected=[])
 
+    def test_ignores_nested_prefix_branch(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = project / 'worktrees' / 'old-goal@A'
+        Git(git_repo.path)('worktree', 'add', '-b', 'parked/new-goal/A', str(worktree), 'main')
+        compare(_run(LegacyWorktreeSeparatorCheck(), ws, fix=True), expected=[])
+        tmpdir.compare(['old-goal@A'], path='lycia/proj/worktrees', recursive=False)
+
 
 def _agent_worktree(repo, project, goal, actor='agent'):
     worktree = project / 'worktrees' / f'{goal}@{actor}'
@@ -594,23 +632,94 @@ class TestWorktreeBranch:
         )
         compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='stray')
 
-    def test_missing_target_branch_not_fixable(self, tmpdir: TempDir, git_repo: Repo) -> None:
+    def test_leftover_worktree_removed(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree, to='parked/g/agent')
+        git = Git(git_repo.path)
+        git('branch', '-D', 'g/agent')  # the goal is finished; the work lives on parked/…
+        sha = git.rev_parse('parked/g/agent', short=False)
+        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+            compare(
+                _run(WorktreeBranchCheck(), ws, fix=True),
+                expected=[
+                    Finding(
+                        'worktree-branch',
+                        f'{worktree} is on parked/g/agent, but branch g/agent is gone '
+                        '— leftover worktree',
+                        resolved=True,
+                        fixable=True,
+                    )
+                ],
+            )
+        tmpdir.compare(path='lycia/proj/worktrees', expected=())
+        compare('parked/g/agent' in git.branches(), expected=True)  # the work survives
+        log.check(
+            (
+                'worktree-branch: removed',
+                {'worktree': str(worktree), 'branch': 'parked/g/agent', 'sha': sha},
+            )
+        )
+
+    def test_leftover_worktree_report_only(self, tmpdir: TempDir, git_repo: Repo) -> None:
         ws = _ws(tmpdir)
         project = _project(tmpdir, ws, git_repo.path)
         worktree = _agent_worktree(git_repo, project, 'g')
         _flip(worktree)
-        Git(git_repo.path)('branch', '-D', 'g/agent')  # nothing left to switch back to
+        Git(git_repo.path)('branch', '-D', 'g/agent')
+        compare(
+            _run(WorktreeBranchCheck(), ws),
+            expected=[
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on stray, but branch g/agent is gone — leftover worktree',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        tmpdir.compare(['g@agent'], path='lycia/proj/worktrees', recursive=False)  # left as-is
+
+    def test_leftover_dirty_left_in_place(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        Git(git_repo.path)('branch', '-D', 'g/agent')
+        (worktree / 'scratch.txt').write_text('wip')
         compare(
             _run(WorktreeBranchCheck(), ws, fix=True),
             expected=[
                 Finding(
                     'worktree-branch',
-                    f'{worktree} is on stray, but branch g/agent is gone',
+                    f'{worktree} is on stray, but branch g/agent is gone '
+                    '— uncommitted changes, left in place',
                     resolved=False,
                     fixable=False,
                 )
             ],
         )
+        compare((worktree / 'scratch.txt').read_text(), expected='wip')
+
+    def test_leftover_detached_left_in_place(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        Git(worktree)('checkout', '--detach')
+        Git(git_repo.path)('branch', '-D', 'g/agent')  # HEAD may be the commits' only anchor
+        compare(
+            _run(WorktreeBranchCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on HEAD, but branch g/agent is gone — detached, left in place',
+                    resolved=False,
+                    fixable=False,
+                )
+            ],
+        )
+        tmpdir.compare(['g@agent'], path='lycia/proj/worktrees', recursive=False)
 
     def test_detached_head_fixed(self, tmpdir: TempDir, git_repo: Repo) -> None:
         ws = _ws(tmpdir)
@@ -629,6 +738,24 @@ class TestWorktreeBranch:
             ],
         )
         compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/agent')
+
+    def test_excluded_worktree_left_alone(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        compare(
+            _run(WorktreeBranchCheck(), ws, fix=True, exclude=Exclusions((str(worktree),))),
+            expected=[
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on stray, expected g/agent',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='stray')
 
     def test_ignores_human_actor(self, tmpdir: TempDir, git_repo: Repo) -> None:
         ws = _ws(tmpdir)
@@ -744,7 +871,7 @@ def _chimera_clone(tmpdir: TempDir, replace: Replacer) -> tuple[Repo, Git]:
     """An origin repo and a clone wired together like a real dev checkout, patched in."""
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed')
-    local = Git.clone(origin.path, tmpdir / 'local')
+    local = Git.clone(origin, tmpdir / 'local')
     replace.in_module(doctor_checks.chimera_repo, lambda: local.path)
     return origin, local
 
