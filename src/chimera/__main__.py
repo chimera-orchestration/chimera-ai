@@ -26,6 +26,7 @@ from chimera.commands.ls import Board, board
 from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.ls import projects as _projects
 from chimera.commands.project.rm import remove as _project_remove
+from chimera.commands.review import review as _review
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
@@ -418,6 +419,32 @@ def _render_board(b: Board) -> None:
             typer.echo('    (no goals)')
     for a in b.loose:
         typer.echo(f'  · {_summary(a)}')
+
+
+@app.command(
+    'review',
+    cls=PassthroughCommand,
+    help='Open a pre-human review of a PR: goal + worktree tracking the PR, then an agent.',
+)
+@logs(_review)
+def review(
+    ctx: typer.Context,
+    pr: Annotated[str, typer.Argument(help='Pull request number or URL')],
+    dangerous: DangerousOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    p = _project(ctx, project)
+    worktree = _review(
+        p.repo,
+        p.worktrees,
+        p.name,
+        p.prompts,
+        pr,
+        _passthrough(ctx),
+        dangerous,
+        Path.cwd(),
+    )
+    typer.echo(f'Reviewing {pr} in {worktree}')
 
 
 project_app = typer.Typer(cls=alias_group({'list': 'ls'}), help='Manage projects.')

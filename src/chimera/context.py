@@ -56,6 +56,10 @@ class Project:
     def worktrees(self) -> Path:
         return self.dir / 'worktrees'
 
+    @property
+    def prompts(self) -> Path:
+        return self.dir / 'prompts'
+
 
 @dataclass(frozen=True)
 class Scope:
