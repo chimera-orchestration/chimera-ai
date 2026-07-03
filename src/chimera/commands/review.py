@@ -17,7 +17,6 @@ from chimera.worktrees import (
     HUMAN,
     branch,
     checkout_here,
-    fetch_origin,
     ref_shas,
     registered_worktrees,
     session_name,
@@ -93,19 +92,23 @@ def _pr_metadata(repo: Path, pr: str) -> dict[str, object]:
 def _wire_upstream(git: Git, number: int, head_oid: str) -> str:
     """Fetch ``refs/pull/<number>/head`` as ``origin/pr/<number>`` and verify it is ``head_oid``.
 
-    Adds the fetch refspec once (idempotent) so the PR head becomes a real remote-tracking ref
-    ``git status`` compares against, then trusts gh's ``headRefOid`` as the source of truth —
-    a mismatch means a stale or wrong fetch and is refused. Returns the tracking ref name.
+    Fetches the PR head into the tracking ref *first* — a targeted fetch that touches no config —
+    then persists the fetch refspec (once, idempotent) so the PR head stays a real remote-tracking
+    ref ``git status`` compares against on later fetches. Persisting only *after* a clean fetch is
+    the crash-safety: a missing or foreign PR ref (the fetch fails) can't leave a dead refspec in
+    ``remote.origin.fetch`` that bricks every future ``git fetch`` in the repo. Trusts gh's
+    ``headRefOid`` as the source of truth — a mismatch means a stale fetch and is refused. Returns
+    the tracking ref name.
     """
     tracking = f'origin/pr/{number}'
     spec = f'+refs/pull/{number}/head:refs/remotes/{tracking}'
+    git('fetch', 'origin', spec)  # validate + create the ref without mutating config on failure
     try:
         existing = git('config', '--get-all', 'remote.origin.fetch').splitlines()
     except GitError:
         existing = []  # no fetch refspec configured yet
     if spec not in existing:
         git('config', '--add', 'remote.origin.fetch', spec)
-    fetch_origin(git)
     if (fetched := git.rev_parse(tracking, short=False)) != head_oid:
         raise UserError(
             f'PR #{number}: fetched {tracking} is {fetched}, but gh reports headRefOid {head_oid}'

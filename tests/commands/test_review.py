@@ -5,7 +5,7 @@ from pathlib import Path
 from string import Template
 from subprocess import CompletedProcess
 
-from giterator import Git
+from giterator import Git, GitError
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
@@ -212,6 +212,17 @@ def test_wire_upstream_adds_a_refspec_when_none_configured(tmpdir: TempDir) -> N
     git('config', '--unset-all', 'remote.origin.fetch')  # no fetch refspec at all
     compare(_wire_upstream(git, 1, head), expected='origin/pr/1')
     compare(git.rev_parse('origin/pr/1', short=False), expected=head)
+
+
+def test_wire_upstream_leaves_config_clean_when_the_pr_ref_is_missing(tmpdir: TempDir) -> None:
+    repo, head = _cloned(tmpdir)
+    git = Git(repo)
+    before = git('config', '--get-all', 'remote.origin.fetch')
+    with ShouldRaise(GitError, match='refs/pull/9/head'):
+        _wire_upstream(git, 9, head)  # origin has no PR #9
+    # the failed fetch must not have persisted a dead refspec that bricks future fetches
+    compare(git('config', '--get-all', 'remote.origin.fetch'), expected=before)
+    git('fetch', '--prune', 'origin')  # proves origin is still fetchable
 
 
 def test_wire_upstream_refuses_a_mismatched_head(tmpdir: TempDir) -> None:
