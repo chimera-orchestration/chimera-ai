@@ -1,7 +1,9 @@
+from dataclasses import dataclass
 from pathlib import Path
 from subprocess import PIPE, run
 
 from giterator import Git, GitError
+from loguru import logger
 
 AGENT = 'agent'
 HUMAN = 'human'
@@ -99,6 +101,55 @@ def checkout_of(git: Git, ref: str) -> Path | None:
         elif line == f'branch refs/heads/{ref}':
             return current
     return None
+
+
+@dataclass(frozen=True)
+class Checkout:
+    """The result of trying to land ``branch`` in the working checkout at ``where``."""
+
+    done: bool  # True: HEAD moved onto the branch; False: skipped because the checkout was dirty
+    where: Path  # the checkout's top-level dir
+    branch: str  # the branch we (tried to) check out
+    was: str | None  # the branch HEAD was on before (``None`` when it was detached)
+
+
+def checkout_here(git: Git, branch_name: str, into: Path, log_as: str) -> Checkout | None:
+    """Check ``branch_name`` out in the checkout containing ``into``, when that's safe.
+
+    Lets a human who just materialised/advanced ``<goal>/human`` land *on* it in place. Returns
+    ``None`` (a silent skip — the caller wasn't in a position to land the branch) when ``into``
+    isn't inside a plain checkout of ``git``'s repo, is a managed ``<goal>@<actor>`` worktree
+    (never flip an agent's HEAD), already has ``branch_name``, or the branch is checked out in
+    another worktree (git would refuse). Returns ``Checkout(done=False, …)`` when the checkout is
+    dirty, so the caller can surface a commit/stash hint. Otherwise moves HEAD, logging the
+    before/after HEAD (keyed by the branch each side, ``'HEAD'`` when detached — see
+    ``agent-docs/logging.md``), and returns ``Checkout(done=True, …)``.
+    """
+    try:
+        top = Path(Git(into)('rev-parse', '--show-toplevel').strip()).resolve()
+    except GitError:
+        return None  # not inside a git repo at all
+    if top not in registered_worktrees(git):
+        return None  # a different repo (e.g. the workspace itself), not this project's
+    if SEP in top.name:
+        return None  # a managed <goal>@<actor> worktree — never flip its HEAD
+    wt = Git(top)
+    was = wt('rev-parse', '--abbrev-ref', 'HEAD').strip()  # 'HEAD' when detached
+    if was == branch_name:
+        return None  # already here
+    elsewhere = checkout_of(git, branch_name)
+    if elsewhere is not None and elsewhere != top:
+        return None  # lives in another worktree — git would refuse to check it out here
+    landed = None if was == 'HEAD' else was
+    if is_dirty(top):
+        return Checkout(done=False, where=top, branch=branch_name, was=landed)
+    before = {was: wt.rev_parse('HEAD', short=False)}
+    wt('checkout', branch_name)
+    logger.bind(
+        worktree=str(top),
+        git={'before': before, 'after': {branch_name: wt.rev_parse('HEAD', short=False)}},
+    ).info(f'{log_as}: refs')
+    return Checkout(done=True, where=top, branch=branch_name, was=landed)
 
 
 def _patch_ids(diffs: str) -> set[str]:

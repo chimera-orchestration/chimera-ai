@@ -9,6 +9,7 @@ from chimera.__main__ import _sync_line
 from chimera.commands.goal.sync import Outcome, SyncResult, sync
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
+from chimera.worktrees import Checkout
 from tests.cli import Command, action_logs
 
 
@@ -165,6 +166,25 @@ def test_materialises_a_custom_actor(tmpdir: TempDir, git_repo: Repo) -> None:
     compare(_full(git_repo, 'g/reviewer'), expected=_full(git_repo, 'g/agent'))
 
 
+def test_lands_the_mover_in_a_clean_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
+    _goal(tmpdir, git_repo)
+    result = sync(git_repo.path, 'g', into=git_repo.path)  # the repo's own clean checkout
+    compare(
+        result.checkout, expected=Checkout(True, git_repo.path.resolve(), 'g/human', was='main')
+    )
+    compare(Git(git_repo.path)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/human')
+
+
+def test_does_not_land_the_mover_in_a_dirty_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
+    _goal(tmpdir, git_repo)
+    (git_repo.path / 'scratch.txt').write_text('wip')
+    result = sync(git_repo.path, 'g', into=git_repo.path)
+    compare(
+        result.checkout, expected=Checkout(False, git_repo.path.resolve(), 'g/human', was='main')
+    )
+    compare(Git(git_repo.path)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
+
+
 def test_sync_line_renders_each_outcome() -> None:
     compare(
         _sync_line(SyncResult(Outcome.CREATED, 'human', 'agent', 'abc123')),
@@ -181,6 +201,48 @@ def test_sync_line_renders_each_outcome() -> None:
     compare(
         _sync_line(SyncResult(Outcome.AHEAD, 'human', 'agent', 'abc123', ahead_by=2)),
         expected='human leads agent by 2 — nothing to sync',
+    )
+
+
+def test_sync_line_appends_the_checkout_outcome() -> None:
+    compare(
+        _sync_line(
+            SyncResult(
+                Outcome.CREATED,
+                'human',
+                'agent',
+                'abc123',
+                checkout=Checkout(True, Path('/w/repo'), 'g/human', was='main'),
+            )
+        ),
+        expected='Created human at agent (abc123)\nChecked out g/human here (was main)',
+    )
+    compare(  # detached: no "(was …)" tail
+        _sync_line(
+            SyncResult(
+                Outcome.CREATED,
+                'human',
+                'agent',
+                'abc123',
+                checkout=Checkout(True, Path('/w/repo'), 'g/human', was=None),
+            )
+        ),
+        expected='Created human at agent (abc123)\nChecked out g/human here',
+    )
+    compare(
+        _sync_line(
+            SyncResult(
+                Outcome.CREATED,
+                'human',
+                'agent',
+                'abc123',
+                checkout=Checkout(False, Path('/w/repo'), 'g/human', was='main'),
+            )
+        ),
+        expected=(
+            'Created human at agent (abc123)\n(note: uncommitted changes — g/human not '
+            'checked out; commit/stash then `git checkout g/human`)'
+        ),
     )
 
 

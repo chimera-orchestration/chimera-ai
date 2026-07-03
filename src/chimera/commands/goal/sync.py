@@ -6,7 +6,16 @@ from giterator import Git, GitError
 from loguru import logger
 
 from chimera.config import UserError
-from chimera.worktrees import AGENT, HUMAN, branch, checkout_of, is_dirty, ref_shas
+from chimera.worktrees import (
+    AGENT,
+    HUMAN,
+    Checkout,
+    branch,
+    checkout_here,
+    checkout_of,
+    is_dirty,
+    ref_shas,
+)
 
 
 class Outcome(Enum):
@@ -27,9 +36,12 @@ class SyncResult:
     target: str
     sha: str  # the mover branch's sha after the run (short)
     ahead_by: int = 0  # commits the mover leads the target by (Outcome.AHEAD only)
+    checkout: Checkout | None = None  # where the mover was landed in place, if anywhere
 
 
-def sync(repo: Path, goal: str, mover: str = HUMAN, target: str = AGENT) -> SyncResult:
+def sync(
+    repo: Path, goal: str, mover: str = HUMAN, target: str = AGENT, into: Path | None = None
+) -> SyncResult:
     """Fast-forward the goal's ``mover`` actor branch up to its ``target`` branch's tip.
 
     Materialises ``mover`` at the target when it doesn't yet exist (so a spike's human branch is
@@ -41,6 +53,11 @@ def sync(repo: Path, goal: str, mover: str = HUMAN, target: str = AGENT) -> Sync
     (``UserError``) when the target is missing, ``mover`` and ``target`` name the same branch, the
     two have diverged (a human must rebase), or ``mover``'s checkout is dirty. The mover branch and
     the sha it pointed at are logged before/after any move (see ``agent-docs/logging.md``).
+
+    ``into`` (the caller's cwd) opts in to landing ``mover`` *in place*: once the branch is settled,
+    it is checked out in the checkout at ``into`` when that's a clean plain checkout of ``repo``
+    (see :func:`chimera.worktrees.checkout_here`), so a human runs one command instead of a manual
+    ``git checkout``. The result carries what happened via ``SyncResult.checkout``.
     """
     if mover == target:
         raise UserError(f'nothing to sync — --move and --to are both {mover!r}')
@@ -52,7 +69,8 @@ def sync(repo: Path, goal: str, mover: str = HUMAN, target: str = AGENT) -> Sync
     outcome, ahead_by = _apply(git, mover_branch, target_branch)
     if (after := ref_shas(git, mover_branch)) != before:
         logger.bind(goal=goal, git={'before': before, 'after': after}).info('goal sync: refs')
-    return SyncResult(outcome, mover, target, git.rev_parse(mover_branch), ahead_by)
+    checkout = checkout_here(git, mover_branch, into, 'goal sync') if into is not None else None
+    return SyncResult(outcome, mover, target, git.rev_parse(mover_branch), ahead_by, checkout)
 
 
 def _apply(git: Git, mover_branch: str, target_branch: str) -> tuple[Outcome, int]:

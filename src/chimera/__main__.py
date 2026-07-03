@@ -599,21 +599,29 @@ def goal_sync(
     overrides = _overrides(ctx)
     p = _project(ctx, project)
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
-    typer.echo(_sync_line(_goal_sync(p.repo, g, move, to)))
+    typer.echo(_sync_line(_goal_sync(p.repo, g, move, to, Path.cwd())))
 
 
 def _sync_line(result: SyncResult) -> str:
-    """One line describing what ``goal sync`` did, keyed on its outcome."""
+    """What ``goal sync`` did: the outcome, plus a checkout line when it landed in place."""
     mover, target, sha = result.mover, result.target, result.sha
     match result.outcome:
         case Outcome.CREATED:
-            return f'Created {mover} at {target} ({sha})'
+            line = f'Created {mover} at {target} ({sha})'
         case Outcome.NOOP:
-            return f'{mover} already at {target} ({sha})'
+            line = f'{mover} already at {target} ({sha})'
         case Outcome.FASTFORWARDED:
-            return f'Fast-forwarded {mover} to {target} ({sha})'
+            line = f'Fast-forwarded {mover} to {target} ({sha})'
         case Outcome.AHEAD:
-            return f'{mover} leads {target} by {result.ahead_by} — nothing to sync'
+            line = f'{mover} leads {target} by {result.ahead_by} — nothing to sync'
+    if (c := result.checkout) is None:
+        return line
+    if c.done:
+        return f'{line}\nChecked out {c.branch} here' + (f' (was {c.was})' if c.was else '')
+    return (
+        f'{line}\n(note: uncommitted changes — {c.branch} not checked out; '
+        f'commit/stash then `git checkout {c.branch}`)'
+    )
 
 
 @goal_app.command('finish', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")

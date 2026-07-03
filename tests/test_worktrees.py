@@ -3,11 +3,14 @@ from pathlib import Path
 
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import TempDir, compare
+from testfixtures import LogCapture, TempDir, compare
+from testfixtures.loguru import LoguruSource
 
 from chimera.worktrees import (
+    Checkout,
     base_ref,
     branch,
+    checkout_here,
     default_branch,
     fetch_origin,
     goal_actors,
@@ -19,6 +22,10 @@ from chimera.worktrees import (
     worktree_dirs,
     worktree_path,
 )
+
+
+def _refs_log() -> LogCapture:
+    return LogCapture(LoguruSource(('message', 'extra')))
 
 
 def _renamed(repo: Repo, to: str) -> Repo:
@@ -192,3 +199,86 @@ class TestFetchOrigin:
             clone.rev_parse('origin/main', short=False),
             expected=Git(git_repo.path).rev_parse('main', short=False),
         )
+
+
+class TestCheckoutHere:
+    def test_lands_the_branch_and_logs_the_head_move(self, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        git('branch', 'g/human', 'main')  # a bare branch to land
+        full = git.rev_parse('main', short=False)
+        with _refs_log() as log:
+            result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
+        compare(
+            result,
+            expected=Checkout(True, git_repo.path.resolve(), 'g/human', was='main'),
+        )
+        compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/human')
+        log.check(
+            (
+                'goal sync: refs',
+                {
+                    'worktree': str(git_repo.path.resolve()),
+                    'git': {'before': {'main': full}, 'after': {'g/human': full}},
+                },
+            ),
+        )
+
+    def test_records_a_detached_head_as_the_branch_left(self, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        git('branch', 'g/human', 'main')
+        git('checkout', '-q', '--detach', 'main')  # HEAD detached, not on a branch
+        full = git.rev_parse('main', short=False)
+        with _refs_log() as log:
+            result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
+        compare(result, expected=Checkout(True, git_repo.path.resolve(), 'g/human', was=None))
+        log.check(
+            (
+                'goal sync: refs',
+                {
+                    'worktree': str(git_repo.path.resolve()),
+                    'git': {'before': {'HEAD': full}, 'after': {'g/human': full}},
+                },
+            ),
+        )
+
+    def test_leaves_a_dirty_checkout_untouched(self, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        git('branch', 'g/human', 'main')
+        (git_repo.path / 'scratch.txt').write_text('wip')
+        with _refs_log() as log:
+            result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
+        compare(result, expected=Checkout(False, git_repo.path.resolve(), 'g/human', was='main'))
+        compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
+        log.check()  # nothing moved
+
+    def test_skips_outside_a_git_repo(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        assert checkout_here(Git(git_repo.path), 'main', tmpdir.makedir('plain'), 'x') is None
+
+    def test_skips_a_checkout_of_a_different_repo(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        other = Repo.make(tmpdir / 'other')
+        other.commit_content('seed')
+        assert checkout_here(Git(git_repo.path), 'main', other.path, 'x') is None
+
+    def test_skips_a_managed_agent_worktree(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        git('branch', 'g/human', 'main')
+        git('worktree', 'add', '-b', 'g/agent', str(tmpdir / 'g@agent'), 'main')
+        assert checkout_here(git, 'g/human', tmpdir / 'g@agent', 'x') is None
+        compare(
+            Git(tmpdir / 'g@agent')('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/agent'
+        )
+
+    def test_skips_when_already_on_the_branch(self, git_repo: Repo) -> None:
+        git = Git(git_repo.path)
+        git('checkout', '-q', '-b', 'g/human')  # already here
+        with _refs_log() as log:
+            assert checkout_here(git, 'g/human', git_repo.path, 'x') is None
+        log.check()
+
+    def test_skips_when_the_branch_is_checked_out_elsewhere(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        git = Git(git_repo.path)
+        git('worktree', 'add', str(tmpdir / 'other'), '-b', 'g/human', 'main')  # lives elsewhere
+        assert checkout_here(git, 'g/human', git_repo.path, 'x') is None
+        compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
