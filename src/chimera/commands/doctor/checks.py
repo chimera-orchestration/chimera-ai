@@ -198,7 +198,7 @@ class InertBranchCheck:
 
     name = 'inert-branches'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         for project in iter_project_dirs(workspace):
             repo = project_repo(project)
             worktrees_dir = project / 'worktrees'
@@ -217,18 +217,15 @@ class InertBranchCheck:
                         continue  # checked out somewhere — never force-delete under a checkout
                     if not _is_inert(git, ref, default_ref):
                         continue
-                    if fix:
+                    message = f'{ref} points at an already-integrated commit — inert'
+                    fixing = fix and not exclude.matches(self.name, message)
+                    if fixing:
                         before = ref_shas(git, ref)
                         git('branch', '-D', ref)
                         logger.bind(git={'before': before, 'after': ref_shas(git, ref)}).info(
                             f'{self.name}: refs'
                         )
-                    yield Finding(
-                        self.name,
-                        f'{ref} points at an already-integrated commit — inert',
-                        resolved=fix,
-                        fixable=True,
-                    )
+                    yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
 def _is_inert(git: Git, ref: str, default_ref: str | None) -> bool:

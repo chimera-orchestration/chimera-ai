@@ -413,7 +413,7 @@ def test_doctor_cli_exclude_mutes_a_finding(
         f'    export CHIMERA_WORKSPACE="{ws.resolve()}"',
     )
     command.run('doctor', '-x', 'workspace-env').check(
-        output=('(+11 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
+        output=('(+12 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
         logging=[start, checkout, dropped, end],
     )
 
@@ -426,7 +426,7 @@ def test_doctor_cli_exclude_prevents_the_fix(
     start, checkout, end = _doctor_logs(str(ws), fix=True, exclude=('workspace-config',))
     dropped = _excluded_log('workspace-config', f'{ws.resolve()}/config.yaml missing')
     command.run('doctor', str(ws), '--fix', '-x', 'workspace-config').check(
-        output=('(+11 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
+        output=('(+12 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
         logging=[start, dropped, checkout, end],
     )
     assert (ws / 'config.yaml').exists() is False  # excluded, so --fix never wrote it
@@ -441,7 +441,7 @@ def test_doctor_cli_exclude_unmatched_warns(
     command.run('doctor', str(ws), '-x', 'bogus').check(
         output=(
             "warning: -x 'bogus' matched nothing\n"
-            'All checks passed! (ch doctor -v lists the 11 checks run)'
+            'All checks passed! (ch doctor -v lists the 12 checks run)'
         ),
         logging=_doctor_logs(str(ws), fix=False, exclude=('bogus',)),
     )

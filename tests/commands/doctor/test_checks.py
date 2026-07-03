@@ -838,6 +838,24 @@ class TestInertBranch:
         )
         compare('g/human' in set(Git(repo.path).branches()), expected=True)
 
+    def test_excluded_branch_reported_but_kept(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        repo, project = _cloned_project(tmpdir, ws)
+        _agent_worktree(repo, project, 'g')
+        _bare_branch(repo, 'g/human')
+        compare(
+            _run(InertBranchCheck(), ws, fix=True, exclude=Exclusions(('g/human',))),
+            expected=[
+                Finding(
+                    'inert-branches',
+                    'g/human points at an already-integrated commit — inert',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        compare('g/human' in set(Git(repo.path).branches()), expected=True)
+
     def test_ancestor_of_local_default_deleted_without_a_remote(
         self, tmpdir: TempDir, git_repo: Repo
     ) -> None:
