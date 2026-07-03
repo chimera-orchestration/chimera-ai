@@ -8,6 +8,7 @@ from loguru import logger
 
 from chimera.commands.doctor.core import (
     Check,
+    Exclusions,
     Finding,
     iter_project_dirs,
     project_repo,
@@ -35,7 +36,7 @@ class WorkspaceConfigCheck:
 
     name = 'workspace-config'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         raw = read_raw(workspace)
         if raw and 'repo' in raw:
             # repo: belongs to a project — never stamp kind: workspace onto it.
@@ -57,10 +58,12 @@ class WorkspaceConfigCheck:
                 fixable=False,
             )
             return
-        if fix:
-            write_config(workspace, {'kind': 'workspace', **(raw or {})})
         missing = 'missing' if raw is None else 'missing kind: workspace'
-        yield Finding(self.name, f'{workspace}/config.yaml {missing}', resolved=fix, fixable=True)
+        message = f'{workspace}/config.yaml {missing}'
+        fixing = fix and not exclude.matches(self.name, message)
+        if fixing:
+            write_config(workspace, {'kind': 'workspace', **(raw or {})})
+        yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
 def _gitignore_entries(path: Path) -> list[str]:
@@ -75,17 +78,22 @@ class GitignoreCheck:
 
     name = 'gitignore'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         gitignore = workspace / '.gitignore'
         have = _gitignore_entries(gitignore)
         missing = [e for e in _gitignore_entries(TEMPLATE / '.gitignore') if e not in have]
-        if missing and fix:
+        messages = {entry: f'{gitignore} missing {entry!r}' for entry in missing}
+        fixing = {
+            entry: fix and not exclude.matches(self.name, message)
+            for entry, message in messages.items()
+        }
+        if writing := [entry for entry in missing if fixing[entry]]:
             text = gitignore.read_text() if gitignore.exists() else ''
             if text and not text.endswith('\n'):
                 text += '\n'
-            gitignore.write_text(text + ''.join(f'{e}\n' for e in missing))
+            gitignore.write_text(text + ''.join(f'{e}\n' for e in writing))
         for entry in missing:
-            yield Finding(self.name, f'{gitignore} missing {entry!r}', resolved=fix, fixable=True)
+            yield Finding(self.name, messages[entry], resolved=fixing[entry], fixable=True)
 
 
 class ProjectConfigCheck:
@@ -93,7 +101,7 @@ class ProjectConfigCheck:
 
     name = 'project-config'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         for project in iter_project_dirs(workspace):
             raw = read_raw(project) or {}
             kind = raw.get('kind')
@@ -102,19 +110,19 @@ class ProjectConfigCheck:
             if 'repo' in raw:
                 # repo: is the authoritative project signal — set the right kind,
                 # dropping any wrong one (e.g. a stray kind: workspace).
-                if fix:
-                    write_config(
-                        project,
-                        {'kind': 'project', **{k: v for k, v in raw.items() if k != 'kind'}},
-                    )
                 problem = (
                     'missing kind: project'
                     if kind is None
                     else f'has kind: {kind} but repo: marks it a project'
                 )
-                yield Finding(
-                    self.name, f'{project}/config.yaml {problem}', resolved=fix, fixable=True
-                )
+                message = f'{project}/config.yaml {problem}'
+                fixing = fix and not exclude.matches(self.name, message)
+                if fixing:
+                    write_config(
+                        project,
+                        {'kind': 'project', **{k: v for k, v in raw.items() if k != 'kind'}},
+                    )
+                yield Finding(self.name, message, resolved=fixing, fixable=True)
             elif kind is not None:
                 yield Finding(
                     self.name,
@@ -136,7 +144,7 @@ class StaleHumanWorktreeCheck:
 
     name = 'human-worktrees'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         for project in iter_project_dirs(workspace):
             repo = project_repo(project)
             worktrees_dir = project / 'worktrees'
@@ -163,11 +171,11 @@ class StaleHumanWorktreeCheck:
                         fixable=False,
                     )
                     continue
-                if fix:
+                message = f'stale human worktree {worktree}'
+                fixing = fix and not exclude.matches(self.name, message)
+                if fixing:
                     git('worktree', 'remove', str(worktree))
-                yield Finding(
-                    self.name, f'stale human worktree {worktree}', resolved=fix, fixable=True
-                )
+                yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
 class LegacyWorktreeSeparatorCheck:
@@ -175,7 +183,7 @@ class LegacyWorktreeSeparatorCheck:
 
     name = 'worktree-separator'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         for project in iter_project_dirs(workspace):
             repo = project_repo(project)
             worktrees_dir = project / 'worktrees'
@@ -187,14 +195,11 @@ class LegacyWorktreeSeparatorCheck:
                 canonical = _canonical_worktree(worktree)
                 if canonical is None or canonical == worktree:
                     continue
-                if fix:
+                message = f'legacy worktree {worktree.name} → {canonical.name}'
+                fixing = fix and not exclude.matches(self.name, message)
+                if fixing:
                     git('worktree', 'move', str(worktree), str(canonical))
-                yield Finding(
-                    self.name,
-                    f'legacy worktree {worktree.name} → {canonical.name}',
-                    resolved=fix,
-                    fixable=True,
-                )
+                yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
 def _canonical_worktree(worktree: Path) -> Path | None:
@@ -234,7 +239,7 @@ class WorktreeBranchCheck:
 
     name = 'worktree-branch'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         for project in iter_project_dirs(workspace):
             repo = project_repo(project)
             worktrees_dir = project / 'worktrees'
@@ -244,9 +249,11 @@ class WorktreeBranchCheck:
             branches = set(git.branches())
             root = worktrees_dir.resolve()
             for worktree in sorted(p for p in registered_worktrees(git) if p.parent == root):
-                yield from self._check(git, worktree, branches, fix)
+                yield from self._check(git, worktree, branches, fix, exclude)
 
-    def _check(self, git: Git, worktree: Path, branches: set[str], fix: bool) -> Iterator[Finding]:
+    def _check(
+        self, git: Git, worktree: Path, branches: set[str], fix: bool, exclude: Exclusions
+    ) -> Iterator[Finding]:
         if not worktree.is_dir() or SEP not in worktree.name:
             return  # a stale registration (orphan check's concern) or an unmanaged dir
         goal, actor = worktree.name.rsplit(SEP, 1)
@@ -258,7 +265,7 @@ class WorktreeBranchCheck:
         if actual == expected:
             return
         if expected not in branches:
-            yield from self._leftover(git, wt, worktree, actual, expected, fix)
+            yield from self._leftover(git, wt, worktree, actual, expected, fix, exclude)
             return
         if is_dirty(worktree):
             yield Finding(
@@ -268,19 +275,26 @@ class WorktreeBranchCheck:
                 fixable=False,
             )
             return
-        if fix:
+        message = f'{worktree} is on {actual}, expected {expected}'
+        fixing = fix and not exclude.matches(self.name, message)
+        if fixing:
             before = {actual: wt.rev_parse('HEAD', short=False)}
             wt('checkout', expected)
             logger.bind(
                 worktree=str(worktree),
                 git={'before': before, 'after': {expected: wt.rev_parse('HEAD', short=False)}},
             ).info(f'{self.name}: refs')
-        yield Finding(
-            self.name, f'{worktree} is on {actual}, expected {expected}', resolved=fix, fixable=True
-        )
+        yield Finding(self.name, message, resolved=fixing, fixable=True)
 
     def _leftover(
-        self, git: Git, wt: Git, worktree: Path, actual: str, expected: str, fix: bool
+        self,
+        git: Git,
+        wt: Git,
+        worktree: Path,
+        actual: str,
+        expected: str,
+        fix: bool,
+        exclude: Exclusions,
     ) -> Iterator[Finding]:
         """Findings for a worktree whose implied branch no longer exists.
 
@@ -303,21 +317,27 @@ class WorktreeBranchCheck:
                 fixable=False,
             )
             return
-        if fix:
+        message = f'{gone} — leftover worktree'
+        fixing = fix and not exclude.matches(self.name, message)
+        if fixing:
             sha = wt.rev_parse('HEAD', short=False)
             git('worktree', 'remove', str(worktree))
             logger.bind(worktree=str(worktree), branch=actual, sha=sha).info(
                 f'{self.name}: removed'
             )
-        yield Finding(self.name, f'{gone} — leftover worktree', resolved=fix, fixable=True)
+        yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
 class OrphanedWorktreeCheck:
-    """Git's worktree registrations and the worktrees/ dir agree with each other."""
+    """Git's worktree registrations and the worktrees/ dir agree with each other.
+
+    ``git worktree prune`` sweeps every stale registration in one go, so excluding
+    one only mutes its report — the prune run for the others still removes it.
+    """
 
     name = 'orphaned-worktrees'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         for project in iter_project_dirs(workspace):
             repo = project_repo(project)
             if repo is None or not repo.is_dir():
@@ -326,15 +346,14 @@ class OrphanedWorktreeCheck:
             registered = registered_worktrees(git)
             stale = sorted(path for path in registered if not path.exists())
             if stale:
-                if fix:
+                messages = {path: f'stale worktree registration for {path}' for path in stale}
+                fixing = fix and not all(
+                    exclude.matches(self.name, message) for message in messages.values()
+                )
+                if fixing:
                     git('worktree', 'prune')
                 for path in stale:
-                    yield Finding(
-                        self.name,
-                        f'stale worktree registration for {path}',
-                        resolved=fix,
-                        fixable=True,
-                    )
+                    yield Finding(self.name, messages[path], resolved=fixing, fixable=True)
             worktrees_dir = project / 'worktrees'
             if worktrees_dir.is_dir():
                 for child in sorted(worktrees_dir.iterdir()):
@@ -435,7 +454,7 @@ class ChimeraUpToDateCheck:
 
     name = 'chimera-up-to-date'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         repo = chimera_repo()
         logger.bind(repo=str(repo) if repo else None).info(f'{self.name}: checkout')
         if repo is None:
@@ -448,13 +467,22 @@ class ChimeraUpToDateCheck:
             remote_sha = git.rev_parse(f'origin/{default}', short=False)
         except GitError:
             return  # no local/remote-tracking branch to compare — nothing to verify
-        current = yield from self._sync_default(git, repo, default, local_sha, remote_sha, fix)
+        current = yield from self._sync_default(
+            git, repo, default, local_sha, remote_sha, fix, exclude
+        )
         if current is None:
             return  # default branch needs a human before deploy can be trusted against it
-        yield from self._sync_deploy(git, repo, default, current, fix)
+        yield from self._sync_deploy(git, repo, default, current, fix, exclude)
 
     def _sync_default(
-        self, git: Git, repo: Path, default: str, local_sha: str, remote_sha: str, fix: bool
+        self,
+        git: Git,
+        repo: Path,
+        default: str,
+        local_sha: str,
+        remote_sha: str,
+        fix: bool,
+        exclude: Exclusions,
     ) -> Iterator[Finding]:
         """Findings about the default branch; returns its sha once confirmed current."""
         if local_sha == remote_sha:
@@ -470,10 +498,9 @@ class ChimeraUpToDateCheck:
                 fixable=False,
             )
             return None
-        if not fix:
-            yield Finding(
-                self.name, f'{repo} {default} is behind {remote}', resolved=False, fixable=True
-            )
+        behind = f'{repo} {default} is behind {remote}'
+        if not fix or exclude.matches(self.name, behind):
+            yield Finding(self.name, behind, resolved=False, fixable=True)
             return None
         new_sha = _repoint(git, default, remote)
         if new_sha is None:
@@ -494,18 +521,14 @@ class ChimeraUpToDateCheck:
         return new_sha
 
     def _sync_deploy(
-        self, git: Git, repo: Path, default: str, current: str, fix: bool
+        self, git: Git, repo: Path, default: str, current: str, fix: bool, exclude: Exclusions
     ) -> Iterator[Finding]:
         deploy_sha = git.rev_parse('deploy', short=False) if 'deploy' in git.branches() else None
         if deploy_sha is None or deploy_sha == current:
             return
-        if not fix:
-            yield Finding(
-                self.name,
-                f'{repo} deploy does not point at {default}',
-                resolved=False,
-                fixable=True,
-            )
+        stale = f'{repo} deploy does not point at {default}'
+        if not fix or exclude.matches(self.name, stale):
+            yield Finding(self.name, stale, resolved=False, fixable=True)
             return
         new_sha = _repoint(git, 'deploy', default)
         if new_sha is None:  # deploy is checked out — branch -f can't move it, ff its checkout
@@ -532,7 +555,7 @@ class WorkspaceEnvCheck:
 
     name = 'workspace-env'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         export = f'export CHIMERA_WORKSPACE="{workspace}"'
         hint = 'add to your shell profile (~/.zshrc, ~/.bashrc, ~/.profile):'
         env = os.environ.get('CHIMERA_WORKSPACE')
@@ -566,7 +589,7 @@ class ShellCompletionCheck:
 
     name = 'shell-completion'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         shell = Path(os.environ.get('SHELL', '')).name
         if shell not in _COMPLETION_SHELLS:
             return  # unknown or unsupported shell — nothing to verify
@@ -632,16 +655,15 @@ class WorkspaceCommitCheck:
 
     name = 'workspace-clean'
 
-    def run(self, workspace: Path, fix: bool) -> Iterator[Finding]:
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         if not (workspace / '.git').exists():
             return  # not a git repo — nothing to commit
         git = Git(workspace)
         if not is_dirty(workspace):
             return
-        if not fix:
-            yield Finding(
-                self.name, f'{workspace} has uncommitted changes', resolved=False, fixable=True
-            )
+        dirty = f'{workspace} has uncommitted changes'
+        if not fix or exclude.matches(self.name, dirty):
+            yield Finding(self.name, dirty, resolved=False, fixable=True)
             return
         head = git('rev-parse', '--abbrev-ref', 'HEAD').strip()  # branch name, or 'HEAD' detached
         before = ref_shas(git, head)

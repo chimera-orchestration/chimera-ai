@@ -13,7 +13,7 @@ from chimera import logging
 from chimera.commands.agent import Agent, agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
-from chimera.commands.doctor import Finding, resolve_root, select_checks
+from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.adopt import adopt as _goal_adopt
@@ -304,11 +304,21 @@ def doctor(
             autocompletion=complete_check,
         ),
     ] = None,
+    exclude: Annotated[
+        list[str] | None,
+        typer.Option(
+            '--exclude',
+            '-x',
+            help='Skip findings matching (check name, or message substring; repeatable)',
+            autocompletion=complete_check,
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option('--verbose', '-v', help='Show every check, including the ones that pass')
     ] = False,
 ) -> None:
     selected = select_checks(check or ())
+    exclusions = Exclusions(tuple(exclude or ()))
     anchor = (path or Path.cwd()).resolve()
     root = resolve_root(path, Path.cwd(), os.environ.get('CHIMERA_WORKSPACE'))
     if root != anchor:
@@ -317,7 +327,7 @@ def doctor(
         repo = doctor_checks.chimera_repo()
         if repo is not None:
             typer.echo(f'note: chimera checkout: {repo}')
-    findings = _doctor(root, fix, selected)
+    findings = _doctor(root, fix, selected, exclusions)
     by_check: dict[str, list[Finding]] = {}
     for finding in findings:
         by_check.setdefault(finding.check, []).append(finding)
@@ -329,13 +339,17 @@ def doctor(
         elif verbose:
             typer.echo(f'[{selected_check.name}] (ok)')
     passing = sum(1 for selected_check in selected if selected_check.name not in by_check)
-    if not findings:
+    for token in exclusions.unmatched:
+        typer.echo(f'warning: -x {token!r} matched nothing')
+    if not findings and not exclusions.excluded:
         if verbose:
             typer.echo('All checks passed!')
         else:
             typer.echo(f'All checks passed! (ch doctor -v lists the {passing} checks run)')
     elif passing and not verbose:
         typer.echo(f'(+{passing} checks passed — ch doctor -v to list)')
+    if count := exclusions.excluded:
+        typer.echo(f'({count} finding{"s" if count != 1 else ""} excluded by -x)')
     if any(not finding.resolved for finding in findings):
         raise typer.Exit(1)
 

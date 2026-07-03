@@ -92,7 +92,12 @@ spots by the `repo:` key in their `config.yaml` — then reports drift from the 
 `--fix` applies the repairs; `--verbose`/`-v` also prints the checks that pass (`[name] (ok)`).
 `-c/--check <name>` (repeatable, tab-completes) limits the run — and so `--fix` — to the named
 checks, always in registry order (workspace-clean still sweeps last); use it to fix one problem
-while leaving the rest alone.
+while leaving the rest alone. `-x/--exclude <text>` (repeatable) is the complement: skip findings
+whose check name equals or message contains `<text>` — so `-x <worktree-dir-name>` mutes one
+known in-flight worktree while everything else reports and fixes. An excluded finding is never
+fixed (checks consult the exclusions with the message the plain report shows, before mutating),
+doesn't fail the exit code, and each drop is logged; the output ends with `(N findings excluded
+by -x)` and a token that matched nothing gets a warning line.
 It's a registry of independent checks (`chimera.commands.doctor`,
 add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates

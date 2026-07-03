@@ -22,7 +22,7 @@ from chimera.commands.doctor.checks import (
     WorktreeBranchCheck,
     commit_message,
 )
-from chimera.commands.doctor.core import Check, Finding
+from chimera.commands.doctor.core import Check, Exclusions, Finding
 from chimera.commands.init import TEMPLATE
 from chimera.worktrees import is_dirty, registered_worktrees
 
@@ -53,8 +53,8 @@ def _human_worktree(repo, project, goal, *, ahead=False, dirty=False):
     return worktree
 
 
-def _run(check: Check, ws, fix: bool = False) -> list[Finding]:
-    return list(check.run(ws, fix))
+def _run(check: Check, ws, fix: bool = False, exclude: Exclusions | None = None) -> list[Finding]:
+    return list(check.run(ws, fix, exclude if exclude is not None else Exclusions()))
 
 
 def _config(path):
@@ -114,6 +114,18 @@ class TestWorkspaceConfig:
         )
         compare(_config(ws), expected={'kind': 'workspace', 'name': 'lycia'})
 
+    def test_excluded_fix_reports_without_writing(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        compare(
+            _run(WorkspaceConfigCheck(), ws, fix=True, exclude=Exclusions(('workspace-config',))),
+            expected=[
+                Finding(
+                    'workspace-config', f'{ws}/config.yaml missing', resolved=False, fixable=True
+                )
+            ],
+        )
+        assert (ws / 'config.yaml').exists() is False  # the excluded fix never ran
+
     def test_already_current_is_silent(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
         tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
@@ -169,6 +181,24 @@ class TestGitignore:
                     fixable=True,
                 )
             ],
+        )
+
+    def test_excluded_entry_not_written(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        gitignore = ws / '.gitignore'
+        gitignore.write_text('*.lock\nservices-running.jsonl\n*/worktrees/\n')
+        compare(
+            _run(GitignoreCheck(), ws, fix=True, exclude=Exclusions(('*/repo/',))),
+            expected=[
+                Finding('gitignore', f"{gitignore} missing 'logs/'", resolved=True, fixable=True),
+                Finding(
+                    'gitignore', f"{gitignore} missing '*/repo/'", resolved=False, fixable=True
+                ),
+            ],
+        )
+        compare(  # the excluded entry stays missing; the other was appended
+            gitignore.read_text(),
+            expected='*.lock\nservices-running.jsonl\n*/worktrees/\nlogs/\n',
         )
 
     def test_missing_entry_appended_after_an_unterminated_final_line(self, tmpdir: TempDir) -> None:
@@ -708,6 +738,24 @@ class TestWorktreeBranch:
             ],
         )
         compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/agent')
+
+    def test_excluded_worktree_left_alone(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        ws = _ws(tmpdir)
+        project = _project(tmpdir, ws, git_repo.path)
+        worktree = _agent_worktree(git_repo, project, 'g')
+        _flip(worktree)
+        compare(
+            _run(WorktreeBranchCheck(), ws, fix=True, exclude=Exclusions((str(worktree),))),
+            expected=[
+                Finding(
+                    'worktree-branch',
+                    f'{worktree} is on stray, expected g/agent',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        compare(Git(worktree)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='stray')
 
     def test_ignores_human_actor(self, tmpdir: TempDir, git_repo: Repo) -> None:
         ws = _ws(tmpdir)

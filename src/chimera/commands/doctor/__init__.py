@@ -1,13 +1,16 @@
 from collections.abc import Sequence
 from pathlib import Path
 
+from loguru import logger
+
 from chimera.commands.doctor.checks import CHECKS
-from chimera.commands.doctor.core import Check, Finding, read_raw
+from chimera.commands.doctor.core import Check, Exclusions, Finding, read_raw
 from chimera.config import NotInWorkspaceError, UserError
 
 __all__ = [
     'CHECKS',
     'Check',
+    'Exclusions',
     'Finding',
     'UnknownCheckError',
     'doctor',
@@ -40,14 +43,27 @@ def select_checks(names: Sequence[str], checks: Sequence[Check] = CHECKS) -> tup
     return tuple(check for check in checks if check.name in wanted)
 
 
-def doctor(workspace: Path, fix: bool = False, checks: Sequence[Check] = CHECKS) -> list[Finding]:
+def doctor(
+    workspace: Path,
+    fix: bool = False,
+    checks: Sequence[Check] = CHECKS,
+    exclude: Exclusions | None = None,
+) -> list[Finding]:
     """Run every check over the workspace root, optionally fixing; return the findings.
 
     Trusts workspace to be the root — resolve it with find_workspace_root first.
+    Findings matching ``exclude`` are dropped (each drop logged and counted on the
+    passed-in ``Exclusions``, so the caller can report what was withheld); the checks
+    also consult it before applying a fix, so an excluded finding is never repaired.
     """
+    exclude = exclude if exclude is not None else Exclusions()
     findings: list[Finding] = []
     for check in checks:
-        findings.extend(check.run(workspace, fix))
+        for finding in check.run(workspace, fix, exclude):
+            if exclude.drop(finding):
+                logger.bind(check=finding.check, finding=finding.message).info('doctor: excluded')
+                continue
+            findings.append(finding)
     return findings
 
 
