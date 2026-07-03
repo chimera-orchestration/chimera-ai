@@ -234,8 +234,13 @@ def _is_inert(git: Git, ref: str, default_ref: str | None) -> bool:
     Either guarantee means deleting the branch loses nothing: the commit lives on a remote, or on
     the local default branch it was taken from. Without a remote and without the default branch,
     neither can be proven, so the branch is treated as *not* inert (never deleted).
+
+    The pushed test asks for one commit reachable from ``ref`` but from no remote-tracking ref —
+    none means the tip is on a remote. ``branch --remotes --contains`` answers the same question
+    but names the containing branches, which costs seconds per call in a repo with thousands of
+    remote-tracking refs; we only need the boolean.
     """
-    if git('branch', '--remotes', '--contains', ref).strip():
+    if not git('rev-list', '-1', ref, '--not', '--remotes', '--').strip():
         return True  # pushed — recoverable from a remote
     return default_ref is not None and _is_ancestor(git, ref, default_ref)
 
