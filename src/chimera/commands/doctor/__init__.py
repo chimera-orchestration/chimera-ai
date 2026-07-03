@@ -55,15 +55,27 @@ def doctor(
     Findings matching ``exclude`` are dropped (each drop logged and counted on the
     passed-in ``Exclusions``, so the caller can report what was withheld); the checks
     also consult it before applying a fix, so an excluded finding is never repaired.
+
+    Logging happens here, at the driver, so a check can't forget to: each check lands an
+    INFO line with its kept-findings count, and each kept finding its own line — ERROR
+    while it still needs attention, INFO once fixed on this run (see
+    ``agent-docs/logging.md``).
     """
     exclude = exclude if exclude is not None else Exclusions()
     findings: list[Finding] = []
     for check in checks:
+        found: list[Finding] = []
         for finding in check.run(workspace, fix, exclude):
             if exclude.drop(finding):
                 logger.bind(check=finding.check, finding=finding.message).info('doctor: excluded')
                 continue
-            findings.append(finding)
+            found.append(finding)
+        logger.bind(findings=len(found)).info(f'{check.name}: checked')
+        for finding in found:
+            logger.bind(fixable=finding.fixable, resolved=finding.resolved).log(
+                'INFO' if finding.resolved else 'ERROR', f'{finding.check}: {finding.message}'
+            )
+        findings.extend(found)
     return findings
 
 
