@@ -15,7 +15,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
     prompts/                    # pre-computed agent context for this project (tracked)
     principles/                 # project-specific principles (tracked)
     processes/                  # project-specific processes (tracked)
-    repo/                       # gitignored — clone managed by Chimera (ch project add only)
+    repo/                       # gitignored — bare clone managed by Chimera (ch project add only)
     worktrees/                  # gitignored — one worktree per goal (agent only)
       {goal}@agent/             # git worktree on branch {goal}/agent
                                 # {goal}/human (and any reviewer/pr) is materialised on demand
@@ -165,7 +165,10 @@ Reports findings and exits non-zero while any remain unresolved.
 ## Adding and removing projects
 
 `ch project add <url|path>` (run anywhere in the workspace) dispatches on its argument:
-- a git URL — clones into `{project}/repo/`
+- a git URL — bare-clones into `{project}/repo/` (no working tree there; all work happens in
+  goal worktrees). The fetch refspec, an initial fetch and `origin/HEAD` are set up by hand
+  since `git clone --bare` skips them, so `origin/<default>` exists for `base_ref`/`default_branch`
+  just as a normal clone would provide.
 - a local path — registers an existing checkout by path; repo stays in place
 
 Both paths:

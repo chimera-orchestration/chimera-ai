@@ -21,8 +21,13 @@ def test_add_clones_a_url_into_the_workspace(tmpdir: TempDir) -> None:
     workspace = tmpdir.makedir('lycia')
     compare(add(workspace, f'file://{origin.path}'), expected=workspace / 'origin')
     repo = workspace / 'origin' / 'repo'
-    assert (repo / '.git').is_dir() is True  # a real clone landed under repo/
-    compare(Git(repo).branches(), expected=['main'])
+    git = Git(repo)
+    compare(git('rev-parse', '--is-bare-repository').strip(), expected='true')  # no working tree
+    compare(git.branches(), expected=['main'])
+    compare(
+        git('symbolic-ref', '--short', 'refs/remotes/origin/HEAD').strip(),
+        expected='origin/main',
+    )
     compare(
         tmpdir.parse('lycia/origin/config.yaml'), expected={'kind': 'project', 'repo': str(repo)}
     )
