@@ -165,7 +165,7 @@ def _ensure_goal(
     """Create ``<goal>/{human,agent}`` at ``head_oid`` tracking ``tracking``; reuse if present."""
     agent_worktree = worktree_path(worktrees_root, goal, AGENT)
     if agent_worktree.resolve() not in registered_worktrees(git):
-        add(repo, worktrees_root, goal, actors=ACTORS, frm=head_oid, fetch=False)
+        add(repo, worktrees_root, goal=goal, actors=ACTORS, frm=head_oid, fetch=False)
         for actor in ACTORS:
             git('branch', f'--set-upstream-to={tracking}', branch(goal, actor))
     return agent_worktree

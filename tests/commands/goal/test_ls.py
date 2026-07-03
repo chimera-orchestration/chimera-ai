@@ -69,8 +69,8 @@ def test_goal_ls_cli_reflects_real_worktrees(
     project = workspace_with_env / 'proj'
     tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
     os.chdir(project)  # worktree add + goal ls both infer the project from cwd
-    command.run('worktree', 'add', 'alpha')
-    command.run('worktree', 'add', 'beta')
+    command.run('worktree', 'add', '--goal', 'alpha')
+    command.run('worktree', 'add', '--goal', 'beta')
     command.run('goal', 'ls').check(
         output='alpha\nbeta',
         logging=action_logs(

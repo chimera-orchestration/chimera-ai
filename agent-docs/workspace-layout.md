@@ -171,6 +171,11 @@ Reports findings and exits non-zero while any remain unresolved.
   just as a normal clone would provide.
 - a local path — registers an existing checkout by path; repo stays in place
 
+`--checkout <path>` (URL sources only — refuses for a local path, which is already a checkout)
+also stands up a plain worktree of the default branch at `<path>` in the same step, via
+`ch worktree add`'s ad-hoc mode (below) — the one-command version of adding a project and then
+checking out `main` somewhere to work in directly.
+
 Both paths:
 1. Create the project directory structure in the workspace
    (`knowledge/`, `prompts/`, `principles/`, `processes/`)
@@ -188,12 +193,33 @@ tracked projects.
 
 Naming pattern (see core concepts): each actor gets branch `{goal}/{actor}`; agents additionally get worktree `{goal}@{actor}`. The dir uses `@` (not the branch's `/`, which would nest, nor a dash, which blurs the boundary against kebab-case goals); `@` can't appear in a goal or actor, so the pair always splits cleanly.
 
-`ch worktree add <goal> [actor…]` (the primitive; repo read from `config.yaml`) creates a branch `{goal}/{actor}` for each actor (default: just `agent`), but only a worktree for non-human actors:
+`ch worktree add` is dual-mode — goal actors, or one ad-hoc branch at an explicit path — with the
+mode chosen by which arguments are given (mutually exclusive; mixing them refuses).
+
+**Goal mode**: `ch worktree add --goal <goal> [--actor <actor>]…` (repo read from `config.yaml`)
+creates a branch `{goal}/{actor}` for each actor (default: just `agent`), but only a worktree for
+non-human actors:
 1. `git worktree add --no-track worktrees/{goal}@agent -b {goal}/agent <base>` from the project repo
 
-Only the agent is created up front. The `human` branch (and any ad-hoc `reviewer`/`pr`) is **lazy** — materialised on demand by `ch goal sync`, so a short-lived spike never accrues a dead branch. Naming actors explicitly (`ch worktree add <goal> human agent`) still creates them: `human` gets a bare branch (`git branch --no-track {goal}/human <base>`, checked out where the human likes), every other named actor gets a worktree.
+Only the agent is created up front. The `human` branch (and any ad-hoc `reviewer`/`pr`) is **lazy** — materialised on demand by `ch goal sync`, so a short-lived spike never accrues a dead branch. Naming actors explicitly (`ch worktree add --goal <goal> --actor human --actor agent`) still creates them: `human` gets a bare branch (`git branch --no-track {goal}/human <base>`, checked out where the human likes), every other named actor gets a worktree.
 
 `<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out), falling back to `HEAD` if neither exists. Branches are created with no upstream tracking.
+
+**Ad-hoc mode**: `ch worktree add <branch> <path>` checks `<branch>` out as a plain worktree at
+`<path>`, which must sit outside the project's `worktrees/` — that tree is reserved for the
+`{goal}@{actor}` shape doctor's checks assume; naming a path inside it refuses (use `--goal`
+instead). Concretely: `ch worktree add main ~/vcs/git/chimera` stands up a normal, pushable
+checkout of `main` next to (not managed by) chimera's goal worktrees.
+
+- **Existing branch** (e.g. `main`, mirrored into a bare `repo/` by `ch project add`): checked out
+  as-is, no new branch created. A bare clone's mirrored branches carry none of the
+  `branch.<name>.remote`/`.merge` tracking config a normal clone sets up for free, so plain
+  `git push`/`pull` would silently need `-u` forever — when `origin/<branch>` exists and no
+  upstream is set yet, this wires it up once, repo-wide, so every future worktree of that branch
+  inherits it too.
+- **New branch**: created from `<base>` (same resolution as goal mode) with git's normal
+  auto-tracking behaviour — unlike a goal actor branch, it isn't forced `--no-track`, since it
+  isn't meant to be managed by `ch goal sync`.
 
 `ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background when a `[prompt]` positional is given). `ch goal adopt <branch>` is the same orchestrator for *existing* work: it takes a branch already carrying commits and restructures it into the `{branch}/{human,agent}` pair (renaming `{branch}` to `{branch}/human` — git can't hold `refs/heads/{branch}` beside `refs/heads/{branch}/*`, and the rename carries any checkout's HEAD along — then splitting `{branch}/agent` off that tip), creates the agent worktree, and launches the agent. Unlike `start`, the base is the adopted branch's own tip, not main. It is idempotent: the restructure is skipped once both actor branches exist, and the worktree is reused if already checked out, so a re-run only (re)launches the agent. `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches. It sweeps **every** actor in the goal's namespace, not just the default human/agent pair: any `{goal}/{actor}` branch and any `{goal}@{actor}` worktree is discovered (see `goal_actors`) and, if the same cleanup rules hold (clean, merged), removed. It refuses while a claude session is live in *any* of the goal's worktrees, reporting each session's pid/kind/status/start/name (sessions can be invisible — see `research/claude-session-registration.md`); `--force` bypasses the liveness check as well as discarding unsaved work. `ch project rm --force` never bypasses it. `--dry` (on `worktree rm`/`goal finish`, and `project rm`) runs every discovery and safety check but deletes nothing, reporting what *would* go — pair with `--force` to preview a forced teardown. It shares the real code path (`chimera.dry.Dry` guards each mutation), so the preview can't drift from the actual run.
 

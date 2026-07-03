@@ -80,8 +80,8 @@ def test_actor_option_value() -> None:
     compare(_complete(['agent', 'start', '-a']), expected=['human', 'agent'])
 
 
-def test_actors_positional_on_worktree_add() -> None:
-    compare(_complete(['worktree', 'add', 'some-goal'], 'h'), expected=['human'])
+def test_actor_option_value_on_worktree_add() -> None:
+    compare(_complete(['worktree', 'add', '--goal', 'some-goal', '-a'], 'h'), expected=['human'])
 
 
 def test_new_goal_arguments_do_not_complete(tmpdir: TempDir, workspace_with_env: Path) -> None:

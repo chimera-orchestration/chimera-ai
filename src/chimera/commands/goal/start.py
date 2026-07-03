@@ -25,7 +25,7 @@ def start(
     ``fetch`` (the default) refreshes ``origin`` before choosing the base. ``dangerous``
     makes bypass-permissions mode reachable. Returns the agent worktree.
     """
-    add(repo, worktrees_root, goal, frm=frm, fetch=fetch)
+    add(repo, worktrees_root, goal=goal, frm=frm, fetch=fetch)
     agent_worktree = worktree_path(worktrees_root, goal, AGENT)
     agent(agent_worktree, name, prompt, extra, dangerous)
     return agent_worktree

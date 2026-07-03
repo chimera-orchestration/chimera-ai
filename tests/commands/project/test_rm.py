@@ -24,7 +24,7 @@ def _project(tmpdir: TempDir, repo: Repo, *, with_goal: bool = False) -> tuple[P
     project = workspace / 'myproj'
     tmpdir.dump('lycia/myproj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     if with_goal:
-        add(repo.path, project / 'worktrees', 'g')
+        add(repo.path, project / 'worktrees', goal='g')
     return workspace, project
 
 

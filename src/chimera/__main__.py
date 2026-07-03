@@ -42,7 +42,7 @@ from chimera.context import (
 )
 from chimera.dry import Dry
 from chimera.help import command_index, render_json, render_text
-from chimera.worktrees import AGENT, DEFAULT_ACTORS, HUMAN, session_name, worktree_path
+from chimera.worktrees import AGENT, HUMAN, session_name, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -457,8 +457,17 @@ app.add_typer(project_app, name='project')
 @logs(_project_add)
 def project_add(
     source: Annotated[str, typer.Argument(help='Git URL to clone, or local path to track')],
+    checkout: Annotated[
+        Path | None,
+        typer.Option(
+            '--checkout', help='Also check out the default branch here (URL sources only)'
+        ),
+    ] = None,
 ) -> None:
-    typer.echo(f'Added {_project_add(resolve_workspace(Path.cwd()), source)}')
+    checkout = checkout.expanduser() if checkout else None
+    typer.echo(f'Added {_project_add(resolve_workspace(Path.cwd()), source, checkout)}')
+    if checkout is not None:
+        typer.echo(f'Checked out at {checkout}')
 
 
 @project_app.command(
@@ -494,15 +503,28 @@ app.add_typer(worktree_app, name='worktree')
 
 
 @worktree_app.command(
-    'add', cls=LoggingCommand, help="Create each actor's branch and the agent worktree for a goal."
+    'add',
+    cls=LoggingCommand,
+    help="Check out a branch as a worktree — an ad-hoc <branch> [path], or a goal's actors "
+    '(--goal).',
 )
 @logs(_worktree_add)
 def worktree_add(
     ctx: typer.Context,
-    goal: Annotated[str, typer.Argument()],
-    actors: Annotated[
+    branch: Annotated[str | None, typer.Argument(help='Branch to check out (ad-hoc mode)')] = None,
+    path: Annotated[Path | None, typer.Argument(help='Where to check it out (ad-hoc mode)')] = None,
+    goal: Annotated[
+        str | None,
+        typer.Option('--goal', '-g', help='Goal to create actor branches/worktrees for'),
+    ] = None,
+    actor: Annotated[
         list[str] | None,
-        typer.Argument(help='Actors (default: human, agent)', autocompletion=complete_actor),
+        typer.Option(
+            '--actor',
+            '-a',
+            help='Actor for --goal (repeatable; default: agent)',
+            autocompletion=complete_actor,
+        ),
     ] = None,
     frm: FromOpt = None,
     offline: OfflineOpt = False,
@@ -512,9 +534,11 @@ def worktree_add(
     for created in _worktree_add(
         p.repo,
         p.worktrees,
-        goal,
-        tuple(actors) if actors else DEFAULT_ACTORS,
-        frm,
+        goal=goal,
+        actors=tuple(actor) if actor else None,
+        branch=branch,
+        path=path.expanduser() if path else None,
+        frm=frm,
         fetch=not offline,
     ):
         typer.echo(f'Created {created}')

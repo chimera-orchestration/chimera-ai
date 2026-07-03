@@ -34,7 +34,7 @@ def _resolved(project_dir: Path, repo: str = '/r') -> Project:
 def _project_with_goal(tmpdir: TempDir, parent: Path, repo: Repo) -> Project:
     project_dir = _project(tmpdir, parent, 'proj', repo=str(repo.path))
     # both actors, so the human-checkout inference tests have a g/human branch to check out
-    add(repo.path, project_dir / 'worktrees', 'g', actors=('human', 'agent'))
+    add(repo.path, project_dir / 'worktrees', goal='g', actors=('human', 'agent'))
     return resolve_project(project_dir)
 
 

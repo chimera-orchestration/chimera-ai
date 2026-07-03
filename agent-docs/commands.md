@@ -40,6 +40,20 @@ It resolves the synonym in `get_command` (so the real command runs) and leaves
 extending the dict. A synonym must not collide with a real command name (a test
 enforces this; the canonical command would win anyway).
 
+## One command, mutually exclusive modes
+
+A command can cover two shapes of the same job (`ch worktree add`: goal actors via `--goal`, or
+one ad-hoc branch+path) without becoming two commands. Put the dispatch — validating which
+combination of arguments was given, raising `UserError` on a conflicting or incomplete one — in
+the **pure function**, not the CLI wrapper. The CLI wrapper just passes through whatever it parsed.
+
+This matters because `@logs(fn)` (see `agent-docs/logging.md`) tags a command with a single,
+fixed dotted path at decoration time — if the wrapper itself branched between two different pure
+functions, the logged delegate would be wrong for whichever branch didn't match the tag. Routing
+the dispatch through one pure function keeps a single, always-correct delegate, and puts the mode
+logic where `commands.md`'s own rule already says it belongs — tested at the function layer, not
+the CLI layer.
+
 ## Shell completion
 
 Value-taking params complete via callbacks in `chimera/completions.py`, attached with

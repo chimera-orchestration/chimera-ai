@@ -51,7 +51,9 @@ def test_track_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None
     command.run('project', 'add', str(repo)).check(
         output=f'Added {workspace / "myrepo"}',
         logging=action_logs(
-            'project add', 'chimera.commands.project.add.add', {'source': str(repo)}
+            'project add',
+            'chimera.commands.project.add.add',
+            {'source': str(repo), 'checkout': None},
         ),
     )
     assert (workspace / 'myrepo' / 'config.yaml').is_file() is True
@@ -66,7 +68,7 @@ def test_track_cli_outside_a_workspace(tmpdir: TempDir, command: Command) -> Non
         logging=action_logs(
             'project add',
             'chimera.commands.project.add.add',
-            {'source': str(repo)},
+            {'source': str(repo), 'checkout': None},
             error=f'NotInWorkspaceError: {Path.cwd()} is not inside a Chimera workspace',
         ),
     )

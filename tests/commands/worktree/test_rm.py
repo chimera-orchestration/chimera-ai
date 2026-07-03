@@ -22,7 +22,7 @@ def _no_agents(replace: Replacer) -> None:
 
 def _goal(tmpdir: TempDir, repo: Repo) -> Path:
     worktrees = tmpdir / 'worktrees'
-    add(repo.path, worktrees, 'g')
+    add(repo.path, worktrees, goal='g')
     return worktrees
 
 
@@ -162,7 +162,9 @@ def test_remove_sweeps_a_stray_branch_only_actor(tmpdir: TempDir, git_repo: Repo
 
 def test_remove_sweeps_a_stray_worktree_actor(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
-    add(git_repo.path, worktrees, 'g', actors=('scout',))  # an extra actor with its own worktree
+    add(
+        git_repo.path, worktrees, goal='g', actors=('scout',)
+    )  # an extra actor with its own worktree
     compare(
         remove(git_repo.path, worktrees, 'g'),
         expected=[worktrees / 'g@agent', worktrees / 'g@scout'],  # both worktrees, sorted
@@ -173,7 +175,7 @@ def test_remove_sweeps_a_stray_worktree_actor(tmpdir: TempDir, git_repo: Repo) -
 
 def test_remove_refuses_an_unmerged_stray_actor(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
-    add(git_repo.path, worktrees, 'g', actors=('scout',))
+    add(git_repo.path, worktrees, goal='g', actors=('scout',))
     Repo(worktrees / 'g@scout').commit_content('work')  # scout ahead of main
     with ShouldRaise(
         RuntimeError(
@@ -188,7 +190,7 @@ def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
-    add(git_repo.path, worktrees, 'g', actors=('scout',))
+    add(git_repo.path, worktrees, goal='g', actors=('scout',))
     scout = worktrees / 'g@scout'
     replace.in_module(
         live_sessions,
@@ -237,7 +239,7 @@ def test_remove_recognises_an_upstream_merge_only_after_fetch(tmpdir: TempDir) -
     origin.commit_content('seed', datetime(2020, 1, 1))
     local = Git.clone(origin, tmpdir / 'repo')
     worktrees = tmpdir / 'worktrees'
-    add(local.path, worktrees, 'g', fetch=False)
+    add(local.path, worktrees, goal='g', fetch=False)
     Repo(worktrees / 'g@agent').commit_content('work', datetime(2022, 1, 1))  # newer than seed
     # the PR merges on origin: push the work to a side branch, then merge it into origin's main.
     # local's origin/main tracking ref stays stale until a fetch — pushing to main would update it.
@@ -297,7 +299,7 @@ def test_remove_uses_the_repos_default_branch(tmpdir: TempDir) -> None:
     repo.commit_content('seed')
     repo('branch', '-m', 'main', 'master')  # master-style default
     worktrees = tmpdir / 'worktrees'
-    add(repo.path, worktrees, 'g')  # branches off master; nothing added → merged
+    add(repo.path, worktrees, goal='g')  # branches off master; nothing added → merged
     remove(repo.path, worktrees, 'g')
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(repo.path).branches(), expected=['master'])
@@ -324,7 +326,7 @@ def _rm_refs(cli: str, goal: str, base: str, *, offline: bool = False) -> list[d
 
 def test_worktree_rm_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     project = _project(tmpdir, git_repo)
-    command.run('worktree', 'add', 'g')
+    command.run('worktree', 'add', '--goal', 'g')
     base = Git(git_repo.path)('rev-parse', 'g/agent').strip()
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('worktree', 'rm', 'g').check(
@@ -337,7 +339,7 @@ def test_worktree_rm_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> N
 
 def test_worktree_rm_cli_dry_previews(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     project = _project(tmpdir, git_repo)
-    command.run('worktree', 'add', 'g')
+    command.run('worktree', 'add', '--goal', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('worktree', 'rm', 'g', '--dry').check(
         output=f'Would remove {worktree}',
@@ -367,7 +369,7 @@ def test_worktree_rm_cli_reports_nothing_to_remove(
 
 def test_goal_finish_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     project = _project(tmpdir, git_repo)
-    command.run('worktree', 'add', 'g')
+    command.run('worktree', 'add', '--goal', 'g')
     base = Git(git_repo.path)('rev-parse', 'g/agent').strip()
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     command.run('goal', 'finish', 'g', '--offline').check(
@@ -380,7 +382,7 @@ def test_goal_finish_cli_offline(tmpdir: TempDir, git_repo: Repo, command: Comma
 
 def test_goal_finish_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     project = _project(tmpdir, git_repo)
-    command.run('worktree', 'add', 'g')
+    command.run('worktree', 'add', '--goal', 'g')
     base = Git(git_repo.path)('rev-parse', 'g/agent').strip()
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     # finish is the lifecycle name for rm

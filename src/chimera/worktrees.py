@@ -187,7 +187,7 @@ def is_dirty(worktree: Path) -> bool:
     return bool(Git(worktree)('status', '--porcelain').strip())
 
 
-def _ref_exists(git: Git, ref: str) -> bool:
+def ref_exists(git: Git, ref: str) -> bool:
     try:
         git('rev-parse', '--verify', '--quiet', ref)
         return True
@@ -201,7 +201,7 @@ def ref_shas(git: Git, *refs: str) -> dict[str, str]:
     The before/after snapshot for logging a ref mutation (see ``agent-docs/logging.md``):
     capture it either side of the change so the log alone can restore a ref.
     """
-    return {ref: git.rev_parse(ref, short=False) for ref in refs if _ref_exists(git, ref)}
+    return {ref: git.rev_parse(ref, short=False) for ref in refs if ref_exists(git, ref)}
 
 
 def default_branch(git: Git) -> str:
@@ -219,7 +219,7 @@ def default_branch(git: Git) -> str:
     except GitError:
         pass
     for name in ('main', 'master'):
-        if _ref_exists(git, name) or _ref_exists(git, f'origin/{name}'):
+        if ref_exists(git, name) or ref_exists(git, f'origin/{name}'):
             return name
     return 'main'
 

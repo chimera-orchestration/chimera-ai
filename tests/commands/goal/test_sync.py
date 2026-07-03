@@ -23,7 +23,7 @@ def _full(repo: Repo, ref: str) -> str:
 
 def _goal(tmpdir: TempDir, repo: Repo) -> Path:
     worktrees = tmpdir / 'worktrees'
-    add(repo.path, worktrees, 'g')  # g@agent worktree + g/agent branch, no human
+    add(repo.path, worktrees, goal='g')  # g@agent worktree + g/agent branch, no human
     return worktrees
 
 
@@ -423,7 +423,7 @@ def test_sync_line_appends_the_checkout_outcome() -> None:
 
 def test_goal_sync_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
     tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
-    command.run('worktree', 'add', 'g')
+    command.run('worktree', 'add', '--goal', 'g')
     agent = _full(git_repo, 'g/agent')
     start, end = action_logs(
         'goal sync',
