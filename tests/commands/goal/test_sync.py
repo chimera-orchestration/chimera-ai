@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from giterator import Git
 from giterator.testing import Repo
 from testfixtures import LogCapture, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.__main__ import _sync_line
-from chimera.commands.goal.sync import Outcome, SyncResult, _exists, sync
+from chimera.commands.goal.sync import Outcome, SyncResult, sync
+from chimera.git import Git
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
 from chimera.worktrees import Checkout
@@ -28,7 +28,7 @@ def _goal(tmpdir: TempDir, repo: Repo) -> Path:
 
 
 def _refs_log() -> LogCapture:
-    return LogCapture(LoguruSource(('message', 'extra')))
+    return LogCapture(LoguruSource(('message', 'extra'), level='INFO'))
 
 
 def _wm(mover: str = 'human') -> str:
@@ -326,7 +326,7 @@ def test_conflict_leaves_the_cherry_pick_in_the_checkout(tmpdir: TempDir, git_re
             conflict=checkout.resolve(),
         ),
     )
-    compare(_exists(Git(checkout), 'CHERRY_PICK_HEAD'), expected=True)  # left mid cherry-pick
+    compare(Git(checkout).ref_exists('CHERRY_PICK_HEAD'), expected=True)  # left mid cherry-pick
     compare(_full(git_repo, _wm()), expected=watermark)  # watermark NOT advanced
 
 

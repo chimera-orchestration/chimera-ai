@@ -1,7 +1,7 @@
 import shutil
 from pathlib import Path
 
-from giterator import Git
+from chimera.git import Git
 
 TEMPLATE = Path(__file__).parent.parent / 'templates' / 'workspace'
 

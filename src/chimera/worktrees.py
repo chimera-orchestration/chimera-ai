@@ -2,8 +2,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from subprocess import PIPE, run
 
-from giterator import Git, GitError
+from giterator import GitError
 from loguru import logger
+
+from chimera.git import Git
 
 AGENT = 'agent'
 HUMAN = 'human'
@@ -187,23 +189,6 @@ def is_dirty(worktree: Path) -> bool:
     return bool(Git(worktree)('status', '--porcelain').strip())
 
 
-def ref_exists(git: Git, ref: str) -> bool:
-    try:
-        git('rev-parse', '--verify', '--quiet', ref)
-        return True
-    except GitError:
-        return False
-
-
-def ref_shas(git: Git, *refs: str) -> dict[str, str]:
-    """Each of ``refs`` that currently exists, mapped to the full sha it points at.
-
-    The before/after snapshot for logging a ref mutation (see ``agent-docs/logging.md``):
-    capture it either side of the change so the log alone can restore a ref.
-    """
-    return {ref: git.rev_parse(ref, short=False) for ref in refs if ref_exists(git, ref)}
-
-
 def default_branch(git: Git) -> str:
     """The repo's default branch name (e.g. ``main`` or ``master``).
 
@@ -219,7 +204,7 @@ def default_branch(git: Git) -> str:
     except GitError:
         pass
     for name in ('main', 'master'):
-        if ref_exists(git, name) or ref_exists(git, f'origin/{name}'):
+        if git.ref_exists(name) or git.ref_exists(f'origin/{name}'):
             return name
     return 'main'
 

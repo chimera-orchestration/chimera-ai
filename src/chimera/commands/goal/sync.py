@@ -2,10 +2,11 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from giterator import Git, GitError
+from giterator import GitError
 from loguru import logger
 
 from chimera.config import UserError
+from chimera.git import Git
 from chimera.worktrees import (
     AGENT,
     HUMAN,
@@ -15,7 +16,6 @@ from chimera.worktrees import (
     checkout_here,
     checkout_of,
     is_dirty,
-    ref_shas,
 )
 
 
@@ -82,14 +82,14 @@ def sync(
         raise UserError(f'nothing to sync — --move and --to are both {mover!r}')
     git = Git(repo)
     mover_branch, target_branch = branch(goal, mover), branch(goal, target)
-    if not _exists(git, target_branch):
+    if not git.ref_exists(target_branch):
         raise UserError(f'no branch {target_branch} to sync from')
     watermark = _watermark_ref(goal, mover)
-    before = ref_shas(git, mover_branch, watermark)
+    before = git.ref_shas(mover_branch, watermark)
     outcome, ahead_by, appended, conflict = _apply(
         git, goal, mover, mover_branch, target_branch, watermark
     )
-    if (after := ref_shas(git, mover_branch, watermark)) != before:
+    if (after := git.ref_shas(mover_branch, watermark)) != before:
         logger.bind(goal=goal, git={'before': before, 'after': after}).info('goal sync: refs')
     landed = (
         checkout_here(git, mover_branch, into, 'goal sync')
@@ -107,7 +107,7 @@ def _apply(
     """Settle ``mover_branch`` against ``target_branch``: ``(outcome, ahead_by, appended, conflict)``."""
     _reconcile(git, goal, mover, mover_branch, watermark)
     tip = git.rev_parse(target_branch, short=False)
-    if not _exists(git, mover_branch):
+    if not git.ref_exists(mover_branch):
         git('branch', '--no-track', mover_branch, target_branch)
         return _record(git, watermark, tip, Outcome.CREATED)
     if git.rev_parse(mover_branch) == git.rev_parse(target_branch):
@@ -132,7 +132,7 @@ def _append(
     git: Git, goal: str, mover: str, mover_branch: str, target_branch: str, watermark: str
 ) -> tuple[Outcome, int, int, Path | None]:
     """Replay the target commits made since the watermark onto a diverged mover branch."""
-    seeded = ref_shas(git, watermark).get(watermark)
+    seeded = git.ref_shas(watermark).get(watermark)
     point = seeded or _tree_match_point(git, mover_branch, target_branch)
     if point is None:
         raise UserError(
@@ -265,15 +265,7 @@ def _read_marker(marker: Path) -> tuple[str, str] | None:
 
 
 def _cherry_pick_in_progress(checkout: Path) -> bool:
-    return _exists(Git(checkout), 'CHERRY_PICK_HEAD')
-
-
-def _exists(git: Git, ref: str) -> bool:
-    try:
-        git('rev-parse', '--verify', '--quiet', ref)
-        return True
-    except GitError:
-        return False
+    return Git(checkout).ref_exists('CHERRY_PICK_HEAD')
 
 
 def _is_ancestor(git: Git, ancestor: str, descendant: str) -> bool:

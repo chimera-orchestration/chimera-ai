@@ -1,11 +1,10 @@
 import re
 from pathlib import Path
 
-from giterator import Git
-
 from chimera.commands.project.track import register, track
 from chimera.commands.worktree.add import add as worktree_add
 from chimera.config import UserError
+from chimera.git import Git
 from chimera.worktrees import default_branch
 
 _URL = re.compile(r'://|^[^/]+@[^/]+:')

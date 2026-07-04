@@ -5,10 +5,12 @@ import time
 from pathlib import Path
 
 import pytest
+from giterator.testing import Repo
 from loguru import logger
-from testfixtures import LogCapture, Replacer, TempDir, compare
+from testfixtures import LogCapture, OutputCapture, Replacer, TempDir, compare
 
 from chimera.commands.init import init
+from chimera.git import Git
 from chimera.logging import (
     configure,
     log_failure,
@@ -181,13 +183,45 @@ class TestFileSink:
         log_finish('init', log_start('init', FUNC, {}))
         compare(len(log_path(sink).read_text().splitlines()), expected=2)
 
-
-def test_configure_outside_a_workspace_keeps_the_default(tmpdir: TempDir) -> None:
-    # cwd is the temp root and the env is cleared, so no workspace resolves: configure
-    # must not raise and must leave loguru's existing sinks in place (better than none).
-    core = getattr(logger, '_core')
-    with Replacer() as replace:
-        sentinel = {'kept': object()}
-        replace(target=core.handlers, container=core, name='handlers', replacement=sentinel)
+    def test_a_git_trace_line_lands_at_debug(self, sink: Path) -> None:
         configure()
-        compare(core.handlers, expected=sentinel)
+        Git(sink)('rev-parse', '--git-dir')
+        trace = json.loads(log_path(sink).read_text().splitlines()[0])
+        del trace['time']
+        compare(
+            trace,
+            expected={
+                'pid': os.getpid(),
+                'level': 'DEBUG',
+                'message': 'git rev-parse --git-dir',
+                'git_cwd': str(sink),
+            },
+        )
+
+
+class TestEchoSink:
+    def test_git_commands_echo_bare_on_stderr(self, sink: Path) -> None:
+        # the command text only — cwd stays in the file log; stdout stays machine-clean
+        with OutputCapture(separate=True) as output:
+            configure()
+            Git(sink)('rev-parse', '--git-dir')
+        output.compare(stderr='git rev-parse --git-dir')
+
+    def test_non_git_lines_do_not_echo(self, sink: Path) -> None:
+        with OutputCapture(separate=True) as output:
+            configure()
+            log_finish('init', log_start('init', FUNC, {}))
+            logger.bind(git={'before': {}, 'after': {}}).info('demo: refs')
+        output.compare(stderr='')
+
+    def test_outside_a_workspace_still_echoes(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # cwd is the temp root and the env is cleared, so no workspace resolves: configure
+        # must not raise, and git commands stay visible even with no file to log to.
+        core = getattr(logger, '_core')  # no typed helper fits an instance attribute
+        replace(target=core.handlers, container=core, name='handlers', replacement={})
+        repo = Repo.make(tmpdir / 'repo')  # giterator's own Git, so make() itself isn't traced
+        with OutputCapture(separate=True) as output:
+            configure()
+            Git(repo.path)('status', '--porcelain')
+        output.compare(stderr='git status --porcelain')
+        compare(len(core.handlers), expected=1)  # just the echo — no file sink

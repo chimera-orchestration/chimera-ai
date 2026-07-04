@@ -6,19 +6,19 @@ from pathlib import Path
 from string import Template
 from urllib.parse import urlsplit
 
-from giterator import Git, GitError
+from giterator import GitError
 from loguru import logger
 
 from chimera.commands.agent import agent
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
+from chimera.git import Git
 from chimera.worktrees import (
     ACTORS,
     AGENT,
     HUMAN,
     branch,
     checkout_here,
-    ref_shas,
     registered_worktrees,
     session_name,
     worktree_path,
@@ -173,7 +173,7 @@ def _ensure_goal(
 
 def _goal_refs(git: Git, goal: str) -> dict[str, str]:
     """The goal's actor branches that exist, each mapped to its full sha (for logging)."""
-    return ref_shas(git, branch(goal, HUMAN), branch(goal, AGENT))
+    return git.ref_shas(branch(goal, HUMAN), branch(goal, AGENT))
 
 
 def _prompt(prompts_dir: Path, meta: dict[str, object], goal: str, project: str) -> str:

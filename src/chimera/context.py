@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from difflib import get_close_matches
 from pathlib import Path
 
-from giterator import Git, GitError
+from giterator import GitError
 
 from chimera.config import (
     NotInWorkspaceError,
@@ -13,6 +13,7 @@ from chimera.config import (
     find_workspace,
     load_config,
 )
+from chimera.git import Git
 from chimera.worktrees import SEP, goals
 
 

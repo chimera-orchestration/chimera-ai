@@ -1,9 +1,10 @@
 """Action logging — every action lands in the workspace's JSON-lines log.
 
-One sink, one file: ``<workspace>/logs/chimera.jsonl``, gitignored. Each line is a flat JSON
+One file: ``<workspace>/logs/chimera.jsonl``, gitignored. Each line is a flat JSON
 object ``{time, pid, command?, level, message?, **extra}`` — everything bound on the record is
 included (only the ``line`` scratch is dropped), so any ``logger.bind(...)`` anywhere in the
-codebase surfaces without touching this format.
+codebase surfaces without touching this format. A second, stderr sink echoes just the git
+command trace (see :func:`configure`).
 
 A CLI action frames itself with a start/end pair sharing a ``pid`` (one process per
 invocation, so ``pid`` ties them — and any lines logged in between — together):
@@ -20,6 +21,7 @@ Log rotation is deferred.
 """
 
 import json
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -68,19 +70,28 @@ def _format(record: 'Record') -> str:
     return '{extra[line]}\n'
 
 
-def configure() -> None:
-    """Point loguru at the current workspace's action log (one sink, one file).
+def _is_git_trace(record: 'Record') -> bool:
+    """A :class:`chimera.git.Git` command-trace line (its ``git_cwd`` key marks it)."""
+    return 'git_cwd' in record['extra']
 
-    Best-effort: an action run outside any workspace (e.g. ``ch init`` before one
-    exists) has no log file to write to, so loguru's default sink is left in place —
-    better than nothing.
+
+def configure() -> None:
+    """Set up loguru's sinks for a CLI action: the git echo, plus the workspace's action log.
+
+    The **echo sink** surfaces every git command as it runs — bare command text on stderr
+    (stdout stays clean for machine output), no cwd (that's the file log's job). The **file
+    sink** (``<workspace>/logs/chimera.jsonl``) records everything from DEBUG up, so the git
+    trace persists alongside the action frames. Outside any workspace (e.g. ``ch init``
+    before one exists) there's no log file, so only the echo sink runs — commands stay
+    visible, frames go nowhere.
     """
+    logger.remove()
+    logger.add(sys.stderr, format='{message}', filter=_is_git_trace, level='DEBUG')
     try:
         workspace = resolve_workspace(Path.cwd())
     except NotInWorkspaceError:
         return
-    logger.remove()
-    logger.add(log_path(workspace), format=_format, level='INFO')
+    logger.add(log_path(workspace), format=_format, level='DEBUG')
 
 
 def log_start(command: str, function: str, params: dict[str, object]) -> float:

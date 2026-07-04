@@ -1,14 +1,14 @@
 from pathlib import Path
 
-from giterator import Git, GitError
+from giterator import GitError
 
 from chimera.config import UserError
+from chimera.git import Git
 from chimera.worktrees import (
     DEFAULT_ACTORS,
     HUMAN,
     base_ref,
     fetch_origin,
-    ref_exists,
     worktree_path,
 )
 from chimera.worktrees import branch as goal_branch
@@ -99,11 +99,11 @@ def _checkout(repo: Path, branch: str, path: Path, frm: str | None, fetch: bool)
     if fetch:
         fetch_origin(git)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if ref_exists(git, branch):
+    if git.ref_exists(branch):
         git('worktree', 'add', str(path), branch)
         origin_ref = f'origin/{branch}'
         upstream = git('for-each-ref', '--format=%(upstream)', f'refs/heads/{branch}').strip()
-        if not upstream and ref_exists(git, origin_ref):
+        if not upstream and git.ref_exists(origin_ref):
             git('branch', f'--set-upstream-to={origin_ref}', branch)
     else:
         base = _resolve_base(git, repo, frm)

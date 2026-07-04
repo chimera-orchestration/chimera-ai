@@ -3,11 +3,10 @@ from pathlib import Path
 
 import yaml
 
-from giterator import Git
-
 from chimera.commands.worktree.rm import refuse_if_agents_running
 from chimera.commands.worktree.rm import remove as remove_worktrees
 from chimera.dry import Dry
+from chimera.git import Git
 from chimera.worktrees import goal_actors, goals, worktree_path
 
 

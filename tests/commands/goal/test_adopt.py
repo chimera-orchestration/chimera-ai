@@ -136,7 +136,7 @@ def test_adopt_logs_the_refs_before_and_after(
     git_repo('checkout', 'main')
     worktrees = tmpdir / 'worktrees'
     _stub_agent(replace)
-    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent')
     log.check(
         (

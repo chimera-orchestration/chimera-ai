@@ -2,12 +2,12 @@ import shutil
 import subprocess
 
 import yaml
-from giterator import Git
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, TempDir, compare, not_there
 from testfixtures.loguru import LoguruSource
 
 from chimera.commands.doctor import checks as doctor_checks
+from chimera.git import Git
 from chimera.commands.doctor.checks import (
     ChimeraUpToDateCheck,
     GitignoreCheck,
@@ -573,7 +573,7 @@ class TestWorktreeBranch:
         worktree = _agent_worktree(git_repo, project, 'g')
         _flip(worktree)
         seed = Git(git_repo.path).rev_parse('main', short=False)  # both branches sit at seed
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             compare(
                 _run(WorktreeBranchCheck(), ws, fix=True),
                 expected=[
@@ -641,7 +641,7 @@ class TestWorktreeBranch:
         git = Git(git_repo.path)
         git('branch', '-D', 'g/agent')  # the goal is finished; the work lives on parked/…
         sha = git.rev_parse('parked/g/agent', short=False)
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             compare(
                 _run(WorktreeBranchCheck(), ws, fix=True),
                 expected=[
@@ -805,7 +805,7 @@ class TestInertBranch:
         _agent_worktree(repo, project, 'g')  # makes 'g' a known goal
         _bare_branch(repo, 'g/human')  # sits at main, which is on origin/main
         seed = Git(repo.path).rev_parse('g/human', short=False)
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             compare(
                 _run(InertBranchCheck(), ws, fix=True),
                 expected=[
@@ -1033,13 +1033,13 @@ class TestChimeraUpToDate:
 
     def test_logs_the_checkout_location(self, tmpdir: TempDir, replace: Replacer) -> None:
         _origin, local = _chimera_clone(tmpdir, replace)
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             _run(ChimeraUpToDateCheck(), _ws(tmpdir))
         log.check(('chimera-up-to-date: checkout', {'repo': str(local.path)}))
 
     def test_logs_no_checkout_found(self, tmpdir: TempDir, replace: Replacer) -> None:
         replace.in_module(doctor_checks.chimera_repo, lambda: None)
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             _run(ChimeraUpToDateCheck(), _ws(tmpdir))
         log.check(('chimera-up-to-date: checkout', {'repo': None}))
 
@@ -1083,7 +1083,7 @@ class TestChimeraUpToDate:
         local('checkout', '-b', 'other')  # main isn't checked out here — branch -f can move it
         original = local.rev_parse('main', short=False)
         origin.commit_content('remote-ahead')
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             compare(
                 _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
                 expected=[
@@ -1168,7 +1168,7 @@ class TestChimeraUpToDate:
         local('fetch', 'origin')
         local('checkout', 'origin/main', '-B', 'main')
         local('branch', 'deploy', first)
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             compare(
                 _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
                 expected=[
@@ -1200,7 +1200,7 @@ class TestChimeraUpToDate:
         local('branch', 'deploy', first)
         local('worktree', 'add', str(tmpdir / 'deploy-wt'), 'deploy')  # deploy is checked out
         second = local.rev_parse('main', short=False)
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             compare(
                 _run(ChimeraUpToDateCheck(), _ws(tmpdir), fix=True),
                 expected=[
@@ -1390,7 +1390,7 @@ class TestWorkspaceClean:
         replace.in_module(doctor_checks.commit_message, lambda diff: 'Add a knowledge note')
         head = repo('rev-parse', '--abbrev-ref', 'HEAD').strip()
         before = repo.rev_parse(head, short=False)
-        with LogCapture(LoguruSource(('message', 'extra'))) as log:
+        with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
             compare(
                 _run(WorkspaceCommitCheck(), ws, fix=True),
                 expected=[

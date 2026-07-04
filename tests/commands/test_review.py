@@ -5,7 +5,7 @@ from pathlib import Path
 from string import Template
 from subprocess import CompletedProcess
 
-from giterator import Git, GitError
+from giterator import GitError
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
@@ -23,6 +23,7 @@ from chimera.commands.review import (
     review,
 )
 from chimera.config import UserError
+from chimera.git import Git
 from tests.cli import Command, action_logs
 
 
@@ -116,7 +117,7 @@ def test_review_logs_the_goal_refs(tmpdir: TempDir, replace: Replacer) -> None:
     worktrees = tmpdir / 'wt'
     _stub_meta(replace, _meta(head))
     _stub_agent(replace)
-    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         review(repo, worktrees, 'proj', tmpdir / 'prompts', '1')
     log.check(
         (

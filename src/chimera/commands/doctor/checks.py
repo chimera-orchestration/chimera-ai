@@ -3,7 +3,7 @@ import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
-from giterator import Git, GitError
+from giterator import GitError
 from loguru import logger
 
 from chimera.commands.doctor.core import (
@@ -16,6 +16,7 @@ from chimera.commands.doctor.core import (
     write_config,
 )
 from chimera.commands.init import TEMPLATE
+from chimera.git import Git
 from chimera.worktrees import (
     AGENT,
     HUMAN,
@@ -28,7 +29,6 @@ from chimera.worktrees import (
     goals,
     is_dirty,
     is_merged,
-    ref_shas,
     registered_worktrees,
     worktree_path,
 )
@@ -220,9 +220,9 @@ class InertBranchCheck:
                     message = f'{ref} points at an already-integrated commit — inert'
                     fixing = fix and not exclude.matches(self.name, message)
                     if fixing:
-                        before = ref_shas(git, ref)
+                        before = git.ref_shas(ref)
                         git('branch', '-D', ref)
-                        logger.bind(git={'before': before, 'after': ref_shas(git, ref)}).info(
+                        logger.bind(git={'before': before, 'after': git.ref_shas(ref)}).info(
                             f'{self.name}: refs'
                         )
                     yield Finding(self.name, message, resolved=fixing, fixable=True)
@@ -733,11 +733,11 @@ class WorkspaceCommitCheck:
             yield Finding(self.name, dirty, resolved=False, fixable=True)
             return
         head = git('rev-parse', '--abbrev-ref', 'HEAD').strip()  # branch name, or 'HEAD' detached
-        before = ref_shas(git, head)
+        before = git.ref_shas(head)
         git('add', '-A')
         message = commit_message(git('diff', '--cached'))
         git('commit', '-m', message)
-        logger.bind(git={'before': before, 'after': ref_shas(git, head)}).info(f'{self.name}: refs')
+        logger.bind(git={'before': before, 'after': git.ref_shas(head)}).info(f'{self.name}: refs')
         yield Finding(self.name, f'{workspace} committed: {message}', resolved=True, fixable=True)
 
 

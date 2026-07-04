@@ -2,11 +2,11 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
-from giterator import Git
 from loguru import logger
 
 from chimera.commands.agent import live_sessions
 from chimera.dry import Dry
+from chimera.git import Git
 from chimera.worktrees import (
     SEP,
     base_ref,
@@ -15,7 +15,6 @@ from chimera.worktrees import (
     goal_actors,
     is_dirty,
     is_merged,
-    ref_shas,
     registered_worktrees,
     worktree_path,
 )
@@ -57,7 +56,7 @@ def remove(
         _refuse_if_unsafe(git, goal, worktrees, registered, branches)
     sync_refs = _sync_refs(git, goal)  # refs/chimera/synced/<goal>/* `goal sync` watermarks
     refs = tuple(branch(goal, actor) for actor in worktrees)
-    before = ref_shas(git, *refs, *sync_refs)
+    before = git.ref_shas(*refs, *sync_refs)
     removed: list[Path] = []
     for actor, worktree in worktrees.items():
         if worktree.resolve() in registered:
@@ -70,7 +69,7 @@ def remove(
     for ref in sync_refs:
         dry(git, 'update-ref', '-d', ref)
     _clear_markers(git, goal, dry)
-    if (after := ref_shas(git, *refs, *sync_refs)) != before:
+    if (after := git.ref_shas(*refs, *sync_refs)) != before:
         logger.bind(goal=goal, git={'before': before, 'after': after}, force=force).info(
             'worktree rm: refs'
         )

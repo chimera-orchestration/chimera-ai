@@ -1,11 +1,11 @@
 from datetime import datetime
 from pathlib import Path
 
-from giterator import Git
 from giterator.testing import Repo
 from testfixtures import LogCapture, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
+from chimera.git import Git
 from chimera.worktrees import (
     Checkout,
     base_ref,
@@ -25,7 +25,7 @@ from chimera.worktrees import (
 
 
 def _refs_log() -> LogCapture:
-    return LogCapture(LoguruSource(('message', 'extra')))
+    return LogCapture(LoguruSource(('message', 'extra'), level='INFO'))
 
 
 def _renamed(repo: Repo, to: str) -> Repo:

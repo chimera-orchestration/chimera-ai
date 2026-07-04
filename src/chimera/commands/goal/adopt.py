@@ -1,11 +1,11 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from giterator import Git
 from loguru import logger
 
 from chimera.commands.agent import agent
-from chimera.worktrees import AGENT, HUMAN, branch, ref_shas, registered_worktrees, worktree_path
+from chimera.git import Git
+from chimera.worktrees import AGENT, HUMAN, branch, registered_worktrees, worktree_path
 
 
 def adopt(
@@ -48,7 +48,7 @@ def goal_refs(git: Git, goal: str) -> dict[str, str]:
     Covers the branch being adopted (``<goal>``) and both actor branches, so the same
     snapshot describes the state before adoption (the bare branch) and after (the pair).
     """
-    return ref_shas(git, goal, branch(goal, HUMAN), branch(goal, AGENT))
+    return git.ref_shas(goal, branch(goal, HUMAN), branch(goal, AGENT))
 
 
 def restructure(git: Git, goal: str) -> None:

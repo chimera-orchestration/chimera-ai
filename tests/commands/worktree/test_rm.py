@@ -218,7 +218,7 @@ def test_remove_dry_previews_without_touching_anything(tmpdir: TempDir, git_repo
 
 def test_remove_dry_logs_no_refs(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
-    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         remove(git_repo.path, worktrees, 'g', dry=Dry(on=True))
     log.check()  # nothing deleted → no ref record
 
@@ -256,7 +256,7 @@ def test_remove_logs_the_refs_it_deletes(tmpdir: TempDir, git_repo: Repo) -> Non
     worktrees = _goal(tmpdir, git_repo)
     git = Git(git_repo.path)
     tip = git.rev_parse('main', short=False)  # the agent branch starts at main
-    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         remove(git_repo.path, worktrees, 'g')
     log.check(
         (
@@ -273,7 +273,7 @@ def test_remove_logs_the_refs_it_deletes(tmpdir: TempDir, git_repo: Repo) -> Non
 def test_remove_force_logs_the_discarded_refs(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     agent_tip = Repo(worktrees / 'g@agent').commit_content('work', short=False)  # unmerged
-    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         remove(git_repo.path, worktrees, 'g', force=True)
     log.check(
         (
@@ -289,7 +289,7 @@ def test_remove_force_logs_the_discarded_refs(tmpdir: TempDir, git_repo: Repo) -
 
 
 def test_remove_a_ghost_goal_logs_nothing(tmpdir: TempDir, git_repo: Repo) -> None:
-    with LogCapture(LoguruSource(('message', 'extra'))) as log:
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         remove(git_repo.path, tmpdir / 'worktrees', 'ghost')
     log.check()  # no refs changed → no ref record
 

@@ -70,8 +70,12 @@ def action_logs(
 
 
 def general_capture() -> LogCapture:
-    """Capture the deterministic payload of every line (drops only the timing)."""
-    return LogCapture(LoguruSource(attributes=_general_entry))
+    """Capture the deterministic payload of every INFO+ line (drops only the timing).
+
+    DEBUG stays out: that level is the per-git-command trace (see ``chimera.git``), whose
+    exact command sequences are an implementation detail no CLI assertion should pin.
+    """
+    return LogCapture(LoguruSource(attributes=_general_entry, level='INFO'))
 
 
 def full_capture() -> LogCapture:
