@@ -1,8 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from loguru import logger
-
 from chimera.commands.agent import agent
 from chimera.git import Git
 from chimera.worktrees import AGENT, HUMAN, branch, registered_worktrees, worktree_path
@@ -30,25 +28,17 @@ def adopt(
     is captured prior to touching anything, so the record can restore what the rename moved.
     """
     git = Git(repo)
-    before = goal_refs(git, goal)
-    restructure(git, goal)
-    agent_worktree = ensure_worktree(git, worktrees_root, goal)
-    logger.bind(
-        goal=goal,
-        git={'before': before, 'after': goal_refs(git, goal)},
-        worktree=str(agent_worktree),
-    ).info('goal adopt: refs')
+    # the snapshot covers the branch being adopted (``<goal>``) and both actor branches, so the
+    # same refs describe the state before adoption (the bare branch) and after (the pair);
+    # ``always`` because the line lands the worktree too — the recovery record even on a re-run
+    with git.ref_log(
+        'goal adopt: refs', goal, branch(goal, HUMAN), branch(goal, AGENT), always=True, goal=goal
+    ) as refs:
+        restructure(git, goal)
+        agent_worktree = ensure_worktree(git, worktrees_root, goal)
+        refs.bind(worktree=str(agent_worktree))
     agent(agent_worktree, name, prompt, extra, dangerous)
     return agent_worktree
-
-
-def goal_refs(git: Git, goal: str) -> dict[str, str]:
-    """The goal's branches that currently exist, each mapped to the commit it points at.
-
-    Covers the branch being adopted (``<goal>``) and both actor branches, so the same
-    snapshot describes the state before adoption (the bare branch) and after (the pair).
-    """
-    return git.ref_shas(goal, branch(goal, HUMAN), branch(goal, AGENT))
 
 
 def restructure(git: Git, goal: str) -> None:

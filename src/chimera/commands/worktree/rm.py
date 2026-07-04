@@ -2,8 +2,6 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
-from loguru import logger
-
 from chimera.commands.agent import live_sessions
 from chimera.dry import Dry
 from chimera.git import Git
@@ -56,23 +54,19 @@ def remove(
         _refuse_if_unsafe(git, goal, worktrees, registered, branches)
     sync_refs = _sync_refs(git, goal)  # refs/chimera/synced/<goal>/* `goal sync` watermarks
     refs = tuple(branch(goal, actor) for actor in worktrees)
-    before = git.ref_shas(*refs, *sync_refs)
     removed: list[Path] = []
-    for actor, worktree in worktrees.items():
-        if worktree.resolve() in registered:
-            dry(git, 'worktree', 'remove', *(('--force',) if force else ()), str(worktree))
-            removed.append(worktree)
-        if (ref := branch(goal, actor)) in branches:
-            # -D not -d: _refuse_if_unsafe is the authority on what's safe to drop (it sees
-            # squash/rebase merges that git's ancestry-only -d would wrongly call unmerged).
-            dry(git, 'branch', '-D', ref)
-    for ref in sync_refs:
-        dry(git, 'update-ref', '-d', ref)
-    _clear_markers(git, goal, dry)
-    if (after := git.ref_shas(*refs, *sync_refs)) != before:
-        logger.bind(goal=goal, git={'before': before, 'after': after}, force=force).info(
-            'worktree rm: refs'
-        )
+    with git.ref_log('worktree rm: refs', *refs, *sync_refs, goal=goal, force=force):
+        for actor, worktree in worktrees.items():
+            if worktree.resolve() in registered:
+                dry(git, 'worktree', 'remove', *(('--force',) if force else ()), str(worktree))
+                removed.append(worktree)
+            if (ref := branch(goal, actor)) in branches:
+                # -D not -d: _refuse_if_unsafe is the authority on what's safe to drop (it sees
+                # squash/rebase merges that git's ancestry-only -d would wrongly call unmerged).
+                dry(git, 'branch', '-D', ref)
+        for ref in sync_refs:
+            dry(git, 'update-ref', '-d', ref)
+        _clear_markers(git, goal, dry)
     return removed
 
 

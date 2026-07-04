@@ -220,11 +220,8 @@ class InertBranchCheck:
                     message = f'{ref} points at an already-integrated commit — inert'
                     fixing = fix and not exclude.matches(self.name, message)
                     if fixing:
-                        before = git.ref_shas(ref)
-                        git('branch', '-D', ref)
-                        logger.bind(git={'before': before, 'after': git.ref_shas(ref)}).info(
-                            f'{self.name}: refs'
-                        )
+                        with git.ref_log(f'{self.name}: refs', ref):
+                            git('branch', '-D', ref)
                     yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
@@ -733,11 +730,10 @@ class WorkspaceCommitCheck:
             yield Finding(self.name, dirty, resolved=False, fixable=True)
             return
         head = git('rev-parse', '--abbrev-ref', 'HEAD').strip()  # branch name, or 'HEAD' detached
-        before = git.ref_shas(head)
-        git('add', '-A')
-        message = commit_message(git('diff', '--cached'))
-        git('commit', '-m', message)
-        logger.bind(git={'before': before, 'after': git.ref_shas(head)}).info(f'{self.name}: refs')
+        with git.ref_log(f'{self.name}: refs', head):
+            git('add', '-A')
+            message = commit_message(git('diff', '--cached'))
+            git('commit', '-m', message)
         yield Finding(self.name, f'{workspace} committed: {message}', resolved=True, fixable=True)
 
 

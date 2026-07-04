@@ -3,7 +3,6 @@ from enum import Enum
 from pathlib import Path
 
 from giterator import GitError
-from loguru import logger
 
 from chimera.config import UserError
 from chimera.git import Git
@@ -85,12 +84,10 @@ def sync(
     if not git.ref_exists(target_branch):
         raise UserError(f'no branch {target_branch} to sync from')
     watermark = _watermark_ref(goal, mover)
-    before = git.ref_shas(mover_branch, watermark)
-    outcome, ahead_by, appended, conflict = _apply(
-        git, goal, mover, mover_branch, target_branch, watermark
-    )
-    if (after := git.ref_shas(mover_branch, watermark)) != before:
-        logger.bind(goal=goal, git={'before': before, 'after': after}).info('goal sync: refs')
+    with git.ref_log('goal sync: refs', mover_branch, watermark, goal=goal):
+        outcome, ahead_by, appended, conflict = _apply(
+            git, goal, mover, mover_branch, target_branch, watermark
+        )
     landed = (
         checkout_here(git, mover_branch, into, 'goal sync')
         if into is not None and outcome is not Outcome.CONFLICT
