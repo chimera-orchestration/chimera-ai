@@ -663,13 +663,15 @@ def _sync_line(result: SyncResult) -> str:
         case Outcome.CREATED:
             line = f'Created {mover} at {target} ({sha})'
         case Outcome.NOOP:
-            line = f'{mover} already at {target} ({sha})'
+            line = f'{mover} already has everything from {target} ({sha})'
         case Outcome.FASTFORWARDED:
             line = f'Fast-forwarded {mover} to {target} ({sha})'
         case Outcome.AHEAD:
             line = f'{mover} leads {target} by {result.ahead_by} — nothing to sync'
         case Outcome.APPENDED:
             line = f'Appended {result.appended} commit(s) from {target} onto {mover} ({sha})'
+        case Outcome.REPOINTED:
+            line = f'Repointed {mover} onto {target} ({sha}) — tips already matched exactly'
         case Outcome.CONFLICT:
             return (
                 f'Conflict appending {target} onto {mover} — resolve in {result.conflict}, '

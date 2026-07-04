@@ -27,6 +27,8 @@ class Outcome(Enum):
     FASTFORWARDED = 'fastforwarded'  # mover was behind; moved up to the target
     AHEAD = 'ahead'  # mover leads the target; nothing to do
     APPENDED = 'appended'  # mover diverged (squash); the new target commits were replayed onto it
+    REPOINTED = 'repointed'  # mover's tip tree was a full, un-watermarked squash of target's own
+    # current tip (zero diff) — moved the ref onto it rather than track a no-op watermark forever
     CONFLICT = 'conflict'  # the replay hit a conflict, left in the mover's checkout to resolve
 
 
@@ -59,9 +61,15 @@ def sync(
     integrated; it's set on every integrating outcome and is what makes the append know what's new.
     A legacy branch with no watermark is auto-seeded by matching the mover's tip *tree* to a target
     commit (a faithful squash preserves the tree); a squash that also carries your own edits can't
-    be matched, so it's refused rather than guessed at. The append replays via ``git cherry-pick``
-    in the mover's checkout (so a conflict is left there to resolve and ``git cherry-pick
-    --continue``); a transient marker lets a re-run tell a finished append from an aborted one.
+    be matched, so it's refused rather than guessed at. When that fresh seed lands exactly on
+    target's own current tip — mover's tip is a full, zero-diff squash of everything target
+    currently holds, so there's nothing to replay — the mover's ref is moved onto target directly
+    (``Outcome.REPOINTED``) instead of recording a watermark that would never move it. This never
+    happens once a watermark already exists for this mover: an *already-tracked* mover finding
+    nothing new to append is the ordinary idempotent case, and must never have its own curated
+    history clobbered by target's raw tip. The append replays via ``git cherry-pick`` in the
+    mover's checkout (so a conflict is left there to resolve and ``git cherry-pick --continue``); a
+    transient marker lets a re-run tell a finished append from an aborted one.
 
     Refuses (``UserError``) when the target is missing, ``mover``/``target`` are the same, the mover
     isn't checked out (an append needs a work tree) or is dirty, a divergence has no integration
@@ -124,16 +132,18 @@ def _append(
     git: Git, goal: str, mover: str, mover_branch: str, target_branch: str, watermark: str
 ) -> tuple[Outcome, int, int, Path | None]:
     """Replay the target commits made since the watermark onto a diverged mover branch."""
-    point = ref_shas(git, watermark).get(watermark) or _tree_match_point(
-        git, mover_branch, target_branch
-    )
+    seeded = ref_shas(git, watermark).get(watermark)
+    point = seeded or _tree_match_point(git, mover_branch, target_branch)
     if point is None:
         raise UserError(
             f'{mover_branch} has diverged from {target_branch} with no integration record — '
             f'rebase or cherry-pick by hand this time'
         )
-    new = git('rev-list', '--reverse', f'{point}..{target_branch}').split()
     tip = git.rev_parse(target_branch, short=False)
+    if seeded is None and point == tip:  # fresh squash-of-everything: repoint, don't just track it
+        _repoint(git, mover_branch, target_branch)
+        return _record(git, watermark, tip, Outcome.REPOINTED)
+    new = git('rev-list', '--reverse', f'{point}..{target_branch}').split()
     if not new:
         return _record(git, watermark, tip, Outcome.NOOP)
     checkout = checkout_of(git, mover_branch)
@@ -195,6 +205,25 @@ def _fast_forward(git: Git, mover_branch: str, target_branch: str) -> None:
         )
     else:  # move the ref and its work tree together
         Git(checkout)('merge', '--ff-only', target_branch)
+
+
+def _repoint(git: Git, mover_branch: str, target_branch: str) -> None:
+    """Move ``mover_branch`` onto ``target_branch`` when their tips are a proven zero-diff match.
+
+    Unlike :func:`_fast_forward`, ``mover`` need not be ``target``'s ancestor — safe only because
+    the caller has already matched the trees exactly, so nothing is lost content-wise even though
+    mover's own commit(s) drop off the branch tip (still reachable via reflog).
+    """
+    checkout = checkout_of(git, mover_branch)
+    if checkout is None:  # bare branch — repoint the ref directly
+        git('branch', '-f', mover_branch, target_branch)
+    elif is_dirty(checkout):
+        raise UserError(
+            f'{mover_branch} is checked out with uncommitted changes at {checkout} — '
+            f'commit or stash there first'
+        )
+    else:  # move the ref and its work tree together
+        Git(checkout)('reset', '--hard', target_branch)
 
 
 def _tree_match_point(git: Git, mover_branch: str, target_branch: str) -> str | None:

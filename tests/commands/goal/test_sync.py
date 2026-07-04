@@ -209,6 +209,64 @@ def test_appends_via_tree_match_without_a_watermark(tmpdir: TempDir, git_repo: R
     )
 
 
+def test_repoints_a_mover_thats_a_full_squash_of_the_target(
+    tmpdir: TempDir, git_repo: Repo
+) -> None:
+    """The reverse direction: bring a raw branch up to a curated one that already squashes it."""
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    _squash_human(git_repo, tmpdir)  # human = a faithful, zero-diff squash of agent's tip
+    result = sync(git_repo.path, 'g', mover='agent', target='human')
+    compare(
+        result,
+        expected=SyncResult(Outcome.REPOINTED, 'agent', 'human', _short(git_repo, 'g/human')),
+    )
+    compare(_full(git_repo, 'g/agent'), expected=_full(git_repo, 'g/human'))
+    compare(_full(git_repo, _wm('agent')), expected=_full(git_repo, 'g/human'))
+    # agent is now literally at human's sha, so a re-run is the plain direct-equality NOOP
+    compare(sync(git_repo.path, 'g', mover='agent', target='human').outcome, expected=Outcome.NOOP)
+
+
+def test_repoints_a_bare_mover(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    _squash_human(git_repo, tmpdir)
+    Git(git_repo.path)('worktree', 'remove', str(worktrees / 'g@agent'))  # agent now bare
+    result = sync(git_repo.path, 'g', mover='agent', target='human')
+    compare(result.outcome, expected=Outcome.REPOINTED)
+    compare(_full(git_repo, 'g/agent'), expected=_full(git_repo, 'g/human'))
+
+
+def test_repoint_refuses_a_dirty_mover(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    agent_wt = worktrees / 'g@agent'
+    Repo(agent_wt).commit_content('a1')
+    _squash_human(git_repo, tmpdir)
+    (agent_wt / 'scratch.txt').write_text('wip')  # uncommitted work in the agent checkout
+    with ShouldRaise(
+        UserError(
+            f'g/agent is checked out with uncommitted changes at {agent_wt.resolve()} — '
+            f'commit or stash there first'
+        )
+    ):
+        sync(git_repo.path, 'g', mover='agent', target='human')
+
+
+def test_repoint_never_fires_once_the_mover_has_a_watermark(
+    tmpdir: TempDir, git_repo: Repo
+) -> None:
+    """An already-tracked mover finding nothing new to append is the ordinary idempotent NOOP —
+    it must never be repointed, or a real curated commit would be clobbered by target's raw tip."""
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    _squash_human(git_repo, tmpdir)  # human squashed; watermark already tracks agent's tip
+    human_sha = _full(git_repo, 'g/human')
+    result = sync(git_repo.path, 'g')
+    compare(result.outcome, expected=Outcome.NOOP)
+    compare(_full(git_repo, 'g/human'), expected=human_sha)  # human's own squash commit untouched
+
+
 def test_diverged_with_no_record_refuses(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('a1')
@@ -356,7 +414,7 @@ def test_sync_line_renders_each_outcome() -> None:
     )
     compare(
         _sync_line(SyncResult(Outcome.NOOP, 'human', 'agent', 'abc123')),
-        expected='human already at agent (abc123)',
+        expected='human already has everything from agent (abc123)',
     )
     compare(
         _sync_line(SyncResult(Outcome.FASTFORWARDED, 'human', 'agent', 'abc123')),
@@ -369,6 +427,10 @@ def test_sync_line_renders_each_outcome() -> None:
     compare(
         _sync_line(SyncResult(Outcome.APPENDED, 'human', 'agent', 'abc123', appended=2)),
         expected='Appended 2 commit(s) from agent onto human (abc123)',
+    )
+    compare(
+        _sync_line(SyncResult(Outcome.REPOINTED, 'agent', 'human', 'abc123')),
+        expected='Repointed agent onto human (abc123) — tips already matched exactly',
     )
     compare(
         _sync_line(
