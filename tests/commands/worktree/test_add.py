@@ -128,6 +128,11 @@ class TestGoalMode:
         [created] = add(local.path, tmpdir / 'worktrees', goal='g')  # fetch=True picks it up
         compare(_head(created), expected=_head(origin.path))
 
+    def test_dead_origin_suggests_offline(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        git_repo('remote', 'add', 'origin', str(tmpdir / 'gone'))  # fetch fails, fast
+        with ShouldRaise(UserError, match='check network, or re-run with --offline'):
+            add(git_repo.path, tmpdir / 'worktrees', goal='g')
+
     def test_refuses_without_a_resolvable_default_branch(
         self, tmpdir: TempDir, git_repo: Repo
     ) -> None:

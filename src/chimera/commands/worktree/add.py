@@ -8,7 +8,7 @@ from chimera.worktrees import (
     DEFAULT_ACTORS,
     HUMAN,
     base_ref,
-    fetch_origin,
+    fetch_origin_or_offline,
     worktree_path,
 )
 from chimera.worktrees import branch as goal_branch
@@ -67,7 +67,7 @@ def _add_goal(
     git = Git(repo)
     _require_commit(git, repo)
     if fetch:
-        fetch_origin(git)
+        fetch_origin_or_offline(git)
     base = _resolve_base(git, repo, frm)
     worktrees_root.mkdir(parents=True, exist_ok=True)
     created: list[Path] = []
@@ -97,7 +97,7 @@ def _checkout(repo: Path, branch: str, path: Path, frm: str | None, fetch: bool)
     git = Git(repo)
     _require_commit(git, repo)
     if fetch:
-        fetch_origin(git)
+        fetch_origin_or_offline(git)
     path.parent.mkdir(parents=True, exist_ok=True)
     if git.ref_exists(branch):
         git('worktree', 'add', str(path), branch)

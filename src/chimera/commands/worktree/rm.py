@@ -9,7 +9,7 @@ from chimera.worktrees import (
     SEP,
     base_ref,
     branch,
-    fetch_origin,
+    fetch_origin_or_offline,
     goal_actors,
     is_dirty,
     is_merged,
@@ -50,7 +50,7 @@ def remove(
     if not force:
         refuse_if_agents_running(wt for wt in worktrees.values() if wt.resolve() in registered)
         if fetch:
-            fetch_origin(git)
+            fetch_origin_or_offline(git)
         _refuse_if_unsafe(git, goal, worktrees, registered, branches)
     sync_refs = _sync_refs(git, goal)  # refs/chimera/synced/<goal>/* `goal sync` watermarks
     refs = tuple(branch(goal, actor) for actor in worktrees)

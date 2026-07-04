@@ -5,6 +5,7 @@ from subprocess import PIPE, run
 from giterator import GitError
 from loguru import logger
 
+from chimera.config import UserError
 from chimera.git import Git
 
 AGENT = 'agent'
@@ -232,3 +233,18 @@ def fetch_origin(git: Git) -> None:
     """Fetch ``origin`` with prune so remote-tracking refs are current. No-op without an origin."""
     if 'origin' in git('remote').split():
         git('fetch', '--prune', 'origin')
+
+
+def fetch_origin_or_offline(git: Git) -> None:
+    """:func:`fetch_origin`, but a failure becomes a clean ``--offline`` hint.
+
+    For commands that fetch as a freshness courtesy and take ``--offline`` to skip it — a dead
+    network (fast now, thanks to ``chimera.git``'s timeouts) shouldn't end in a traceback when
+    the run could proceed without the fetch.
+    """
+    try:
+        fetch_origin(git)
+    except GitError as error:
+        raise UserError(
+            f'fetching origin failed — check network, or re-run with --offline:\n{error}'
+        ) from None

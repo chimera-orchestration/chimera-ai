@@ -2,9 +2,10 @@ from datetime import datetime
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import LogCapture, TempDir, compare
+from testfixtures import LogCapture, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
+from chimera.config import UserError
 from chimera.git import Git
 from chimera.worktrees import (
     Checkout,
@@ -13,6 +14,7 @@ from chimera.worktrees import (
     checkout_here,
     default_branch,
     fetch_origin,
+    fetch_origin_or_offline,
     goal_actors,
     goals,
     is_dirty,
@@ -199,6 +201,23 @@ class TestFetchOrigin:
             clone.rev_parse('origin/main', short=False),
             expected=Git(git_repo.path).rev_parse('main', short=False),
         )
+
+    def test_or_offline_passes_a_fetch_through(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        clone = Git.clone(git_repo, tmpdir / 'clone')
+        git_repo.commit_content('remote-ahead')
+        fetch_origin_or_offline(clone)
+        compare(
+            clone.rev_parse('origin/main', short=False),
+            expected=Git(git_repo.path).rev_parse('main', short=False),
+        )
+
+    def test_or_offline_turns_a_failure_into_the_offline_hint(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        git = Git(git_repo.path)
+        git('remote', 'add', 'origin', str(tmpdir / 'gone'))  # a dead remote — fetch fails fast
+        with ShouldRaise(UserError, match='check network, or re-run with --offline'):
+            fetch_origin_or_offline(git)
 
 
 class TestCheckoutHere:

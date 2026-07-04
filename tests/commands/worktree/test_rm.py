@@ -11,6 +11,7 @@ from chimera.commands.agent import live_sessions
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
 from chimera.commands.worktree.rm import remove
+from chimera.config import UserError
 from chimera.dry import Dry
 from tests.cli import Command, action_logs
 
@@ -250,6 +251,13 @@ def test_remove_recognises_an_upstream_merge_only_after_fetch(tmpdir: TempDir) -
     remove(local.path, worktrees, 'g')  # fetch refreshes origin/main → merged
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(local.path).branches(), expected=['main'])
+
+
+def test_remove_with_a_dead_origin_suggests_offline(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    git_repo('remote', 'add', 'origin', str(tmpdir / 'gone'))  # fetch fails, fast
+    with ShouldRaise(UserError, match='check network, or re-run with --offline'):
+        remove(git_repo.path, worktrees, 'g')
 
 
 def test_remove_logs_the_refs_it_deletes(tmpdir: TempDir, git_repo: Repo) -> None:
