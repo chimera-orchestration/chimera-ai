@@ -8,6 +8,7 @@ import pytest
 from giterator.testing import Repo
 from loguru import logger
 from testfixtures import LogCapture, OutputCapture, Replacer, TempDir, compare
+from testfixtures.mock import Mock
 
 from chimera.commands.init import init
 from chimera.git import Git
@@ -199,29 +200,15 @@ class TestFileSink:
         )
 
 
-class TestEchoSink:
-    def test_git_commands_echo_bare_on_stderr(self, sink: Path) -> None:
-        # the command text only — cwd stays in the file log; stdout stays machine-clean
-        with OutputCapture(separate=True) as output:
-            configure()
-            Git(sink)('rev-parse', '--git-dir')
-        output.compare(stderr='git rev-parse --git-dir')
-
-    def test_non_git_lines_do_not_echo(self, sink: Path) -> None:
-        with OutputCapture(separate=True) as output:
-            configure()
-            log_finish('init', log_start('init', FUNC, {}))
-            logger.bind(git={'before': {}, 'after': {}}).info('demo: refs')
-        output.compare(stderr='')
-
-    def test_outside_a_workspace_still_echoes(self, tmpdir: TempDir, replace: Replacer) -> None:
-        # cwd is the temp root and the env is cleared, so no workspace resolves: configure
-        # must not raise, and git commands stay visible even with no file to log to.
-        core = getattr(logger, '_core')  # no typed helper fits an instance attribute
-        replace(target=core.handlers, container=core, name='handlers', replacement={})
-        repo = Repo.make(tmpdir / 'repo')  # giterator's own Git, so make() itself isn't traced
-        with OutputCapture(separate=True) as output:
-            configure()
-            Git(repo.path)('status', '--porcelain')
-        output.compare(stderr='git status --porcelain')
-        compare(len(core.handlers), expected=1)  # just the echo — no file sink
+def test_configure_outside_a_workspace_goes_quiet(tmpdir: TempDir, replace: Replacer) -> None:
+    # cwd is the temp root and the env is cleared, so no workspace resolves: configure must
+    # not raise, and must still clear the sinks — loguru's default would otherwise spew the
+    # DEBUG git trace at the console — so a git command emits nothing anywhere.
+    core = getattr(logger, '_core')  # no typed helper fits an instance attribute
+    replace(target=core.handlers, container=core, name='handlers', replacement={0: Mock()})
+    repo = Repo.make(tmpdir / 'repo')
+    with OutputCapture(separate=True) as output:
+        configure()
+        Git(repo.path)('status', '--porcelain')
+    compare(core.handlers, expected={})
+    output.compare(stderr='')

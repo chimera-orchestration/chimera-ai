@@ -1,10 +1,9 @@
 """Action logging — every action lands in the workspace's JSON-lines log.
 
-One file: ``<workspace>/logs/chimera.jsonl``, gitignored. Each line is a flat JSON
+One sink, one file: ``<workspace>/logs/chimera.jsonl``, gitignored. Each line is a flat JSON
 object ``{time, pid, command?, level, message?, **extra}`` — everything bound on the record is
 included (only the ``line`` scratch is dropped), so any ``logger.bind(...)`` anywhere in the
-codebase surfaces without touching this format. A second, stderr sink echoes just the git
-command trace (see :func:`configure`).
+codebase surfaces without touching this format.
 
 A CLI action frames itself with a start/end pair sharing a ``pid`` (one process per
 invocation, so ``pid`` ties them — and any lines logged in between — together):
@@ -21,7 +20,6 @@ Log rotation is deferred.
 """
 
 import json
-import sys
 import time
 import traceback
 from pathlib import Path
@@ -70,23 +68,15 @@ def _format(record: 'Record') -> str:
     return '{extra[line]}\n'
 
 
-def _is_git_trace(record: 'Record') -> bool:
-    """A :class:`chimera.git.Git` command-trace line (its ``git_cwd`` key marks it)."""
-    return 'git_cwd' in record['extra']
-
-
 def configure() -> None:
-    """Set up loguru's sinks for a CLI action: the git echo, plus the workspace's action log.
+    """Point loguru at the current workspace's action log (one sink, one file).
 
-    The **echo sink** surfaces every git command as it runs — bare command text on stderr
-    (stdout stays clean for machine output), no cwd (that's the file log's job). The **file
-    sink** (``<workspace>/logs/chimera.jsonl``) records everything from DEBUG up, so the git
-    trace persists alongside the action frames. Outside any workspace (e.g. ``ch init``
-    before one exists) there's no log file, so only the echo sink runs — commands stay
-    visible, frames go nowhere.
+    The sink records everything from DEBUG up, so the git command trace (see ``chimera.git``)
+    persists alongside the action frames. Outside any workspace (e.g. ``ch init`` before one
+    exists) there's no log file: the sinks are still cleared — loguru's default stderr sink
+    would otherwise spew the DEBUG trace at the console — and nothing is logged anywhere.
     """
     logger.remove()
-    logger.add(sys.stderr, format='{message}', filter=_is_git_trace, level='DEBUG')
     try:
         workspace = resolve_workspace(Path.cwd())
     except NotInWorkspaceError:

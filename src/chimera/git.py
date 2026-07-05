@@ -3,10 +3,11 @@
 Every chimera module uses this subclass (never ``giterator.Git`` directly), so
 :meth:`Git.__call__` is the single choke point every git subprocess runs through:
 
-- **Tracing** — each command lands a DEBUG line *before* it runs (a hung fetch is visible while
-  it hangs): the message is the exact command, the working directory rides the ``git_cwd`` key.
-  The console echo of these lines is a sink concern (see :func:`chimera.logging.configure`);
-  nothing here prints. Suppressed during shell completion (a completer must never print).
+- **Tracing** — each command lands a DEBUG line *before* it runs (a hung fetch is on record
+  while it hangs): the message is the exact command, the working directory rides the ``git_cwd``
+  key. Where the lines go is a sink concern (see :func:`chimera.logging.configure` — the
+  workspace's log file); nothing here prints. Suppressed during shell completion, where
+  ``configure`` never runs and loguru's default stderr sink would print into the completer.
 - **Ref-mutation logging** — :meth:`Git.ref_log` wraps a mutating block in the before/after
   snapshot ``agent-docs/logging.md`` mandates, so call sites can't drift from the rule.
 - **Network timeouts** — a stalled SSH/HTTPS transport fails in seconds instead of hanging

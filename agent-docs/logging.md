@@ -28,13 +28,15 @@ line (`fixable`/`resolved` bound) — ERROR while unresolved, INFO once fixed.
 ## Git command trace
 
 Every git subprocess runs through `chimera.git.Git` (never `giterator.Git` directly), whose
-`__call__` lands a DEBUG line *before* the command runs — so a hung fetch is visible while it
-hangs. The message is the exact command (`git fetch --prune origin`), the working directory rides
-`git_cwd`. `configure()` echoes just these lines bare on stderr (suppressed during shell
-completion), and injects network timeouts (`GIT_SSH_COMMAND` connect/keepalive,
-`GIT_HTTP_LOW_SPEED_*`) unless the user set their own, so a dead transport fails in seconds
-instead of hanging forever. The trace is spew-exempt by construction: it lives at DEBUG, below
-the triage levels, and tests pin their captures to INFO+ so command sequences are never asserted.
+`__call__` lands a DEBUG line *before* the command runs — so a hung fetch is on record while it
+hangs (`tail -f logs/chimera.jsonl` to watch live). The message is the exact command
+(`git fetch --prune origin`), the working directory rides `git_cwd`. The trace goes only to the
+log file, never the console (and is suppressed during shell completion, where the file sink
+isn't configured). `chimera.git` also injects network timeouts (`GIT_SSH_COMMAND`
+connect/keepalive, `GIT_HTTP_LOW_SPEED_*`) unless the user set their own, so a dead transport
+fails in seconds instead of hanging forever. The trace is spew-exempt by construction: it lives
+at DEBUG, below the triage levels, and tests pin their captures to INFO+ so command sequences
+are never asserted.
 
 ## Conventions
 
