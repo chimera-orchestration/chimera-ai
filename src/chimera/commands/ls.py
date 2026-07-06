@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from chimera.commands.agent import Agent, in_goal, scoped, under
+from chimera.commands.agent import Session, in_goal, scoped, under
 from chimera.context import Scope, iter_projects
 from chimera.worktrees import goals
 
@@ -10,7 +10,7 @@ class GoalBoard:
     """A goal in flight and the agents working it."""
 
     name: str
-    agents: list[Agent]
+    agents: list[Session]
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class ProjectBoard:
 
     name: str
     goals: list[GoalBoard]
-    loose: list[Agent]
+    loose: list[Session]
 
 
 @dataclass(frozen=True)
@@ -28,10 +28,10 @@ class Board:
 
     workspace: str
     projects: list[ProjectBoard]
-    loose: list[Agent]
+    loose: list[Session]
 
 
-def board(scope: Scope, listing: list[Agent]) -> Board:
+def board(scope: Scope, listing: list[Session]) -> Board:
     """Partition the in-scope agents into a project → goal tree, surfacing strays as ``loose``.
 
     Every agent in scope lands exactly once: under its goal when its cwd is in a goal
@@ -41,7 +41,7 @@ def board(scope: Scope, listing: list[Agent]) -> Board:
     universe = scoped(listing, scope, otherwise=scope.workspace)
     projects = [scope.project] if scope.project is not None else iter_projects(scope.workspace)
     boards: list[ProjectBoard] = []
-    placed: set[Agent] = set()
+    placed: set[Session] = set()
     for p in projects:
         names = sorted(goals(p.worktrees))
         if scope.goal is not None:

@@ -8,7 +8,7 @@ from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera import __main__ as chimera_main
 from chimera.commands.agent import (
-    Agent,
+    Session,
     agent,
     agents,
     all_sessions,
@@ -29,8 +29,8 @@ def _project_obj(directory: Path) -> Project:
     return Project(directory, ProjectConfig(kind='project', repo=Path('/r')))
 
 
-def _agent_at(cwd: Path, name: str = 'a') -> Agent:
-    return Agent(name, name, 'idle', cwd, None)
+def _agent_at(cwd: Path, name: str = 'a') -> Session:
+    return Session(name, name, 'idle', cwd, None)
 
 
 def _stub(replace: Replacer, sessions: Iterable[object] = ()) -> list[object]:
@@ -501,24 +501,32 @@ def test_agents_enriches_sessions_with_name_cwd_and_summary(
     _transcript(
         projects / '-work-proj', 'a.jsonl', '{"type": "last-prompt", "lastPrompt": "do it"}\n', 1000
     )
+    full = 'abc12345-9f80-4c8e-b3d7-1234567890ab'
     replace.in_module(
         all_sessions,
         lambda: [
-            {'id': 'x', 'status': 'busy', 'name': 'proj@goal@agent', 'cwd': '/work/proj'},
+            # the full sessionId (the transcript UUID) beats claude's short handle
+            {
+                'id': full[:8],
+                'sessionId': full,
+                'status': 'busy',
+                'name': 'proj@goal@agent',
+                'cwd': '/work/proj',
+            },
             {'sessionId': 'bare', 'status': 'idle', 'cwd': '/elsewhere'},  # no name, no transcript
         ],
     )
     compare(
         agents(projects),
         expected=[
-            Agent(
-                id='x',
+            Session(
+                id=full,
                 name='proj@goal@agent',
                 status='busy',
                 cwd=Path('/work/proj'),
                 summary='do it',
             ),
-            Agent(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
+            Session(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
         ],
     )
 
@@ -532,15 +540,19 @@ def test_agents_tolerates_sessions_missing_fields(replace: Replacer) -> None:
     )
     compare(
         agents(),
-        expected=[Agent(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)],
+        expected=[
+            Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
+        ],
     )
 
 
 def test_agent_detail_falls_back_to_tilde_cwd(replace: Replacer) -> None:
     replace.on_class(Path.home, lambda cls: Path('/home/me'))
-    compare(Agent('i', 'n', 'idle', Path('/home/me/work'), 'a prompt').detail, expected='a prompt')
-    compare(Agent('i', 'n', 'idle', Path('/home/me/work'), None).detail, expected='~/work')
-    compare(Agent('i', 'n', 'idle', Path('/other'), None).detail, expected='/other')
+    compare(
+        Session('i', 'n', 'idle', Path('/home/me/work'), 'a prompt').detail, expected='a prompt'
+    )
+    compare(Session('i', 'n', 'idle', Path('/home/me/work'), None).detail, expected='~/work')
+    compare(Session('i', 'n', 'idle', Path('/other'), None).detail, expected='/other')
 
 
 def test_scoped_unpinned_keeps_every_agent_when_otherwise_is_none(tmpdir: TempDir) -> None:
@@ -618,12 +630,16 @@ def test_agent_ls_cli_unpinned_lists_every_agent(
     replace.in_module(
         agents,
         lambda: [
-            Agent(
-                id='aaa11111', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'
+            Session(  # a full-UUID id renders as its 8-char short form
+                id='aaa11111-9f80-4c8e-b3d7-1234567890ab',
+                name='proj@g@agent',
+                status='busy',
+                cwd=worktree,
+                summary='fix it',
             ),
-            Agent(id='bbb22222', name='other', status='idle', cwd=worktree, summary='do a thing'),
-            Agent(id='ccc', name='ccc', status='idle', cwd=worktree, summary='unnamed'),
-            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
+            Session(id='bbb22222', name='other', status='idle', cwd=worktree, summary='do a thing'),
+            Session(id='ccc', name='ccc', status='idle', cwd=worktree, summary='unnamed'),
+            Session(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
         ],
         module=chimera_main,
     )
@@ -651,7 +667,7 @@ def test_agent_ls_cli_trims_long_detail(
     detail = 'x' * 200
     replace.in_module(
         agents,
-        lambda: [Agent(id='aaa', name='named', status='busy', cwd=worktree, summary=detail)],
+        lambda: [Session(id='aaa', name='named', status='busy', cwd=worktree, summary=detail)],
         module=chimera_main,
     )
     command.run('agent', 'ls').check(
@@ -670,8 +686,8 @@ def test_agent_ls_cli_pinned_to_project_filters_strays(
     replace.in_module(
         agents,
         lambda: [
-            Agent(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
-            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
+            Session(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            Session(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
         ],
         module=chimera_main,
     )

@@ -13,14 +13,24 @@ from chimera.worktrees import SEP
 
 
 @dataclass(frozen=True)
-class Agent:
-    """A live agent: its claude id, name, status, working directory and most recent prompt."""
+class Session:
+    """A live agent session: its native id, name, status, working directory and summary.
+
+    ``id`` is the fullest form the harness reports (claude's full session UUID when
+    present) — session identity must stay ``(platform, native_id)``-shaped for the
+    archive, and a short handle isn't safe to recover from. Display uses :attr:`short`.
+    """
 
     id: str
     name: str
     status: str
     cwd: Path
     summary: str | None
+
+    @property
+    def short(self) -> str:
+        """The display form of the id: its leading 8-char block."""
+        return self.id[:8]
 
     @property
     def detail(self) -> str:
@@ -32,22 +42,22 @@ class Agent:
         return '~' + cwd[len(home) :] if cwd.startswith(home) else cwd
 
 
-def agents(projects: Path | None = None) -> list[Agent]:
-    """Every live agent across all projects, each enriched with a one-line summary.
+def agents(projects: Path | None = None) -> list[Session]:
+    """Every live agent session across all projects, each enriched with a one-line summary.
 
-    The summary is the agent's session title or last prompt (see ``session_summary``),
+    The summary is the session's title or last prompt (see ``session_summary``),
     read from its transcript under ``projects`` (default ``~/.claude/projects``).
     """
     return [_describe(session, projects) for session in all_sessions()]
 
 
-def _describe(session: dict[str, object], projects: Path | None) -> Agent:
-    # `id` is claude's short session handle; fall back to the leading block of the
-    # full sessionId (its own first 8 chars) when a session omits it.
-    id = str(session.get('id') or session.get('sessionId') or '?')[:8]
+def _describe(session: dict[str, object], projects: Path | None) -> Session:
+    # Prefer the full sessionId (the transcript-filename UUID) over `id`, claude's
+    # short handle — the short form is that UUID's own leading block anyway.
+    id = str(session.get('sessionId') or session.get('id') or '?')
     name = str(session.get('name') or id)
     cwd = str(session.get('cwd') or '')
-    return Agent(
+    return Session(
         id=id,
         name=name,
         status=str(session.get('status') or session.get('state') or '?'),
@@ -73,7 +83,7 @@ def scope_line(scope: Scope) -> str:
     return f'scope: {target}'
 
 
-def scoped(listing: list[Agent], scope: Scope, *, otherwise: Path | None) -> list[Agent]:
+def scoped(listing: list[Session], scope: Scope, *, otherwise: Path | None) -> list[Session]:
     """The agents in scope: under the goal's worktrees, the project, else ``otherwise``.
 
     With no project pinned the fallback ``otherwise`` decides reach: ``None`` keeps every

@@ -12,7 +12,7 @@ from typer.main import get_command
 
 from chimera import logging
 from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
-from chimera.commands.agent import Agent, agents, scope_line, scoped
+from chimera.commands.agent import Session, agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
@@ -421,19 +421,19 @@ def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> 
 DETAIL_MAX = 80
 
 
-def _name(a: Agent) -> str:
-    """The agent's name, blanked when it merely echoes the id column."""
+def _name(a: Session) -> str:
+    """The session's name, blanked when it merely echoes the id column."""
     return '' if a.name == a.id else a.name
 
 
-def _detail(a: Agent) -> str:
-    """The agent's one-line detail, trimmed to ``DETAIL_MAX`` with an ellipsis."""
+def _detail(a: Session) -> str:
+    """The session's one-line detail, trimmed to ``DETAIL_MAX`` with an ellipsis."""
     return a.detail if len(a.detail) <= DETAIL_MAX else a.detail[: DETAIL_MAX - 1] + '…'
 
 
-def _summary(a: Agent) -> str:
+def _summary(a: Session) -> str:
     """``id  name  status  detail`` for a board row, dropping the name when blank."""
-    return '  '.join(part for part in (a.id, _name(a), a.status, _detail(a)) if part)
+    return '  '.join(part for part in (a.short, _name(a), a.status, _detail(a)) if part)
 
 
 def _render_board(b: Board) -> None:
@@ -893,11 +893,11 @@ def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = Non
     if not listing:
         typer.echo('No agents running')
         return
-    id_w = max(len(a.id) for a in listing)
+    id_w = max(len(a.short) for a in listing)
     name_w = max(len(_name(a)) for a in listing)
     status_w = max(len(a.status) for a in listing)
     for a in listing:
-        row = f'{a.id:<{id_w}}  {_name(a):<{name_w}}  {a.status:<{status_w}}  {_detail(a)}'
+        row = f'{a.short:<{id_w}}  {_name(a):<{name_w}}  {a.status:<{status_w}}  {_detail(a)}'
         typer.echo(row.rstrip())
 
 
