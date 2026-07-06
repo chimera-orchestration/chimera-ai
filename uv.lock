@@ -148,25 +148,25 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "giterator", git = "https://github.com/simplistix/giterator" },
+    { name = "giterator", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "typer", specifier = ">=0.26.3" },
+    { name = "pydantic", specifier = ">=2.13.4" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "typer", specifier = ">=0.26.8" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "sybil" },
-    { name = "testfixtures", specifier = ">=12.1.0" },
-    { name = "ty" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "ruff", specifier = ">=0.15.20" },
+    { name = "sybil", specifier = ">=10.1.0" },
+    { name = "testfixtures", specifier = ">=12.2.0" },
+    { name = "ty", specifier = ">=0.0.55" },
 ]
 docs = [
-    { name = "furo" },
-    { name = "sphinx" },
+    { name = "furo", specifier = ">=2025.12.19" },
+    { name = "sphinx", specifier = ">=9.1.0" },
 ]
 
 [[package]]
@@ -245,7 +245,11 @@ wheels = [
 [[package]]
 name = "giterator"
 version = "1.0.0"
-source = { git = "https://github.com/simplistix/giterator#1780afe1fbe95da6f311db2c53bb08d1c78b5c38" }
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8b/99/2263a317022bc5c346b160c3ac091a6f3841f09d5efa2575294358274132/giterator-1.0.0.tar.gz", hash = "sha256:c5bcf1e021a2c69b50f11ce6a78f408805aad12500628fb2bb03d583355fe1ba", size = 24174, upload-time = "2026-07-06T07:14:27.043Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a7/64/e8d27d23deec09fd2f3e5f4721ac0cbbb40d27bcc4f917d61f88d218c83b/giterator-1.0.0-py3-none-any.whl", hash = "sha256:700f2d9f4a90baf36cb2f99a2f1aa0d5a1344b989befa075853915d02d176594", size = 11685, upload-time = "2026-07-06T07:14:25.757Z" },
+]
 
 [[package]]
 name = "idna"
