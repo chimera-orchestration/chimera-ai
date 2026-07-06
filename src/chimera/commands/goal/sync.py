@@ -87,12 +87,17 @@ def sync(
     line, so the log is enough to restore them. For when there's no integration record to append
     from, or the target was rebased and a replay would only conflict. The watermark moves to the
     target's tip, so the next un-forced sync appends incrementally again. Inert unless the two
-    have actually diverged — a mover that merely leads keeps its lead.
+    have actually diverged — a mover that merely leads keeps its lead. It also cleans up a broken
+    append on its way through: a conflicted append of our own (the marker attributes it) is
+    aborted, and a stray sequence stranded in the mover's clean checkout is quit, before the
+    repoint.
 
     Refuses (``UserError``) when the target is missing, ``mover``/``target`` are the same, the mover
     isn't checked out (an append needs a work tree) or is dirty, a divergence has no integration
-    record (and no ``force``), the commits to append include merges, or an append is still in
-    progress. Ref moves ride a ``goal sync: refs`` log line (see
+    record (and no ``force``), the commits to append include merges, or a cherry-pick is already
+    in progress in the mover's checkout — ours (resolve and re-run, or ``force`` to discard it)
+    or anyone's. A replay that dies without leaving a conflict to resolve is backed out, never
+    left half-applied. Ref moves ride a ``goal sync: refs`` log line (see
     ``agent-docs/logging.md``). ``into`` (the caller's cwd) opts in to landing ``mover`` *in place*
     once it's settled (see :func:`chimera.worktrees.checkout_here`); the result carries what
     happened via ``SyncResult.checkout``. A conflict is never also landed elsewhere.
@@ -138,7 +143,7 @@ def _apply(
 ) -> tuple[Outcome, int, int, int, Path | None]:
     """Settle ``mover_branch`` against ``target_branch``:
     ``(outcome, ahead_by, appended, discarded, conflict)``."""
-    _reconcile(git, goal, mover, mover_branch, watermark)
+    _reconcile(git, goal, mover, mover_branch, watermark, force)
     tip = git.rev_parse(target_branch, short=False)
     if not git.ref_exists(mover_branch):
         git('branch', '--no-track', mover_branch, target_branch)
@@ -172,8 +177,12 @@ def _force(
 
     The count rides the ``goal sync: refs`` line beside the before/after shas that make the
     discard recoverable; the watermark moves to the target's tip so the next un-forced sync
-    appends incrementally again.
+    appends incrementally again. A stray cherry-pick sequence in the mover's clean checkout
+    (a replay that died mid-flight) is quit first — the repoint supersedes whatever it was doing.
     """
+    checkout = checkout_of(git, mover_branch)
+    if checkout is not None and not is_dirty(checkout) and _cherry_pick_in_progress(checkout):
+        Git(checkout)('cherry-pick', '--quit')
     discarded = int(git('rev-list', '--count', f'{target_branch}..{mover_branch}'))
     _repoint(git, mover_branch, target_branch)
     refs.bind(discarded=discarded)
@@ -214,6 +223,11 @@ def _append(
             f'check out {mover_branch} to append {len(new)} commit(s) '
             f'(git checkout {mover_branch} …), then re-run'
         )
+    if _cherry_pick_in_progress(checkout):
+        raise UserError(
+            f'a cherry-pick is already in progress at {checkout} — finish or abort it '
+            f'(git cherry-pick --abort), then re-run'
+        )
     if is_dirty(checkout):
         raise UserError(
             f'{mover_branch} is checked out with uncommitted changes at {checkout} — '
@@ -221,23 +235,39 @@ def _append(
         )
     before = git.rev_parse(mover_branch, short=False)
     try:
-        Git(checkout)('cherry-pick', f'{point}..{target_branch}')
-    except GitError:
-        if not _cherry_pick_in_progress(checkout):
-            raise  # pragma: no cover — a cherry-pick failure that isn't a merge conflict (the
-            # validated non-empty range of fresh commits makes this unreachable in normal flow)
-        _write_marker(_marker(git, goal, mover), before, tip)
-        return Outcome.CONFLICT, 0, 0, 0, checkout
+        _replay(checkout, point, target_branch)
+    except GitError as error:
+        if _conflicted(checkout):  # stopped on a pick for the human: resolve/skip and --continue
+            _write_marker(_marker(git, goal, mover), before, tip)
+            return Outcome.CONFLICT, 0, 0, 0, checkout
+        # died some other way mid-replay — back it out rather than strand the mover half-appended
+        # (any sequence state is this run's own: the guard above proved none existed before)
+        if _cherry_pick_in_progress(checkout):
+            Git(checkout)('cherry-pick', '--abort')
+        raise UserError(f'append onto {mover_branch} failed and was rolled back:\n{error}')
     git('update-ref', watermark, tip)
     return Outcome.APPENDED, 0, len(new), 0, None
 
 
-def _reconcile(git: Git, goal: str, mover: str, mover_branch: str, watermark: str) -> None:
+def _replay(checkout: Path, point: str, target_branch: str) -> None:
+    """Cherry-pick the append range in the mover's checkout.
+
+    A seam: with merge-carrying ranges refused up front, no honest mid-replay failure is known,
+    so tests inject one here to keep the rollback path proven.
+    """
+    Git(checkout)('cherry-pick', f'{point}..{target_branch}')
+
+
+def _reconcile(
+    git: Git, goal: str, mover: str, mover_branch: str, watermark: str, force: bool
+) -> None:
     """Settle a prior append that hit a conflict, before deciding what this run should do.
 
-    An in-progress cherry-pick blocks; otherwise the marker is cleared and — if the mover moved
-    since the append started — the watermark advances to what that append integrated (a finished
-    resolve). A mover still at its pre-append sha means the user aborted, so nothing is recorded.
+    An in-progress cherry-pick blocks — unless ``force``, which backs it out (the marker
+    attributes it to our own append, and the repoint force is headed for supersedes it anyway).
+    Otherwise the marker is cleared and — if the mover moved since the append started — the
+    watermark advances to what that append integrated (a finished resolve). A mover still at its
+    pre-append sha means the user aborted, so nothing is recorded.
     """
     marker = _marker(git, goal, mover)
     state = _read_marker(marker)
@@ -246,10 +276,12 @@ def _reconcile(git: Git, goal: str, mover: str, mover_branch: str, watermark: st
     before, tip = state
     checkout = checkout_of(git, mover_branch)
     if checkout is not None and _cherry_pick_in_progress(checkout):
-        raise UserError(
-            f'an append is in progress at {checkout} — resolve and `git cherry-pick --continue`, '
-            f'then re-run'
-        )
+        if not force:
+            raise UserError(
+                f'an append is in progress at {checkout} — resolve and '
+                f'`git cherry-pick --continue`, then re-run'
+            )
+        Git(checkout)('cherry-pick', '--abort')
     marker.unlink()
     if git.rev_parse(mover_branch, short=False) != before:  # finished — the mover advanced
         git('update-ref', watermark, tip)
@@ -327,8 +359,24 @@ def _read_marker(marker: Path) -> tuple[str, str] | None:
     return fields['before'], fields['target']
 
 
-def _cherry_pick_in_progress(checkout: Path) -> bool:
+def _conflicted(checkout: Path) -> bool:
+    """A cherry-pick has stopped on a pick (conflict or empty), awaiting --continue/--skip."""
     return Git(checkout).ref_exists('CHERRY_PICK_HEAD')
+
+
+def _cherry_pick_in_progress(checkout: Path) -> bool:
+    """Any cherry-pick mid-flight: a stopped pick, or a live multi-commit sequence.
+
+    ``CHERRY_PICK_HEAD`` alone misses a sequence that died *between* picks (nothing conflicted,
+    but the sequencer state remains and blocks the next replay) — check both.
+    """
+    git = Git(checkout)
+    return (
+        git.ref_exists('CHERRY_PICK_HEAD')
+        or Path(
+            git('rev-parse', '--path-format=absolute', '--git-path', 'sequencer').strip()
+        ).exists()
+    )
 
 
 def _is_ancestor(git: Git, ancestor: str, descendant: str) -> bool:
