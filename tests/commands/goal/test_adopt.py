@@ -31,8 +31,9 @@ def _stub_agent(replace: Replacer) -> list[object]:
         extra: Sequence[str] = (),
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
+        context: Path | None = None,
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous, spec))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context))
 
     replace.in_module(agent, record, module=goal_adopt)
     return calls
@@ -62,7 +63,7 @@ def test_adopt_restructures_the_branch_then_launches_the_agent(
     compare(
         calls,
         expected=[
-            (worktrees / 'feature@agent', 'proj@feature@agent', None, (), False, AgentSpec())
+            (worktrees / 'feature@agent', 'proj@feature@agent', None, (), False, AgentSpec(), None)
         ],
     )
 
@@ -113,7 +114,15 @@ def test_adopt_passes_the_prompt_to_the_agent(
     compare(
         calls,
         expected=[
-            (worktrees / 'feature@agent', 'proj@feature@agent', 'do it', (), False, AgentSpec())
+            (
+                worktrees / 'feature@agent',
+                'proj@feature@agent',
+                'do it',
+                (),
+                False,
+                AgentSpec(),
+                None,
+            )
         ],
     )
 
@@ -234,7 +243,9 @@ def test_goal_adopt_cli(
     )
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False, AgentSpec())])
+    compare(
+        calls, expected=[(expected, 'project@feature-x@agent', None, [], False, AgentSpec(), None)]
+    )
 
 
 def test_goal_adopt_cli_passes_extra_flags_through(
@@ -252,7 +263,15 @@ def test_goal_adopt_cli_passes_extra_flags_through(
     compare(
         calls,
         expected=[
-            (expected, 'project@feature-x@agent', None, ['--model', 'opus'], False, AgentSpec())
+            (
+                expected,
+                'project@feature-x@agent',
+                None,
+                ['--model', 'opus'],
+                False,
+                AgentSpec(),
+                None,
+            )
         ],
     )
 
@@ -269,4 +288,6 @@ def test_goal_adopt_cli_dangerous(
         output=f'Adopted feature-x in {expected}',
         logging=_adopt_logs(base, expected, dangerous=True),
     )
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], True, AgentSpec())])
+    compare(
+        calls, expected=[(expected, 'project@feature-x@agent', None, [], True, AgentSpec(), None)]
+    )

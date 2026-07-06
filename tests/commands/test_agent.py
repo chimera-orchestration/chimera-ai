@@ -1,5 +1,6 @@
 import os
 import subprocess
+from hashlib import sha256
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -686,3 +687,66 @@ def test_agent_start_cli_unknown_harness_errors(
         ),
     )
     compare(calls, expected=[])  # never launched
+
+
+def test_agent_context_rides_as_system_prompt_file(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(worktree, 'proj@goal@agent', context=tmpdir / 'ctx.md')
+    expected = [
+        'claude',
+        '--name',
+        'proj@goal@agent',
+        '--append-system-prompt-file',
+        str(tmpdir / 'ctx.md'),
+    ]
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_agent_start_cli_injects_rendered_context(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    tmpdir.write(ws / 'principles' / 'verify.md', 'Verify before done.\n')
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(project)
+    calls = _stub(replace)
+    expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
+    text = '# Principles\n\nVerify before done.'
+    digest = sha256(text.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    command.run('agent', 'start', '-g', 'g').check(
+        output=f'Launched agent in {expected_wt}',
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'agent start',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.agent',
+                'params': {
+                    'prompt': None,
+                    'goal': 'g',
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@g@agent',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+        ],
+    )
+    compare(context.read_text(), expected=text)
+    claude_cmd = ['claude', '--name', 'proj@g@agent', '--append-system-prompt-file', str(context)]
+    compare(calls, expected=[(claude_cmd, expected_wt, True)])

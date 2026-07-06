@@ -66,6 +66,22 @@ agent:
   model: opus       # optional; harness-native name
 ```
 
+## Launch context: principles inline, knowledge indexes
+
+The same launching commands inject a rendered launch context (`chimera.agents.context`),
+following the Principle/Knowledge split: workspace + project `principles/*.md` inline whole
+(always-on, small), while `knowledge/*.md` lands as an *index* of trigger lines (`- topic:
+<abs path>`) the agent reads on demand with its own tools — a pinned project indexes only its
+own knowledge, an unpinned scope indexes every project's, qualified by name. `prompts/` is
+*not* injected — those are hand-curated prompt templates (e.g. `review.md`).
+
+The render is a build product, never committed: it's written content-addressed to
+`<workspace>/logs/context/<session>-<sha8>.md` (gitignored; identical re-renders land on the
+same file) and handed to the harness by path — claude gets `--append-system-prompt-file` — so
+the repo and worktree stay untouched. The `context: rendered` log line binds the path and full
+sha256: the audit record of exactly what a session was launched with. No workspace (a lone
+project) or no sources → nothing rendered, nothing injected, no log line.
+
 The `-p/-g/-a` flags may appear at any level of a project-scoped command — before the group,
 between group and subcommand, or after it — so `ch -p chimera goal ls`, `ch goal -p chimera ls`
 and `ch goal ls -p chimera` are equivalent. A shared `_context` callback (in `chimera.__main__`)

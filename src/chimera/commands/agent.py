@@ -20,9 +20,12 @@ def agent(
     extra: Sequence[str] = (),
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
+    context: Path | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``)."""
-    return spec.agent.start(worktree, name, prompt, extra, dangerous, model=spec.model)
+    return spec.agent.start(
+        worktree, name, prompt, extra, dangerous, model=spec.model, context=context
+    )
 
 
 def resume(
@@ -32,9 +35,12 @@ def resume(
     extra: Sequence[str] = (),
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
+    context: Path | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     """Reattach to ``spec``'s agent session named ``name`` (see ``Agent.resume``)."""
-    return spec.agent.resume(worktree, name, prompt, extra, dangerous, model=spec.model)
+    return spec.agent.resume(
+        worktree, name, prompt, extra, dangerous, model=spec.model, context=context
+    )
 
 
 def scope_line(scope: Scope) -> str:

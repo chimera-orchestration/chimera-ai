@@ -46,9 +46,11 @@ class Agent(Protocol):
 
     ``platform`` names the harness in config, flags and session records — session
     identity is ``(platform, native id)``. ``model`` picks the model for the session
-    (the harness's own default when ``None``). ``dangerous`` asks the harness to make
-    its permissions-bypass mode *reachable* (never active); a harness without such a
-    mode ignores it. ``extra`` is forwarded to the harness binary verbatim.
+    (the harness's own default when ``None``). ``context`` is a rendered launch-context
+    file (see ``chimera.agents.context``) the harness injects by whatever channel it
+    has — never by writing into the repo. ``dangerous`` asks the harness to make its
+    permissions-bypass mode *reachable* (never active); a harness without such a mode
+    ignores it. ``extra`` is forwarded to the harness binary verbatim.
     """
 
     platform: str
@@ -62,6 +64,7 @@ class Agent(Protocol):
         dangerous: bool = False,
         *,
         model: str | None = None,
+        context: Path | None = None,
     ) -> CompletedProcess[bytes]:
         """Launch a new session named ``name`` in ``cwd``; background when ``prompt`` is given."""
         ...
@@ -75,6 +78,7 @@ class Agent(Protocol):
         dangerous: bool = False,
         *,
         model: str | None = None,
+        context: Path | None = None,
     ) -> CompletedProcess[bytes]:
         """Reattach to the session named ``name``, reviving it in ``cwd`` if dead."""
         ...

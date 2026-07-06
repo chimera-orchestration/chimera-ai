@@ -30,8 +30,9 @@ def _stub_agent(replace: Replacer) -> list[object]:
         extra: Sequence[str] = (),
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
+        context: Path | None = None,
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous, spec))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context))
 
     replace.in_module(agent, record, module=goal_start)
     return calls
@@ -46,7 +47,10 @@ def test_start_creates_worktrees_then_launches_the_agent(
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])  # human is lazy
     # foreground (no prompt), not dangerous
-    compare(calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', None, (), False, AgentSpec())])
+    compare(
+        calls,
+        expected=[(worktrees / 'g@agent', 'proj@g@agent', None, (), False, AgentSpec(), None)],
+    )
 
 
 def test_start_passes_the_prompt_to_the_agent(
@@ -56,7 +60,8 @@ def test_start_passes_the_prompt_to_the_agent(
     calls = _stub_agent(replace)
     start(git_repo.path, worktrees, 'g', 'proj@g@agent', prompt='do it')
     compare(
-        calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', 'do it', (), False, AgentSpec())]
+        calls,
+        expected=[(worktrees / 'g@agent', 'proj@g@agent', 'do it', (), False, AgentSpec(), None)],
     )
 
 
@@ -66,7 +71,9 @@ def test_start_passes_dangerous_to_the_agent(
     worktrees = tmpdir / 'worktrees'
     calls = _stub_agent(replace)
     start(git_repo.path, worktrees, 'g', 'proj@g@agent', dangerous=True)
-    compare(calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', None, (), True, AgentSpec())])
+    compare(
+        calls, expected=[(worktrees / 'g@agent', 'proj@g@agent', None, (), True, AgentSpec(), None)]
+    )
 
 
 def test_goal_start_cli(
@@ -93,7 +100,9 @@ def test_goal_start_cli(
         ),
     )
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False, AgentSpec())])
+    compare(
+        calls, expected=[(expected, 'project@feature-x@agent', None, [], False, AgentSpec(), None)]
+    )
 
 
 def test_goal_start_cli_with_prompt(
@@ -121,7 +130,9 @@ def test_goal_start_cli_with_prompt(
     )
     compare(
         calls,
-        expected=[(expected, 'project@feature-x@agent', 'go build it', [], False, AgentSpec())],
+        expected=[
+            (expected, 'project@feature-x@agent', 'go build it', [], False, AgentSpec(), None)
+        ],
     )
 
 
@@ -148,7 +159,9 @@ def test_goal_start_cli_dangerous(
             },
         ),
     )
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], True, AgentSpec())])
+    compare(
+        calls, expected=[(expected, 'project@feature-x@agent', None, [], True, AgentSpec(), None)]
+    )
 
 
 def test_goal_start_cli_offline(
@@ -174,7 +187,9 @@ def test_goal_start_cli_offline(
             },
         ),
     )
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False, AgentSpec())])
+    compare(
+        calls, expected=[(expected, 'project@feature-x@agent', None, [], False, AgentSpec(), None)]
+    )
 
 
 def test_goal_start_cli_passes_extra_flags_through(
@@ -203,6 +218,14 @@ def test_goal_start_cli_passes_extra_flags_through(
     compare(
         calls,
         expected=[
-            (expected, 'project@feature-x@agent', None, ['--model', 'opus'], False, AgentSpec())
+            (
+                expected,
+                'project@feature-x@agent',
+                None,
+                ['--model', 'opus'],
+                False,
+                AgentSpec(),
+                None,
+            )
         ],
     )

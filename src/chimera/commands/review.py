@@ -48,6 +48,7 @@ def review(
     into: Path | None = None,
     launch: bool = True,
     spec: AgentSpec = AgentSpec(),
+    context: Path | None = None,
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
 
@@ -91,7 +92,15 @@ def review(
         checkout_here(git, branch(goal, HUMAN), into, 'review')
     if launch:
         prompt = _prompt(prompts_dir, meta, goal, project)
-        agent(agent_worktree, session_name(project, goal, AGENT), prompt, extra, dangerous, spec)
+        agent(
+            agent_worktree,
+            session_name(project, goal, AGENT),
+            prompt,
+            extra,
+            dangerous,
+            spec,
+            context,
+        )
     return agent_worktree
 
 

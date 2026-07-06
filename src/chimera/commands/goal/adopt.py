@@ -16,6 +16,7 @@ def adopt(
     extra: Sequence[str] = (),
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
+    context: Path | None = None,
 ) -> Path:
     """Adopt an existing branch ``<goal>`` as a goal, then launch its agent.
 
@@ -39,7 +40,7 @@ def adopt(
         restructure(git, goal)
         agent_worktree = ensure_worktree(git, worktrees_root, goal)
         refs.bind(worktree=str(agent_worktree))
-    agent(agent_worktree, name, prompt, extra, dangerous, spec)
+    agent(agent_worktree, name, prompt, extra, dangerous, spec, context)
     return agent_worktree
 
 

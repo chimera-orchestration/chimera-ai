@@ -13,6 +13,7 @@ from typer.main import get_command
 from chimera import logging
 from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
 from chimera.agents import Session
+from chimera.agents.context import materialize, render
 from chimera.agents.registry import AgentSpec, resolve_spec
 from chimera.commands.agent import agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
@@ -334,6 +335,20 @@ def _spec(project: Project, harness: str | None, model: str | None) -> AgentSpec
     return resolve_spec(harness, model, project.config.agent, workspace)
 
 
+def _context_file(project: Project | None, name: str) -> Path | None:
+    """Render and store session ``name``'s launch context; ``None`` when there is none.
+
+    The render needs a workspace both for its workspace-level sources and as the home of
+    the stored artifact (``logs/context/``), so a project standing outside any workspace
+    launches without injected context rather than failing.
+    """
+    try:
+        workspace = resolve_workspace(Path.cwd())
+    except NotInWorkspaceError:
+        return None
+    return materialize(workspace, name, render(workspace, project))
+
+
 def _scope(
     ctx: typer.Context, project: str | None, goal: str | None, *, infer: bool = True
 ) -> Scope:
@@ -527,6 +542,7 @@ def review(
         Path.cwd(),
         launch=not no_agent,
         spec=_spec(p, harness, model),
+        context=_context_file(p, session_name(p.name, f'pr-{pr}', AGENT)),
     )
     if no_agent:
         goal = worktree.name.split(SEP, 1)[0]
@@ -740,6 +756,7 @@ def goal_start(
         fetch=not offline,
         dangerous=dangerous,
         spec=_spec(p, harness, model),
+        context=_context_file(p, session_name(p.name, goal, AGENT)),
     )
     typer.echo(f'Started {goal} in {worktree}')
 
@@ -769,6 +786,7 @@ def goal_adopt(
         _passthrough(ctx),
         dangerous,
         _spec(p, harness, model),
+        _context_file(p, session_name(p.name, goal, AGENT)),
     )
     typer.echo(f'Adopted {goal} in {worktree}')
 
@@ -909,8 +927,9 @@ def agent_start(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
+    name = session_name(p.name, g, actor)
     spec = _spec(p, harness, model)
-    _agent(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous, spec)
+    _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, _context_file(p, name))
     typer.echo(f'Launched agent in {worktree}')
 
 
@@ -931,8 +950,9 @@ def agent_resume(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
+    name = session_name(p.name, g, actor)
     spec = _spec(p, harness, model)
-    _resume(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous, spec)
+    _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, _context_file(p, name))
     typer.echo(f'Resumed agent in {worktree}')
 
 

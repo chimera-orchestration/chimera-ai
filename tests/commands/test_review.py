@@ -69,8 +69,9 @@ def _stub_agent(replace: Replacer) -> list[object]:
         extra: Sequence[str] = (),
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
+        context: Path | None = None,
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous, spec))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context))
 
     replace.in_module(agent, record, module=review_mod)
     return calls
@@ -113,7 +114,15 @@ def test_review_builds_the_goal_tracking_the_pr_and_launches(
     compare(
         calls,
         expected=[
-            (worktrees / 'pr-1@agent', 'proj@pr-1@agent', expected_prompt, (), False, AgentSpec())
+            (
+                worktrees / 'pr-1@agent',
+                'proj@pr-1@agent',
+                expected_prompt,
+                (),
+                False,
+                AgentSpec(),
+                None,
+            )
         ],
     )
 
@@ -431,8 +440,9 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         into: Path | None = None,
         launch: bool = True,
         spec: AgentSpec = AgentSpec(),
+        context: Path | None = None,
     ) -> Path:
-        calls.append((project, pr, list(extra), dangerous, into, launch, spec))
+        calls.append((project, pr, list(extra), dangerous, into, launch, spec, context))
         return worktrees / 'pr-1@agent'
 
     replace(target=review, container=main, name='_review', replacement=record)
@@ -454,7 +464,9 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
     )
     compare(
         calls,
-        expected=[('project', '1', ['--model', 'opus'], False, Path.cwd(), True, AgentSpec())],
+        expected=[
+            ('project', '1', ['--model', 'opus'], False, Path.cwd(), True, AgentSpec(), None)
+        ],
     )
     calls.clear()
     command.run('review', '1', '--no-agent').check(
@@ -474,4 +486,6 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
             },
         ),
     )
-    compare(calls, expected=[('project', '1', [], False, Path.cwd(), False, AgentSpec())])
+    compare(
+        calls, expected=[('project', '1', [], False, Path.cwd(), False, AgentSpec(), None)]
+    )
