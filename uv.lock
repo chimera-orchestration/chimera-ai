@@ -221,8 +221,8 @@ wheels = [
 
 [[package]]
 name = "giterator"
-version = "0.3.0"
-source = { git = "https://github.com/simplistix/giterator#77fb1286b2d27e077a56670184cd67c6e4196c24" }
+version = "1.0.0"
+source = { git = "https://github.com/simplistix/giterator#f37acaa60437379e9b6a7dfe7e3f9d7bf8158279" }
 
 [[package]]
 name = "idna"
