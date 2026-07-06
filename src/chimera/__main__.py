@@ -437,7 +437,12 @@ def _render_board(b: Board) -> None:
 @logs(_review)
 def review(
     ctx: typer.Context,
-    pr: Annotated[str, typer.Argument(help='Pull request number or URL')],
+    pr: Annotated[
+        str,
+        typer.Argument(
+            help='PR number, or URL — github or any review tool naming owner/repo and number'
+        ),
+    ],
     dangerous: DangerousOpt = False,
     project: ProjectOpt = None,
 ) -> None:
