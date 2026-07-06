@@ -267,22 +267,95 @@ def test_repoint_never_fires_once_the_mover_has_a_watermark(
     compare(_full(git_repo, 'g/human'), expected=human_sha)  # human's own squash commit untouched
 
 
-def test_diverged_with_no_record_refuses(tmpdir: TempDir, git_repo: Repo) -> None:
+def _diverged_no_record(tmpdir: TempDir, git_repo: Repo) -> Path:
+    """A human that diverged from the agent with nothing to append from: a squash carrying an
+    edit of the human's own (tree matches nothing) and no watermark. Returns the human checkout."""
     worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('a1')
     checkout = _squash_human(git_repo, tmpdir)
-    (checkout / 'own.txt').write_text('mine')  # an edit of the human's own → tree matches nothing
+    (checkout / 'own.txt').write_text('mine')
     Git(checkout)('add', '-A')
     Git(checkout)('commit', '-qm', 'own edit')
-    Git(git_repo.path)('update-ref', '-d', _wm())  # and no watermark to fall back on
+    Git(git_repo.path)('update-ref', '-d', _wm())
     Repo(worktrees / 'g@agent').commit_content('a2')
+    return checkout
+
+
+def test_diverged_with_no_record_refuses(tmpdir: TempDir, git_repo: Repo) -> None:
+    _diverged_no_record(tmpdir, git_repo)
     with ShouldRaise(
         UserError(
             'g/human has diverged from g/agent with no integration record — '
-            'rebase or cherry-pick by hand this time'
+            'rebase or cherry-pick by hand, or --force to repoint g/human onto g/agent, '
+            'discarding its own commits'
         )
     ):
         sync(git_repo.path, 'g')
+
+
+def test_force_repoints_a_diverged_mover(tmpdir: TempDir, git_repo: Repo) -> None:
+    checkout = _diverged_no_record(tmpdir, git_repo)
+    old = _full(git_repo, 'g/human')
+    with _refs_log() as log:
+        result = sync(git_repo.path, 'g', force=True)
+    compare(
+        result,
+        expected=SyncResult(
+            Outcome.FORCED, 'human', 'agent', _short(git_repo, 'g/agent'), discarded=2
+        ),
+    )
+    tip = _full(git_repo, 'g/agent')
+    compare(_full(git_repo, 'g/human'), expected=tip)  # ref and work tree moved together
+    compare(Git(checkout)('rev-parse', 'HEAD').strip(), expected=tip)
+    compare(_full(git_repo, _wm()), expected=tip)  # watermark seeded for future appends
+    log.check(
+        (
+            'goal sync: refs',
+            {
+                'goal': 'g',
+                'discarded': 2,
+                'git': {'before': {'g/human': old}, 'after': {'g/human': tip, _wm(): tip}},
+            },
+        ),
+    )
+    compare(sync(git_repo.path, 'g', force=True).outcome, expected=Outcome.NOOP)  # idempotent
+
+
+def test_force_beats_the_append(tmpdir: TempDir, git_repo: Repo) -> None:
+    """With a watermark an un-forced sync would append; --force still means repoint —
+    the escape hatch when a replay would only conflict (e.g. the target was rebased)."""
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    _squash_human(git_repo, tmpdir)  # human squashed, watermark tracks agent's tip
+    Repo(worktrees / 'g@agent').commit_content('a2')  # a commit an append would replay
+    result = sync(git_repo.path, 'g', force=True)
+    compare(result.outcome, expected=Outcome.FORCED)
+    compare(result.discarded, expected=1)  # the squash commit dropped, not appended onto
+    compare(_full(git_repo, 'g/human'), expected=_full(git_repo, 'g/agent'))
+
+
+def test_force_refuses_a_dirty_mover(tmpdir: TempDir, git_repo: Repo) -> None:
+    checkout = _diverged_no_record(tmpdir, git_repo)
+    (checkout / 'scratch.txt').write_text('wip')  # uncommitted — not recoverable from any log
+    with ShouldRaise(
+        UserError(
+            f'g/human is checked out with uncommitted changes at {checkout.resolve()} — '
+            f'commit or stash there first'
+        )
+    ):
+        sync(git_repo.path, 'g', force=True)
+
+
+def test_force_never_discards_a_lead(tmpdir: TempDir, git_repo: Repo) -> None:
+    _goal(tmpdir, git_repo)
+    sync(git_repo.path, 'g')
+    checkout = tmpdir / 'human'
+    Git(git_repo.path)('worktree', 'add', str(checkout), 'g/human')
+    Repo(checkout).commit_content('human-work')  # human strictly leads — no divergence
+    lead = _full(git_repo, 'g/human')
+    result = sync(git_repo.path, 'g', force=True)
+    compare(result.outcome, expected=Outcome.AHEAD)
+    compare(_full(git_repo, 'g/human'), expected=lead)  # the lead survives
 
 
 def test_diverged_append_refuses_a_dirty_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -433,6 +506,10 @@ def test_sync_line_renders_each_outcome() -> None:
         expected='Repointed agent onto human (abc123) — tips already matched exactly',
     )
     compare(
+        _sync_line(SyncResult(Outcome.FORCED, 'human', 'agent', 'abc123', discarded=2)),
+        expected='Forced human onto agent (abc123) — discarded 2 commit(s), shas in the log',
+    )
+    compare(
         _sync_line(
             SyncResult(Outcome.CONFLICT, 'human', 'agent', 'abc123', conflict=Path('/repo'))
         ),
@@ -490,7 +567,7 @@ def test_goal_sync_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> Non
     start, end = action_logs(
         'goal sync',
         'chimera.commands.goal.sync.sync',
-        {'goal': 'g', 'move': 'human', 'to': 'agent', 'project': None},
+        {'goal': 'g', 'move': 'human', 'to': 'agent', 'force': False, 'project': None},
     )
     command.run('goal', 'sync', 'g').check(
         output=f'Created human at agent ({_short(git_repo, "g/agent")})',
@@ -520,7 +597,34 @@ def test_goal_sync_cli_conflict_exits_nonzero(
         logging=action_logs(
             'goal sync',
             'chimera.commands.goal.sync.sync',
-            {'goal': 'g', 'move': 'human', 'to': 'agent', 'project': None},
+            {'goal': 'g', 'move': 'human', 'to': 'agent', 'force': False, 'project': None},
         ),
         return_code=1,
     )
+
+
+def test_goal_sync_cli_force(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    _diverged_no_record(tmpdir, git_repo)
+    old, tip = _full(git_repo, 'g/human'), _full(git_repo, 'g/agent')
+    start, end = action_logs(
+        'goal sync',
+        'chimera.commands.goal.sync.sync',
+        {'goal': 'g', 'move': 'human', 'to': 'agent', 'force': True, 'project': None},
+    )
+    command.run('goal', 'sync', 'g', '--force').check(
+        output=f'Forced human onto agent ({_short(git_repo, "g/agent")}) — '
+        f'discarded 2 commit(s), shas in the log',
+        logging=[
+            start,
+            {
+                'level': 'INFO',
+                'goal': 'g',
+                'discarded': 2,
+                'git': {'before': {'g/human': old}, 'after': {'g/human': tip, _wm(): tip}},
+                'message': 'goal sync: refs',
+            },
+            end,
+        ],
+    )
+    compare(_full(git_repo, 'g/human'), expected=tip)

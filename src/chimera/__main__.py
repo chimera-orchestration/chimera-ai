@@ -93,6 +93,14 @@ ToOpt = Annotated[
     ),
 ]
 ForceOpt = Annotated[bool, typer.Option('--force')]
+SyncForceOpt = Annotated[
+    bool,
+    typer.Option(
+        '--force',
+        help='On divergence, repoint the mover onto the target, discarding the mover-only '
+        'commits (shas recoverable from the log)',
+    ),
+]
 DryOpt = Annotated[
     bool, typer.Option('--dry', help='Preview what would be removed; change nothing')
 ]
@@ -645,12 +653,13 @@ def goal_sync(
     goal: Annotated[str | None, typer.Argument(autocompletion=complete_goal)] = None,
     move: MoveOpt = HUMAN,
     to: ToOpt = AGENT,
+    force: SyncForceOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
     p = _project(ctx, project)
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
-    result = _goal_sync(p.repo, g, move, to, Path.cwd())
+    result = _goal_sync(p.repo, g, move, to, Path.cwd(), force)
     typer.echo(_sync_line(result))
     if result.outcome is Outcome.CONFLICT:
         raise typer.Exit(1)  # append left mid-conflict for the human to finish
@@ -672,6 +681,11 @@ def _sync_line(result: SyncResult) -> str:
             line = f'Appended {result.appended} commit(s) from {target} onto {mover} ({sha})'
         case Outcome.REPOINTED:
             line = f'Repointed {mover} onto {target} ({sha}) — tips already matched exactly'
+        case Outcome.FORCED:
+            line = (
+                f'Forced {mover} onto {target} ({sha}) — discarded {result.discarded} '
+                f'commit(s), shas in the log'
+            )
         case Outcome.CONFLICT:
             return (
                 f'Conflict appending {target} onto {mover} — resolve in {result.conflict}, '
