@@ -3,7 +3,7 @@ from pathlib import Path
 
 from testfixtures import Replacer, TempDir, compare
 
-from chimera.commands.agent import live_sessions
+from chimera.agents.claude import live_sessions
 from tests.cli import Command, action_logs
 
 

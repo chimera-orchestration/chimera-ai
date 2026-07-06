@@ -2,7 +2,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
-from chimera.commands.agent import live_sessions
+from chimera.agents.claude import live_sessions
 from chimera.dry import Dry
 from chimera.git import Git
 from chimera.worktrees import (

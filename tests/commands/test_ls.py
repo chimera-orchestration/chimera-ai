@@ -4,7 +4,8 @@ from pathlib import Path
 from testfixtures import Replacer, TempDir, compare
 
 from chimera import __main__ as chimera_main
-from chimera.commands.agent import Session, agents
+from chimera.agents import Session
+from chimera.commands.agent import agents
 from chimera.commands.ls import Board, GoalBoard, ProjectBoard, board
 from chimera.context import Scope, resolve_project
 from tests.cli import Command, action_logs

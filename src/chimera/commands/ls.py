@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
-from chimera.commands.agent import Session, in_goal, scoped, under
+from chimera.agents import Session
+from chimera.commands.agent import in_goal, scoped, under
 from chimera.context import Scope, iter_projects
 from chimera.worktrees import goals
 

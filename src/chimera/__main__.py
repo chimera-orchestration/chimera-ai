@@ -12,7 +12,8 @@ from typer.main import get_command
 
 from chimera import logging
 from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
-from chimera.commands.agent import Session, agents, scope_line, scoped
+from chimera.agents import Session
+from chimera.commands.agent import agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks

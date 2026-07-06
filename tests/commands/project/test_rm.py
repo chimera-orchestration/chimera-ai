@@ -5,7 +5,7 @@ from giterator import Git
 from giterator.testing import Repo
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
-from chimera.commands.agent import live_sessions
+from chimera.agents.claude import live_sessions
 from chimera.commands.project.new import new
 from chimera.commands.project.rm import remove
 from chimera.commands.worktree import rm as worktree_rm
