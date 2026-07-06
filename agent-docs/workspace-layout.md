@@ -7,6 +7,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
   .gitignore                    # ignores: */repo/ */worktrees/
   config.yaml                   # `kind: workspace` — marks the workspace root
   processes/                    # workspace-wide process definitions
+  roles/                        # role directives: roles/{role}/*.md (e.g. roles/captain/)
   principles/                   # workspace-wide principles
   knowledge/                    # workspace-wide extracted knowledge (plain markdown)
   {project}/
@@ -65,6 +66,24 @@ agent:
   harness: claude   # optional; must be registered
   model: opus       # optional; harness-native name
 ```
+
+## Chat: the captain and scoped conversations
+
+`ch chat` launches a conversation at the current scope, resolved like the listers: standing in a
+goal worktree chats as `<project>@<goal>@chat` in that worktree, in a project as
+`<project>@chat` in the project dir, and at the bare workspace as the **captain** — the
+workspace-level agent that directs all work. The captain has no goal, branch or worktree: it
+works on the workspace as a whole. Its persona name comes from `config.yaml` (`captain: pegasus`,
+or the full form `captain: {name: …, harness: …, model: …}` to also override the agent cascade;
+`ch init --captain pegasus` sets it at creation) and *is* the session name. Role directives in
+`roles/captain/*.md` lead the captain's rendered context, after an intro line carrying the
+persona name; the workspace-wide knowledge index (every project, qualified) follows.
+
+A chat deliberately sits *alongside* whatever agent is working in the same cwd, so the
+one-session-per-worktree guard is off; instead the scope's chat itself being live refuses with
+an attach hint. `--resume`/`-r` revives the scope's previous (dead) chat session. `-p`/`-g`
+override the scope as usual; prompt/`--`-passthrough/`--dangerous`/`--harness`/`-m` behave as on
+the other launchers.
 
 ## Launch context: principles inline, knowledge indexes
 
@@ -136,6 +155,9 @@ It's a registry of independent checks (`chimera.commands.doctor`,
 add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates
   pre-marker workspaces and legacy `repo:`-only project configs)
+- **workspace-dirs** — every directory the current workspace template ships (`processes/`,
+  `roles/`, …) exists; derived from the template itself so it can't drift. `--fix` creates the
+  dir with a `.gitkeep` (matching `ch init`), which workspace-clean then commits
 - **gitignore** — the workspace `.gitignore` carries every entry the current template ships
   (`logs/`, `*/repo/`, …); `--fix` appends any missing ones, preserving existing/custom lines.
   Reconciles workspaces created before a template entry was added

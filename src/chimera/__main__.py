@@ -13,11 +13,13 @@ from typer.main import get_command
 from chimera import logging
 from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
 from chimera.agents import Session
-from chimera.agents.context import materialize, render
+from chimera.agents.context import materialize, render, role_context
 from chimera.agents.registry import AgentSpec, resolve_spec
 from chimera.commands.agent import agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
+from chimera.commands.chat import chat as _chat
+from chimera.commands.chat import chat_target
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
@@ -370,8 +372,14 @@ app = typer.Typer(
 
 @app.command(cls=LoggingCommand, help='Create a Chimera workspace at PATH.')
 @logs(_init)
-def init(path: Annotated[Path, typer.Argument()]) -> None:
-    typer.echo(f'Initialized workspace at {_init(path)}')
+def init(
+    path: Annotated[Path, typer.Argument()],
+    captain: Annotated[
+        str | None,
+        typer.Option('--captain', help="Name the workspace's captain persona (e.g. pegasus)"),
+    ] = None,
+) -> None:
+    typer.echo(f'Initialized workspace at {_init(path, captain)}')
 
 
 @app.command(
@@ -553,6 +561,47 @@ def review(
         )
     else:
         typer.echo(f'Reviewing {pr} in {worktree}')
+
+
+@app.command(
+    'chat',
+    cls=PassthroughCommand,
+    help='Chat at the current scope: the workspace captain, a project, or a goal.',
+)
+@logs(_chat)
+def chat(
+    ctx: typer.Context,
+    prompt: PromptArg = None,
+    resume: Annotated[
+        bool, typer.Option('--resume', '-r', help="Revive the scope's previous chat session")
+    ] = False,
+    dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    project: ProjectOpt = None,
+    goal: GoalOpt = None,
+) -> None:
+    scope = _scope(ctx, project, goal)
+    config = workspace_config(scope.workspace)
+    cwd, name = chat_target(scope, config.captain.name)
+    if scope.project is None:  # the captain: role directives lead, all projects index
+        spec = resolve_spec(harness, model, config.captain, config.agent)
+        role = role_context(scope.workspace, 'captain', name)
+        text = '\n\n'.join(part for part in (role, render(scope.workspace, None)) if part)
+    else:
+        spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
+        text = render(scope.workspace, scope.project)
+    _chat(
+        cwd,
+        name,
+        prompt,
+        _passthrough(ctx),
+        dangerous,
+        spec,
+        materialize(scope.workspace, name, text),
+        resume,
+    )
+    typer.echo(f'{"Resumed" if resume else "Launched"} chat {name} in {cwd}')
 
 
 project_app = typer.Typer(

@@ -42,6 +42,7 @@ class Claude:
         *,
         model: str | None = None,
         context: Path | None = None,
+        exclusive: bool = True,
     ) -> subprocess.CompletedProcess[bytes]:
         """Run a claude session named ``name``, with cwd set to ``cwd``.
 
@@ -52,7 +53,7 @@ class Claude:
         reachable (see ``_session_args``). Refuses if a session is already live in ``cwd``.
         """
         args = _session_args(['--name', name], prompt, extra, dangerous, model, context)
-        return _launch(cwd, args)
+        return _launch(cwd, args, exclusive)
 
     def resume(
         self,
@@ -64,6 +65,7 @@ class Claude:
         *,
         model: str | None = None,
         context: Path | None = None,
+        exclusive: bool = True,
     ) -> subprocess.CompletedProcess[bytes]:
         """Resume the claude session named ``name``, with cwd set to ``cwd``.
 
@@ -76,7 +78,7 @@ class Claude:
         (see ``_session_args``). Refuses if a session is already live in ``cwd``.
         """
         args = _session_args(['--resume', name], prompt, extra, dangerous, model, context)
-        return _launch(cwd, args)
+        return _launch(cwd, args, exclusive)
 
     def sessions(self) -> list[Session]:
         """Every live claude session, each enriched with a one-line summary.
@@ -169,11 +171,17 @@ def _session_args(
     return [*lead, *extra, *allow]
 
 
-def _launch(worktree: Path, args: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
-    """Run ``claude <args>`` with cwd set to the worktree; refuse if one is already live."""
+def _launch(
+    worktree: Path, args: Sequence[str], exclusive: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    """Run ``claude <args>`` with cwd set to the worktree.
+
+    ``exclusive`` (the default) refuses while any session is live there — the guard for
+    one-agent-per-worktree launches; a chat alongside a working agent passes ``False``.
+    """
     if not worktree.is_dir():
         raise FileNotFoundError(worktree)
-    if running := live_sessions(worktree):
+    if exclusive and (running := live_sessions(worktree)):
         ids = ', '.join(f'{s["sessionId"]} ({s["status"]})' for s in running)
         raise RuntimeError(f'an agent is already live in {worktree}: {ids} — attach or stop it')
     return subprocess.run(['claude', *args], cwd=worktree, check=True)

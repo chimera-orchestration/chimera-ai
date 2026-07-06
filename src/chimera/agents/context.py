@@ -40,6 +40,18 @@ def render(workspace: Path | None, project: Project | None) -> str:
     return '\n\n'.join(sections)
 
 
+def role_context(workspace: Path, role: str, name: str) -> str:
+    """The role section of a launch context: who the session is, then the role's directives.
+
+    Directives are the workspace's ``roles/<role>/*.md``, inlined whole like principles
+    (a role must know itself before anything else, so this section leads the render).
+    The intro line carries the persona ``name`` — config, not directive text — so the
+    agent knows what it is called.
+    """
+    intro = f'You are {name}, the {role} of the {workspace.name} workspace.'
+    return '\n\n'.join([f'# Role: {role}', intro, *_contents(workspace / 'roles' / role)])
+
+
 def materialize(workspace: Path, name: str, text: str) -> Path | None:
     """Write the rendered context for session ``name`` under the workspace's logs.
 

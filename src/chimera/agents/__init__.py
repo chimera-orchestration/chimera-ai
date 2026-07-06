@@ -50,7 +50,9 @@ class Agent(Protocol):
     file (see ``chimera.agents.context``) the harness injects by whatever channel it
     has — never by writing into the repo. ``dangerous`` asks the harness to make its
     permissions-bypass mode *reachable* (never active); a harness without such a mode
-    ignores it. ``extra`` is forwarded to the harness binary verbatim.
+    ignores it. ``extra`` is forwarded to the harness binary verbatim. ``exclusive``
+    (the default) refuses to launch while any session is live in ``cwd`` — a chat
+    deliberately sits alongside a working agent, so it opts out.
     """
 
     platform: str
@@ -65,6 +67,7 @@ class Agent(Protocol):
         *,
         model: str | None = None,
         context: Path | None = None,
+        exclusive: bool = True,
     ) -> CompletedProcess[bytes]:
         """Launch a new session named ``name`` in ``cwd``; background when ``prompt`` is given."""
         ...
@@ -79,6 +82,7 @@ class Agent(Protocol):
         *,
         model: str | None = None,
         context: Path | None = None,
+        exclusive: bool = True,
     ) -> CompletedProcess[bytes]:
         """Reattach to the session named ``name``, reviving it in ``cwd`` if dead."""
         ...

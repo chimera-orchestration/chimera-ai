@@ -3,7 +3,7 @@ from pathlib import Path
 
 from testfixtures import LogCapture, TempDir, compare
 
-from chimera.agents.context import KNOWLEDGE_HINT, materialize, render
+from chimera.agents.context import KNOWLEDGE_HINT, materialize, render, role_context
 from chimera.config import ProjectConfig
 from chimera.context import Project
 
@@ -130,3 +130,23 @@ def test_materialize_none_when_nothing_to_inject(tmpdir: TempDir, full_logs: Log
     assert materialize(ws, 'n', '') is None
     compare((ws / 'logs').exists(), expected=False)  # no file either
     full_logs.check()  # and no log line: nothing was rendered
+
+
+def test_role_context_inlines_directives(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.write(ws / 'roles' / 'captain' / 'a.md', 'Direct the work.\n')
+    tmpdir.write(ws / 'roles' / 'captain' / 'b.md', 'Never push to main.\n')
+    compare(
+        role_context(ws, 'captain', 'pegasus'),
+        expected='# Role: captain\n\n'
+        'You are pegasus, the captain of the lycia workspace.\n\n'
+        'Direct the work.\n\nNever push to main.',
+    )
+
+
+def test_role_context_without_directives_still_introduces(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    compare(
+        role_context(ws, 'captain', 'pegasus'),
+        expected='# Role: captain\n\nYou are pegasus, the captain of the lycia workspace.',
+    )
