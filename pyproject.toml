@@ -5,11 +5,11 @@ description = "Orchestrates AI agents working on goals across multiple projects"
 readme = "README.rst"
 requires-python = ">=3.14"
 dependencies = [
-    "typer>=0.26.3",
-    "pydantic",
-    "giterator @ git+https://github.com/simplistix/giterator",
-    "pyyaml",
-    "loguru>=0.7.3",
+  "typer>=0.26.8",
+  "pydantic>=2.13.4",
+  "giterator>=1.0.0",
+  "pyyaml>=6.0.3",
+  "loguru>=0.7.3",
 ]
 
 [project.urls]
@@ -22,17 +22,19 @@ ch = "chimera.__main__:app"
 
 [dependency-groups]
 dev = [
-    "ty",
-    "ruff",
-    "pytest",
-    "pytest-cov",
-    "testfixtures>=12.1.0",
-    "sybil",
+  "ty>=0.0.55",
+  "ruff>=0.15.20",
+  "pytest>=9.1.1",
+  "pytest-cov>=7.1.0",
+  "testfixtures>=12.2.0",
+  "sybil>=10.1.0",
 ]
-docs = [
-    "sphinx",
-    "furo",
-]
+docs = ["sphinx>=9.1.0", "furo>=2025.12.19"]
+
+[tool.uv]
+exclude-newer = "1 week"
+# giterator: remove ~2026-07-13 (1.0.0 published 2026-07-06)
+exclude-newer-package = { giterator = false }
 
 [build-system]
 requires = ["hatchling"]

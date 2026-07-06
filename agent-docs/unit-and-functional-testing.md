@@ -70,7 +70,7 @@ def tmpdir() -> Iterator[TempDir]: ...
   `d.dump(str(project.relative_to(d.path) / 'config.yaml'), …)`
 - `d.write('file.txt', b'data')` returns `Path`; `d.makedir('subdir')` returns `Path`
 - `TempDirectory` is the old deprecated API with str/bytes interface — do NOT use it
-- dep: `testfixtures @ git+https://github.com/simplistix/testfixtures` (main branch)
+- dep: `testfixtures>=12.2.0` (PyPI)
 
 *Writing structured files* — `d.dump(relpath, obj)` serialises by extension (`.yaml`/`.json`/
 `.toml`), creating parent dirs; never hand-format YAML/JSON. `d.parse(relpath)` reads it back.
@@ -92,5 +92,5 @@ shorter than the equivalent `compare` (e.g. one path among an otherwise-noisy tr
 - `Repo.make(path)` — creates an initialized git repo at path
 - `repo.commit_content('prefix', datetime(...))` — writes file and commits, returns short hash
 - `repo('log', ...)` — run raw git commands (instance is callable)
-- dep: `giterator @ git+https://github.com/simplistix/giterator` (main branch)
+- dep: `giterator>=1.0.0` (PyPI)
 - conftest fixture pattern: `with TempDir() as d: yield Repo.make(d.path / 'repo')`
