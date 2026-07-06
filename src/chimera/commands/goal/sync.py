@@ -74,7 +74,11 @@ def sync(
     (``Outcome.REPOINTED``) instead of recording a watermark that would never move it. This never
     happens once a watermark already exists for this mover: an *already-tracked* mover finding
     nothing new to append is the ordinary idempotent case, and must never have its own curated
-    history clobbered by target's raw tip. The append replays via ``git cherry-pick`` in the
+    history clobbered by target's raw tip. A range that contains merge commits is refused
+    outright: once the target has rebased onto or merged in other work,
+    ``<watermark>..<target>`` sweeps in history that is not the target's own (and
+    ``git cherry-pick`` cannot replay a merge) — ``--force`` is the way through, or integrate by
+    hand. The append replays via ``git cherry-pick`` in the
     mover's checkout (so a conflict is left there to resolve and ``git cherry-pick --continue``); a
     transient marker lets a re-run tell a finished append from an aborted one.
 
@@ -87,7 +91,8 @@ def sync(
 
     Refuses (``UserError``) when the target is missing, ``mover``/``target`` are the same, the mover
     isn't checked out (an append needs a work tree) or is dirty, a divergence has no integration
-    record (and no ``force``), or an append is still in progress. Ref moves ride a ``goal sync: refs`` log line (see
+    record (and no ``force``), the commits to append include merges, or an append is still in
+    progress. Ref moves ride a ``goal sync: refs`` log line (see
     ``agent-docs/logging.md``). ``into`` (the caller's cwd) opts in to landing ``mover`` *in place*
     once it's settled (see :func:`chimera.worktrees.checkout_here`); the result carries what
     happened via ``SyncResult.checkout``. A conflict is never also landed elsewhere.
@@ -195,6 +200,14 @@ def _append(
     new = git('rev-list', '--reverse', f'{point}..{target_branch}').split()
     if not new:
         return _record(git, watermark, tip, Outcome.NOOP)
+    merges = git('rev-list', '--merges', f'{point}..{target_branch}').split()
+    if merges:
+        raise UserError(
+            f'the {len(new)} commit(s) to append include {len(merges)} merge(s) — '
+            f'{target_branch} was rebased or merged other work in, so an append would '
+            f'replay history that is not its own; sync by hand, or --force to repoint '
+            f'{mover_branch} onto {target_branch}, discarding its own commits'
+        )
     checkout = checkout_of(git, mover_branch)
     if checkout is None:
         raise UserError(

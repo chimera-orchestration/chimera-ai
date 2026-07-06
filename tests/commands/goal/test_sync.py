@@ -358,6 +358,26 @@ def test_force_never_discards_a_lead(tmpdir: TempDir, git_repo: Repo) -> None:
     compare(_full(git_repo, 'g/human'), expected=lead)  # the lead survives
 
 
+def test_refuses_to_append_across_merges(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    agent_wt = worktrees / 'g@agent'
+    Repo(agent_wt).commit_content('a1')
+    _squash_human(git_repo, tmpdir)
+    Repo(git_repo.path).commit_content('mainline')  # main moves on…
+    Git(agent_wt)('merge', '-m', 'merge main', 'main')  # …and the agent pulls it in
+    with ShouldRaise(
+        UserError(
+            'the 2 commit(s) to append include 1 merge(s) — g/agent was rebased or merged '
+            'other work in, so an append would replay history that is not its own; sync by '
+            'hand, or --force to repoint g/human onto g/agent, discarding its own commits'
+        )
+    ):
+        sync(git_repo.path, 'g')
+    compare(
+        sync(git_repo.path, 'g', force=True).outcome, expected=Outcome.FORCED
+    )  # the way through
+
+
 def test_diverged_append_refuses_a_dirty_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('a1')
