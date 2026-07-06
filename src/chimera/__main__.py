@@ -444,6 +444,10 @@ def review(
         ),
     ],
     dangerous: DangerousOpt = False,
+    no_agent: Annotated[
+        bool,
+        typer.Option('--no-agent', help='Branch, fetch and check out the PR, but launch no agent'),
+    ] = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
@@ -456,8 +460,9 @@ def review(
         _passthrough(ctx),
         dangerous,
         Path.cwd(),
+        launch=not no_agent,
     )
-    typer.echo(f'Reviewing {pr} in {worktree}')
+    typer.echo(f'{"Prepared review of" if no_agent else "Reviewing"} {pr} in {worktree}')
 
 
 project_app = typer.Typer(cls=alias_group({'list': 'ls'}), help='Manage projects.')

@@ -156,6 +156,32 @@ def test_review_lands_the_human_branch_in_place(tmpdir: TempDir, replace: Replac
     compare(Git(repo)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='pr-1/human')
 
 
+def test_review_without_launch_stops_after_the_checkout(tmpdir: TempDir, replace: Replacer) -> None:
+    repo, head = _cloned(tmpdir)
+    worktrees = tmpdir / 'wt'
+    _stub_meta(replace, _meta(head))
+    calls = _stub_agent(replace)
+    compare(
+        review(repo, worktrees, 'proj', tmpdir / 'prompts', '1', into=repo, launch=False),
+        expected=worktrees / 'pr-1@agent',
+    )
+    git = Git(repo)
+    # the goal stands ready — branches on the PR head, human landed in place — but no agent ran
+    compare(git.rev_parse('pr-1/agent', short=False), expected=head)
+    compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='pr-1/human')
+    compare(calls, expected=[])
+
+
+def test_review_without_launch_refuses_agent_flags(tmpdir: TempDir) -> None:
+    refused = UserError(
+        '--no-agent launches no agent, so --dangerous and "-- …" have nothing to apply to.'
+    )
+    with ShouldRaise(refused):
+        review(tmpdir / 'r', tmpdir / 'wt', 'proj', tmpdir / 'p', '1', launch=False, dangerous=True)
+    with ShouldRaise(refused):
+        review(tmpdir / 'r', tmpdir / 'wt', 'proj', tmpdir / 'p', '1', launch=False, extra=['-c'])
+
+
 def test_prompt_prefers_a_project_override(tmpdir: TempDir) -> None:
     (tmpdir.makedir('prompts') / 'review.md').write_text('Custom review of #$PR in $PROJECT.\n')
     compare(
@@ -389,8 +415,9 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         extra: Sequence[str] = (),
         dangerous: bool = False,
         into: Path | None = None,
+        launch: bool = True,
     ) -> Path:
-        calls.append((project, pr, list(extra), dangerous, into))
+        calls.append((project, pr, list(extra), dangerous, into, launch))
         return worktrees / 'pr-1@agent'
 
     replace(target=review, container=main, name='_review', replacement=record)
@@ -400,7 +427,17 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         logging=action_logs(
             'review',
             'chimera.commands.review.review',
-            {'pr': '1', 'dangerous': False, 'project': None},
+            {'pr': '1', 'dangerous': False, 'no_agent': False, 'project': None},
         ),
     )
-    compare(calls, expected=[('project', '1', ['--model', 'opus'], False, Path.cwd())])
+    compare(calls, expected=[('project', '1', ['--model', 'opus'], False, Path.cwd(), True)])
+    calls.clear()
+    command.run('review', '1', '--no-agent').check(
+        output=f'Prepared review of 1 in {expected}',
+        logging=action_logs(
+            'review',
+            'chimera.commands.review.review',
+            {'pr': '1', 'dangerous': False, 'no_agent': True, 'project': None},
+        ),
+    )
+    compare(calls, expected=[('project', '1', [], False, Path.cwd(), False)])

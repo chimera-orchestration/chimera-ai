@@ -45,6 +45,7 @@ def review(
     extra: Sequence[str] = (),
     dangerous: bool = False,
     into: Path | None = None,
+    launch: bool = True,
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
 
@@ -54,10 +55,18 @@ def review(
     ``prompts/review.md`` if present, else the packaged default, both behind a no-publish
     guardrail. ``into`` optionally lands the human branch in place (see ``checkout_here``).
 
+    ``launch=False`` (CLI ``--no-agent``) stops after the checkout: branches, worktree and
+    upstream all stand, but no agent runs — kick one off later with ``ch agent start``. The
+    agent-only knobs (``dangerous``, ``extra``) are refused with it: nothing would read them.
+
     Idempotent: an existing ``<goal>@agent`` worktree is reused, so a re-run only relaunches.
     The goal's branches are logged before/after creation (see ``agent-docs/logging.md``).
     Returns the agent worktree.
     """
+    if not launch and (dangerous or extra):
+        raise UserError(
+            '--no-agent launches no agent, so --dangerous and "-- …" have nothing to apply to.'
+        )
     git = Git(repo)
     meta = _pr_metadata(repo, _pr_argument(git, pr, project))
     _check_pr_repo(git, meta['url'], project)
@@ -73,8 +82,9 @@ def review(
     ).info('review: refs')
     if into is not None:
         checkout_here(git, branch(goal, HUMAN), into, 'review')
-    prompt = _prompt(prompts_dir, meta, goal, project)
-    agent(agent_worktree, session_name(project, goal, AGENT), prompt, extra, dangerous)
+    if launch:
+        prompt = _prompt(prompts_dir, meta, goal, project)
+        agent(agent_worktree, session_name(project, goal, AGENT), prompt, extra, dangerous)
     return agent_worktree
 
 
