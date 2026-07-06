@@ -1,11 +1,12 @@
 from pathlib import Path
 
+from giterator import GitError
 from giterator.testing import Repo
-from testfixtures import LogCapture, ShouldRaise, TempDir, compare
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.__main__ import _sync_line
-from chimera.commands.goal.sync import Outcome, SyncResult, sync
+from chimera.commands.goal.sync import Outcome, SyncResult, _replay, sync
 from chimera.git import Git
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
@@ -358,6 +359,26 @@ def test_force_never_discards_a_lead(tmpdir: TempDir, git_repo: Repo) -> None:
     compare(_full(git_repo, 'g/human'), expected=lead)  # the lead survives
 
 
+def test_refuses_to_append_across_merges(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    agent_wt = worktrees / 'g@agent'
+    Repo(agent_wt).commit_content('a1')
+    _squash_human(git_repo, tmpdir)
+    Repo(git_repo.path).commit_content('mainline')  # main moves on…
+    Git(agent_wt)('merge', '-m', 'merge main', 'main')  # …and the agent pulls it in
+    with ShouldRaise(
+        UserError(
+            'the 2 commit(s) to append include 1 merge(s) — g/agent was rebased or merged '
+            'other work in, so an append would replay history that is not its own; sync by '
+            'hand, or --force to repoint g/human onto g/agent, discarding its own commits'
+        )
+    ):
+        sync(git_repo.path, 'g')
+    compare(
+        sync(git_repo.path, 'g', force=True).outcome, expected=Outcome.FORCED
+    )  # the way through
+
+
 def test_diverged_append_refuses_a_dirty_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('a1')
@@ -379,10 +400,58 @@ def test_bare_diverged_mover_needs_a_checkout(tmpdir: TempDir, git_repo: Repo) -
     checkout = _squash_human(git_repo, tmpdir)
     Git(git_repo.path)('worktree', 'remove', str(checkout))  # g/human now bare
     Repo(worktrees / 'g@agent').commit_content('a2')
-    with ShouldRaise(
-        UserError('check out g/human to append 1 commit(s) (git checkout g/human …), then re-run')
-    ):
+    refusal = UserError(
+        'check out g/human to append 1 commit(s) (git checkout g/human …), then re-run'
+    )
+    with ShouldRaise(refusal):
         sync(git_repo.path, 'g')
+    with ShouldRaise(refusal):  # a cwd outside any checkout can't host the append
+        sync(git_repo.path, 'g', into=tmpdir.path)
+    with ShouldRaise(refusal):  # an agent's worktree is never claimed for it
+        sync(git_repo.path, 'g', into=worktrees / 'g@agent')
+
+
+def test_append_claims_the_callers_checkout_for_a_bare_mover(
+    tmpdir: TempDir, git_repo: Repo
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    Git(git_repo.path)('worktree', 'remove', str(checkout))  # g/human now bare
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    result = sync(git_repo.path, 'g', into=git_repo.path)  # standing in the repo's own checkout
+    compare(
+        result,
+        expected=SyncResult(
+            Outcome.APPENDED,
+            'human',
+            'agent',
+            _short(git_repo, 'g/human'),
+            appended=1,
+            checkout=Checkout(True, git_repo.path.resolve(), 'g/human', was='main'),
+        ),
+    )
+    compare(Git(git_repo.path)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/human')
+    compare(_full(git_repo, 'g/human^{tree}'), expected=_full(git_repo, 'g/agent^{tree}'))
+
+
+def test_append_refuses_to_claim_a_dirty_callers_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    Git(git_repo.path)('worktree', 'remove', str(checkout))  # g/human now bare
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    (git_repo.path / 'scratch.txt').write_text('wip')
+    with ShouldRaise(
+        UserError(
+            f'{git_repo.path.resolve()} has uncommitted changes — commit or stash them so '
+            f'g/human can be checked out here for the append, then re-run'
+        )
+    ):
+        sync(git_repo.path, 'g', into=git_repo.path)
+    compare(  # left where it stood
+        Git(git_repo.path)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main'
+    )
 
 
 def test_conflict_leaves_the_cherry_pick_in_the_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -437,6 +506,116 @@ def test_aborted_append_is_reconciled_and_retried(tmpdir: TempDir, git_repo: Rep
     result = sync(git_repo.path, 'g')  # reconcile: mover unchanged → clear marker, retry the append
     compare(result.outcome, expected=Outcome.CONFLICT)  # same conflict, freshly attempted
     compare(_full(git_repo, _wm()), expected=watermark)  # still not advanced
+
+
+def _stray_merge(checkout: Path) -> str:
+    """A merge commit of the checkout's HEAD — cherry-picking it always dies (no -m is given)."""
+    git = Git(checkout)
+    head = git('rev-parse', 'HEAD').strip()
+    tree = git('rev-parse', f'{head}^{{tree}}').strip()
+    parent = git('rev-parse', f'{head}^').strip()
+    return git('commit-tree', tree, '-p', head, '-p', parent, '-m', 'stray').strip()
+
+
+def _sequencer(checkout: Path) -> Path:
+    return Path(
+        Git(checkout)('rev-parse', '--path-format=absolute', '--git-path', 'sequencer').strip()
+    )
+
+
+def test_stranded_cherry_pick_blocks_an_append(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    a2 = Repo(worktrees / 'g@agent').commit_content('a2', short=False)
+    with ShouldRaise(GitError, match='is a merge'):  # a stray replay strands mid-sequence:
+        Git(checkout)('cherry-pick', a2, _stray_merge(checkout))  # clean tree, live sequencer
+    with ShouldRaise(
+        UserError(
+            f'a cherry-pick is already in progress at {checkout.resolve()} — finish or abort it '
+            f'(git cherry-pick --abort), then re-run'
+        )
+    ):
+        sync(git_repo.path, 'g')
+
+
+def test_force_cleans_up_a_stranded_append(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    agent_wt = worktrees / 'g@agent'
+    Repo(agent_wt).commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    Repo(git_repo.path).commit_content('mainline')  # main moves on…
+    Git(agent_wt)('merge', '-m', 'merge main', 'main')  # …the agent pulls it in…
+    with ShouldRaise(GitError, match='is a merge'):  # …and a hand replay strands at the merge
+        Git(checkout)('cherry-pick', f'{_full(git_repo, _wm())}..g/agent')
+    result = sync(git_repo.path, 'g', force=True)
+    compare(
+        result,
+        expected=SyncResult(
+            Outcome.FORCED, 'human', 'agent', _short(git_repo, 'g/agent'), discarded=2
+        ),
+    )
+    tip = _full(git_repo, 'g/agent')
+    compare(_full(git_repo, 'g/human'), expected=tip)
+    compare(Git(checkout)('rev-parse', 'HEAD').strip(), expected=tip)
+    compare(Git(checkout)('status', '--porcelain').strip(), expected='')  # no mess left behind
+    compare(_sequencer(checkout).exists(), expected=False)  # the stray sequence is gone
+    compare(sync(git_repo.path, 'g').outcome, expected=Outcome.NOOP)  # sync is healthy again
+
+
+def test_force_cleans_up_a_conflicted_append(tmpdir: TempDir, git_repo: Repo) -> None:
+    checkout = _case_b(tmpdir, git_repo)
+    sync(git_repo.path, 'g')  # leaves the conflict, marker written
+    result = sync(git_repo.path, 'g', force=True)
+    compare(
+        result,
+        expected=SyncResult(
+            Outcome.FORCED, 'human', 'agent', _short(git_repo, 'g/agent'), discarded=2
+        ),
+    )
+    compare(_full(git_repo, 'g/human'), expected=_full(git_repo, 'g/agent'))
+    compare(Git(checkout)('status', '--porcelain').strip(), expected='')  # conflict backed out
+    compare(sync(git_repo.path, 'g').outcome, expected=Outcome.NOOP)  # marker cleared with it
+
+
+def test_replay_death_without_a_conflict_rolls_back(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    a2 = Repo(worktrees / 'g@agent').commit_content('a2', short=False)
+    human, watermark = _full(git_repo, 'g/human'), _full(git_repo, _wm())
+
+    def die_mid_replay(checkout: Path, point: str, target_branch: str) -> None:
+        Git(checkout)('cherry-pick', a2, _stray_merge(checkout))  # one applied, dead at the merge
+
+    replace.in_module(_replay, die_mid_replay)
+    with ShouldRaise(UserError, match='append onto g/human failed and was rolled back'):
+        sync(git_repo.path, 'g')
+    compare(_full(git_repo, 'g/human'), expected=human)  # the half-applied replay was backed out
+    compare(Git(checkout)('status', '--porcelain').strip(), expected='')
+    compare(_sequencer(checkout).exists(), expected=False)
+    compare(_full(git_repo, _wm()), expected=watermark)  # nothing recorded as integrated
+
+
+def test_replay_failure_leaving_no_state_reports(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    human = _full(git_repo, 'g/human')
+
+    def die_at_once(checkout: Path, point: str, target_branch: str) -> None:
+        raise GitError('fatal: could not even start')
+
+    replace.in_module(_replay, die_at_once)
+    with ShouldRaise(UserError, match='could not even start'):
+        sync(git_repo.path, 'g')
+    compare(_full(git_repo, 'g/human'), expected=human)  # untouched — nothing to roll back
+    compare(Git(checkout)('status', '--porcelain').strip(), expected='')
 
 
 def test_refuses_when_the_target_is_missing(tmpdir: TempDir, git_repo: Repo) -> None:
