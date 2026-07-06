@@ -400,10 +400,58 @@ def test_bare_diverged_mover_needs_a_checkout(tmpdir: TempDir, git_repo: Repo) -
     checkout = _squash_human(git_repo, tmpdir)
     Git(git_repo.path)('worktree', 'remove', str(checkout))  # g/human now bare
     Repo(worktrees / 'g@agent').commit_content('a2')
-    with ShouldRaise(
-        UserError('check out g/human to append 1 commit(s) (git checkout g/human …), then re-run')
-    ):
+    refusal = UserError(
+        'check out g/human to append 1 commit(s) (git checkout g/human …), then re-run'
+    )
+    with ShouldRaise(refusal):
         sync(git_repo.path, 'g')
+    with ShouldRaise(refusal):  # a cwd outside any checkout can't host the append
+        sync(git_repo.path, 'g', into=tmpdir.path)
+    with ShouldRaise(refusal):  # an agent's worktree is never claimed for it
+        sync(git_repo.path, 'g', into=worktrees / 'g@agent')
+
+
+def test_append_claims_the_callers_checkout_for_a_bare_mover(
+    tmpdir: TempDir, git_repo: Repo
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    Git(git_repo.path)('worktree', 'remove', str(checkout))  # g/human now bare
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    result = sync(git_repo.path, 'g', into=git_repo.path)  # standing in the repo's own checkout
+    compare(
+        result,
+        expected=SyncResult(
+            Outcome.APPENDED,
+            'human',
+            'agent',
+            _short(git_repo, 'g/human'),
+            appended=1,
+            checkout=Checkout(True, git_repo.path.resolve(), 'g/human', was='main'),
+        ),
+    )
+    compare(Git(git_repo.path)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/human')
+    compare(_full(git_repo, 'g/human^{tree}'), expected=_full(git_repo, 'g/agent^{tree}'))
+
+
+def test_append_refuses_to_claim_a_dirty_callers_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('a1')
+    checkout = _squash_human(git_repo, tmpdir)
+    Git(git_repo.path)('worktree', 'remove', str(checkout))  # g/human now bare
+    Repo(worktrees / 'g@agent').commit_content('a2')
+    (git_repo.path / 'scratch.txt').write_text('wip')
+    with ShouldRaise(
+        UserError(
+            f'{git_repo.path.resolve()} has uncommitted changes — commit or stash them so '
+            f'g/human can be checked out here for the append, then re-run'
+        )
+    ):
+        sync(git_repo.path, 'g', into=git_repo.path)
+    compare(  # left where it stood
+        Git(git_repo.path)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main'
+    )
 
 
 def test_conflict_leaves_the_cherry_pick_in_the_checkout(tmpdir: TempDir, git_repo: Repo) -> None:

@@ -93,14 +93,17 @@ def sync(
     repoint.
 
     Refuses (``UserError``) when the target is missing, ``mover``/``target`` are the same, the mover
-    isn't checked out (an append needs a work tree) or is dirty, a divergence has no integration
+    isn't checked out anywhere an append can run or is dirty, a divergence has no integration
     record (and no ``force``), the commits to append include merges, or a cherry-pick is already
     in progress in the mover's checkout — ours (resolve and re-run, or ``force`` to discard it)
     or anyone's. A replay that dies without leaving a conflict to resolve is backed out, never
     left half-applied. Ref moves ride a ``goal sync: refs`` log line (see
-    ``agent-docs/logging.md``). ``into`` (the caller's cwd) opts in to landing ``mover`` *in place*
-    once it's settled (see :func:`chimera.worktrees.checkout_here`); the result carries what
-    happened via ``SyncResult.checkout``. A conflict is never also landed elsewhere.
+    ``agent-docs/logging.md``). ``into`` (the caller's cwd) opts in to landing ``mover`` *in
+    place* (see :func:`chimera.worktrees.checkout_here`): once it's settled — and, when an append
+    finds the mover checked out nowhere, *before* the replay, so the append runs right there
+    instead of refusing. The result carries what happened via ``SyncResult.checkout``. A conflict
+    is never landed anywhere new after the fact — though an append that pre-landed in ``into``
+    leaves you there, mid-conflict, to resolve.
     """
     if mover == target:
         raise UserError(f'nothing to sync — --move and --to are both {mover!r}')
@@ -110,14 +113,11 @@ def sync(
         raise UserError(f'no branch {target_branch} to sync from')
     watermark = _watermark_ref(goal, mover)
     with git.ref_log('goal sync: refs', mover_branch, watermark, goal=goal) as refs:
-        outcome, ahead_by, appended, discarded, conflict = _apply(
-            git, goal, mover, mover_branch, target_branch, watermark, refs, force
+        outcome, ahead_by, appended, discarded, conflict, landed = _apply(
+            git, goal, mover, mover_branch, target_branch, watermark, refs, force, into
         )
-    landed = (
-        checkout_here(git, mover_branch, into, 'goal sync')
-        if into is not None and outcome is not Outcome.CONFLICT
-        else None
-    )
+    if landed is None and into is not None and outcome is not Outcome.CONFLICT:
+        landed = checkout_here(git, mover_branch, into, 'goal sync')
     return SyncResult(
         outcome,
         mover,
@@ -140,9 +140,10 @@ def _apply(
     watermark: str,
     refs: RefLog,
     force: bool,
-) -> tuple[Outcome, int, int, int, Path | None]:
+    into: Path | None,
+) -> tuple[Outcome, int, int, int, Path | None, Checkout | None]:
     """Settle ``mover_branch`` against ``target_branch``:
-    ``(outcome, ahead_by, appended, discarded, conflict)``."""
+    ``(outcome, ahead_by, appended, discarded, conflict, landed)``."""
     _reconcile(git, goal, mover, mover_branch, watermark, force)
     tip = git.rev_parse(target_branch, short=False)
     if not git.ref_exists(mover_branch):
@@ -156,23 +157,23 @@ def _apply(
     if _is_ancestor(git, target_branch, mover_branch):  # mover leads — target fully contained
         ahead = int(git('rev-list', '--count', f'{target_branch}..{mover_branch}'))
         _record(git, watermark, tip, Outcome.AHEAD)
-        return Outcome.AHEAD, ahead, 0, 0, None
+        return Outcome.AHEAD, ahead, 0, 0, None, None
     if force:
         return _force(git, mover_branch, target_branch, watermark, refs)
-    return _append(git, goal, mover, mover_branch, target_branch, watermark)
+    return _append(git, goal, mover, mover_branch, target_branch, watermark, into)
 
 
 def _record(
     git: Git, watermark: str, tip: str, outcome: Outcome
-) -> tuple[Outcome, int, int, int, None]:
+) -> tuple[Outcome, int, int, int, None, None]:
     """Record ``tip`` as the integration watermark and report a non-append outcome."""
     git('update-ref', watermark, tip)
-    return outcome, 0, 0, 0, None
+    return outcome, 0, 0, 0, None, None
 
 
 def _force(
     git: Git, mover_branch: str, target_branch: str, watermark: str, refs: RefLog
-) -> tuple[Outcome, int, int, int, None]:
+) -> tuple[Outcome, int, int, int, None, None]:
     """Repoint a diverged mover onto the target, discarding the mover's own commits.
 
     The count rides the ``goal sync: refs`` line beside the before/after shas that make the
@@ -187,13 +188,24 @@ def _force(
     _repoint(git, mover_branch, target_branch)
     refs.bind(discarded=discarded)
     _record(git, watermark, git.rev_parse(target_branch, short=False), Outcome.FORCED)
-    return Outcome.FORCED, 0, 0, discarded, None
+    return Outcome.FORCED, 0, 0, discarded, None, None
 
 
 def _append(
-    git: Git, goal: str, mover: str, mover_branch: str, target_branch: str, watermark: str
-) -> tuple[Outcome, int, int, int, Path | None]:
-    """Replay the target commits made since the watermark onto a diverged mover branch."""
+    git: Git,
+    goal: str,
+    mover: str,
+    mover_branch: str,
+    target_branch: str,
+    watermark: str,
+    into: Path | None,
+) -> tuple[Outcome, int, int, int, Path | None, Checkout | None]:
+    """Replay the target commits made since the watermark onto a diverged mover branch.
+
+    The replay needs the mover checked out; a mover checked out nowhere is materialised in
+    ``into`` first when that's safe (:func:`chimera.worktrees.checkout_here` — a clean plain
+    checkout of this repo), so a human standing in one never has to check it out by hand.
+    """
     seeded = git.ref_shas(watermark).get(watermark)
     point = seeded or _tree_match_point(git, mover_branch, target_branch)
     if point is None:
@@ -217,7 +229,16 @@ def _append(
             f'replay history that is not its own; sync by hand, or --force to repoint '
             f'{mover_branch} onto {target_branch}, discarding its own commits'
         )
-    checkout = checkout_of(git, mover_branch)
+    checkout, landed = checkout_of(git, mover_branch), None
+    if checkout is None and into is not None:
+        landed = checkout_here(git, mover_branch, into, 'goal sync')
+        if landed is not None:
+            if not landed.done:
+                raise UserError(
+                    f'{landed.where} has uncommitted changes — commit or stash them so '
+                    f'{mover_branch} can be checked out here for the append, then re-run'
+                )
+            checkout = landed.where
     if checkout is None:
         raise UserError(
             f'check out {mover_branch} to append {len(new)} commit(s) '
@@ -239,14 +260,14 @@ def _append(
     except GitError as error:
         if _conflicted(checkout):  # stopped on a pick for the human: resolve/skip and --continue
             _write_marker(_marker(git, goal, mover), before, tip)
-            return Outcome.CONFLICT, 0, 0, 0, checkout
+            return Outcome.CONFLICT, 0, 0, 0, checkout, landed
         # died some other way mid-replay — back it out rather than strand the mover half-appended
         # (any sequence state is this run's own: the guard above proved none existed before)
         if _cherry_pick_in_progress(checkout):
             Git(checkout)('cherry-pick', '--abort')
         raise UserError(f'append onto {mover_branch} failed and was rolled back:\n{error}')
     git('update-ref', watermark, tip)
-    return Outcome.APPENDED, 0, len(new), 0, None
+    return Outcome.APPENDED, 0, len(new), 0, None, landed
 
 
 def _replay(checkout: Path, point: str, target_branch: str) -> None:
