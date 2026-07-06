@@ -509,9 +509,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
             },
         ),
     )
-    compare(
-        calls, expected=[('project', '1', [], False, Path.cwd(), False, AgentSpec(), None)]
-    )
+    compare(calls, expected=[('project', '1', [], False, Path.cwd(), False, AgentSpec(), None)])
 
 
 def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command):

@@ -8,7 +8,8 @@ from typer import Typer
 
 from chimera import __main__ as chimera_main
 from chimera.__main__ import app
-from chimera.commands.agent import agent, agents, live_sessions
+from chimera.agents.claude import live_sessions
+from chimera.commands.agent import agent, agents
 from chimera.commands.goal import start as goal_start
 from chimera.commands.worktree import rm as worktree_rm
 from tests.cli import Command, action_logs
