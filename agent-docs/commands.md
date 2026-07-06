@@ -110,6 +110,15 @@ code path and can't drift from it. `--dry` previews *under whatever other flags 
 it still reports a refusal on unsafe state and `--dry --force` previews a forced teardown.
 Report with `dry.verb('Removed', 'Would remove')`. Read-only commands never take `--dry`.
 
+**Launching commands preview with `--dry` too** (`agent start`/`resume`, `goal start`/`adopt`,
+`review`, `chat`): everything resolves for real — scope, spec cascade, rendered context (the
+file is written and logged; it's the same content-addressed artifact a real launch would use) —
+but every mutation (worktree/branch setup, the harness launch) routes through the same `Dry`,
+so nothing is created and nothing runs. The report names the target, then what would be
+injected: harness/model, prompt, passthrough, and the full context text. Guards *outside* the
+launch (e.g. chat's already-live-by-name refusal) still fire under `--dry`; the harness's own
+in-launch liveness check does not.
+
 ## Testing
 
 - Put logic depth in pure-function tests — assert on return values / raised exceptions.

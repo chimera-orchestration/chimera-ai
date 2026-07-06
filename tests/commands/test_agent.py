@@ -196,6 +196,7 @@ def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -222,6 +223,7 @@ def test_agent_start_cli_dangerous_makes_bypass_reachable(
                 'dangerous': True,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -246,6 +248,7 @@ def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -271,6 +274,7 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command:
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -298,6 +302,7 @@ def test_agent_start_cli_forwards_flags_after_dashdash(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -324,6 +329,7 @@ def test_agent_start_cli_with_prompt_and_passthrough(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -348,6 +354,7 @@ def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) 
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -374,6 +381,7 @@ def test_agent_resume_cli_with_passthrough(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -594,6 +602,7 @@ def test_agent_start_cli_with_model_flag(
                 'dangerous': False,
                 'harness': None,
                 'model': 'opus',
+                'dry': False,
             },
         ),
     )
@@ -624,6 +633,7 @@ def test_agent_start_cli_model_from_project_config(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -656,6 +666,7 @@ def test_agent_start_cli_model_from_workspace_config(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )
@@ -682,6 +693,7 @@ def test_agent_start_cli_unknown_harness_errors(
                 'dangerous': False,
                 'harness': 'codex',
                 'model': None,
+                'dry': False,
             },
             error="UnknownHarnessError: no harness 'codex' (available: claude)",
         ),
@@ -735,6 +747,7 @@ def test_agent_start_cli_injects_rendered_context(
                     'dangerous': False,
                     'harness': None,
                     'model': None,
+                    'dry': False,
                 },
             },
             {
@@ -750,3 +763,95 @@ def test_agent_start_cli_injects_rendered_context(
     compare(context.read_text(), expected=text)
     claude_cmd = ['claude', '--name', 'proj@g@agent', '--append-system-prompt-file', str(context)]
     compare(calls, expected=[(claude_cmd, expected_wt, True)])
+
+
+def test_agent_start_cli_dry_previews_without_launching(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    tmpdir.write(ws / 'principles' / 'verify.md', 'Verify before done.\n')
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(project)
+    calls = _stub(replace)
+    expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
+    text_ = '# Principles\n\nVerify before done.'
+    digest = sha256(text_.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    command.run('agent', 'start', 'do it', '-g', 'g', '-m', 'opus', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would launch agent in {expected_wt}',
+                'harness: claude  model: opus',
+                'prompt: do it',
+                f'context: {context}',
+                '---',
+                text_,
+            ]
+        ),
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'agent start',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.agent',
+                'params': {
+                    'prompt': 'do it',
+                    'goal': 'g',
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': 'opus',
+                    'dry': True,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@g@agent',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+        ],
+    )
+    compare(calls, expected=[])  # nothing launched
+
+
+def test_agent_resume_cli_dry_without_context(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    calls = _stub(replace)
+    expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
+    # no workspace, no sources: the preview shows an interactive launch with no context
+    command.run('agent', 'resume', '-g', 'g', '--dry', '--', '--verbose').check(
+        output='\n'.join(
+            [
+                f'Would resume agent in {expected_wt}',
+                'harness: claude',
+                'prompt: (interactive)',
+                'passthrough: --verbose',
+                'context: (none)',
+            ]
+        ),
+        logging=action_logs(
+            'agent resume',
+            'chimera.commands.agent.resume',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': True,
+            },
+        ),
+    )
+    compare(calls, expected=[])  # nothing launched

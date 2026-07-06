@@ -46,6 +46,7 @@ def test_new_dispatches_to_start(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'offline': False,
             },
         ),

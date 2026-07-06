@@ -14,6 +14,7 @@ from testfixtures.mock import Mock
 import chimera.__main__ as main
 from chimera.commands import review as review_mod
 from chimera.agents.registry import AgentSpec
+from chimera.dry import Dry
 from chimera.commands.agent import agent
 from chimera.commands.review import (
     GUARDRAIL,
@@ -70,6 +71,7 @@ def _stub_agent(replace: Replacer) -> list[object]:
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
+        dry: Dry = Dry(),
     ) -> None:
         calls.append((worktree, name, prompt, extra, dangerous, spec, context))
 
@@ -260,7 +262,7 @@ def test_pr_metadata_raises_on_gh_failure(tmpdir: TempDir, replace: Replacer) ->
 def test_wire_upstream_verifies_against_head_oid(tmpdir: TempDir) -> None:
     repo, head = _cloned(tmpdir)
     git = Git(repo)
-    compare(_wire_upstream(git, 1, head), expected='origin/pr/1')
+    compare(_wire_upstream(git, 1, head, 'origin/pr/1'), expected='origin/pr/1')
     compare(git.rev_parse('origin/pr/1', short=False), expected=head)
 
 
@@ -269,7 +271,7 @@ def test_wire_upstream_adds_a_refspec_when_none_configured(tmpdir: TempDir) -> N
     git = Git(Repo.make(tmpdir / 'r').path)
     git('remote', 'add', 'origin', str(origin.path))
     git('config', '--unset-all', 'remote.origin.fetch')  # no fetch refspec at all
-    compare(_wire_upstream(git, 1, head), expected='origin/pr/1')
+    compare(_wire_upstream(git, 1, head, 'origin/pr/1'), expected='origin/pr/1')
     compare(git.rev_parse('origin/pr/1', short=False), expected=head)
 
 
@@ -278,7 +280,7 @@ def test_wire_upstream_leaves_config_clean_when_the_pr_ref_is_missing(tmpdir: Te
     git = Git(repo)
     before = git('config', '--get-all', 'remote.origin.fetch')
     with ShouldRaise(GitError, match='refs/pull/9/head'):
-        _wire_upstream(git, 9, head)  # origin has no PR #9
+        _wire_upstream(git, 9, head, 'origin/pr/9')  # origin has no PR #9
     # the failed fetch must not have persisted a dead refspec that bricks future fetches
     compare(git('config', '--get-all', 'remote.origin.fetch'), expected=before)
     git('fetch', '--prune', 'origin')  # proves origin is still fetchable
@@ -416,13 +418,31 @@ def test_wire_upstream_refuses_a_mismatched_head(tmpdir: TempDir) -> None:
     with ShouldRaise(
         UserError(f'PR #1: fetched origin/pr/1 is {head}, but gh reports headRefOid {wrong}')
     ):
-        _wire_upstream(Git(repo), 1, wrong)
+        _wire_upstream(Git(repo), 1, wrong, 'origin/pr/1')
 
 
 def _project_dir(tmpdir: TempDir, repo: Repo) -> Path:
     tmpdir.dump('project/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
     os.chdir(tmpdir / 'project')  # the CLI infers the project (and its name) from cwd
     return tmpdir / 'project'
+
+
+def test_review_dry_wires_nothing(tmpdir: TempDir, replace: Replacer) -> None:
+    clone, head = _cloned(tmpdir)
+    _stub_meta(replace, _meta(head))
+    _stub_agent(replace)
+    worktrees = tmpdir / 'wt'
+    compare(
+        review(clone, worktrees, 'proj', tmpdir / 'prompts', '1', dry=Dry(True)),
+        expected=worktrees / 'pr-1@agent',
+    )
+    git = Git(clone)
+    compare(worktrees.exists(), expected=False)  # no worktree dir
+    compare(git.ref_exists('origin/pr/1'), expected=False)  # tracking ref never fetched
+    compare(  # and no PR refspec persisted alongside the clone's default one
+        git('config', '--get-all', 'remote.origin.fetch').splitlines(),
+        expected=['+refs/heads/*:refs/remotes/origin/*'],
+    )
 
 
 def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command) -> None:
@@ -441,6 +461,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         launch: bool = True,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
+        dry: Dry = Dry(),
     ) -> Path:
         calls.append((project, pr, list(extra), dangerous, into, launch, spec, context))
         return worktrees / 'pr-1@agent'
@@ -458,6 +479,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
                 'no_agent': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'project': None,
             },
         ),
@@ -482,6 +504,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
                 'no_agent': True,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'project': None,
             },
         ),
@@ -489,3 +512,93 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
     compare(
         calls, expected=[('project', '1', [], False, Path.cwd(), False, AgentSpec(), None)]
     )
+
+
+def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command):
+    project = _project_dir(tmpdir, git_repo)
+    calls: list[object] = []
+
+    def record(
+        repo: Path,
+        worktrees: Path,
+        project_name: str,
+        prompts: Path,
+        pr: str,
+        extra: Sequence[str] = (),
+        dangerous: bool = False,
+        into: Path | None = None,
+        launch: bool = True,
+        spec: AgentSpec = AgentSpec(),
+        context: Path | None = None,
+        dry: Dry = Dry(),
+    ) -> Path:
+        calls.append(dry)
+        return worktrees / 'pr-1@agent'
+
+    replace(target=review, container=main, name='_review', replacement=record)
+    return project, calls
+
+
+def test_review_cli_dry_with_packaged_template(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    project, calls = _dry_review_cli(tmpdir, git_repo, replace, command)
+    expected = Path.cwd() / 'worktrees' / 'pr-1@agent'
+    command.run('review', '1', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would review 1 in {expected}',
+                'harness: claude',
+                'prompt: review template (packaged default) + guardrail',
+                'context: (none)',
+            ]
+        ),
+        logging=action_logs(
+            'review',
+            'chimera.commands.review.review',
+            {
+                'pr': '1',
+                'dangerous': False,
+                'no_agent': False,
+                'harness': None,
+                'model': None,
+                'dry': True,
+                'project': None,
+            },
+        ),
+    )
+    compare(calls, expected=[Dry(True)])
+
+
+def test_review_cli_dry_names_the_project_template(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    project, calls = _dry_review_cli(tmpdir, git_repo, replace, command)
+    override = project / 'prompts' / 'review.md'
+    override.parent.mkdir(parents=True)
+    override.write_text('Review $PR carefully.\n')
+    expected = Path.cwd() / 'worktrees' / 'pr-1@agent'
+    command.run('review', '1', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would review 1 in {expected}',
+                'harness: claude',
+                f'prompt: review template ({Path.cwd() / "prompts" / "review.md"}) + guardrail',
+                'context: (none)',
+            ]
+        ),
+        logging=action_logs(
+            'review',
+            'chimera.commands.review.review',
+            {
+                'pr': '1',
+                'dangerous': False,
+                'no_agent': False,
+                'harness': None,
+                'model': None,
+                'dry': True,
+                'project': None,
+            },
+        ),
+    )
+    compare(calls, expected=[Dry(True)])

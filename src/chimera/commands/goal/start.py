@@ -4,6 +4,7 @@ from pathlib import Path
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.commands.worktree.add import add
+from chimera.dry import Dry
 from chimera.worktrees import AGENT, worktree_path
 
 
@@ -19,6 +20,7 @@ def start(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
+    dry: Dry = Dry(),
 ) -> Path:
     """Create the goal's worktrees and branches, then launch its agent.
 
@@ -29,7 +31,7 @@ def start(
     makes bypass-permissions mode reachable. ``spec`` picks the harness and model;
     ``context`` is the rendered launch-context file to inject. Returns the agent worktree.
     """
-    add(repo, worktrees_root, goal=goal, frm=frm, fetch=fetch)
+    dry(add, repo, worktrees_root, goal=goal, frm=frm, fetch=fetch)
     agent_worktree = worktree_path(worktrees_root, goal, AGENT)
-    agent(agent_worktree, name, prompt, extra, dangerous, spec, context)
+    agent(agent_worktree, name, prompt, extra, dangerous, spec, context, dry)
     return agent_worktree

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
+from chimera.dry import Dry
 from chimera.git import Git
 from chimera.worktrees import AGENT, HUMAN, branch, registered_worktrees, worktree_path
 
@@ -17,6 +18,7 @@ def adopt(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
+    dry: Dry = Dry(),
 ) -> Path:
     """Adopt an existing branch ``<goal>`` as a goal, then launch its agent.
 
@@ -34,13 +36,14 @@ def adopt(
     # the snapshot covers the branch being adopted (``<goal>``) and both actor branches, so the
     # same refs describe the state before adoption (the bare branch) and after (the pair);
     # ``always`` because the line lands the worktree too — the recovery record even on a re-run
+    agent_worktree = worktree_path(worktrees_root, goal, AGENT)
     with git.ref_log(
         'goal adopt: refs', goal, branch(goal, HUMAN), branch(goal, AGENT), always=True, goal=goal
     ) as refs:
-        restructure(git, goal)
-        agent_worktree = ensure_worktree(git, worktrees_root, goal)
+        dry(restructure, git, goal)
+        dry(ensure_worktree, git, worktrees_root, goal)
         refs.bind(worktree=str(agent_worktree))
-    agent(agent_worktree, name, prompt, extra, dangerous, spec, context)
+    agent(agent_worktree, name, prompt, extra, dangerous, spec, context, dry)
     return agent_worktree
 
 

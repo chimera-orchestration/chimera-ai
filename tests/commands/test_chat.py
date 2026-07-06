@@ -133,6 +133,7 @@ def test_chat_cli_launches_the_captain(
                     'dangerous': False,
                     'harness': None,
                     'model': None,
+                    'dry': False,
                     'project': None,
                     'goal': None,
                 },
@@ -178,6 +179,7 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'project': None,
                 'goal': None,
             },
@@ -208,6 +210,7 @@ def test_chat_cli_goal_scope_from_worktree(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'project': None,
                 'goal': None,
             },
@@ -239,6 +242,7 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
                     'dangerous': False,
                     'harness': None,
                     'model': None,
+                    'dry': False,
                     'project': None,
                     'goal': None,
                 },
@@ -255,3 +259,52 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
     )
     claude_cmd = ['claude', '--resume', 'pegasus', '--append-system-prompt-file', str(context)]
     compare(calls, expected=[(claude_cmd, ws, True)])
+
+
+def test_chat_cli_dry_previews_without_launching(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
+    calls = _stub(replace)
+    text = '# Role: captain\n\nYou are pegasus, the captain of the lycia workspace.'
+    digest = sha256(text.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
+    command.run('chat', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would launch chat pegasus in {ws}',
+                'harness: claude',
+                'prompt: (interactive)',
+                f'context: {context}',
+                '---',
+                text,
+            ]
+        ),
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'chat',
+                'phase': 'start',
+                'function': 'chimera.commands.chat.chat',
+                'params': {
+                    'prompt': None,
+                    'resume': False,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': True,
+                    'project': None,
+                    'goal': None,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'pegasus',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
+        ],
+    )
+    compare(calls, expected=[])  # nothing launched

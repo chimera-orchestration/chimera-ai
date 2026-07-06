@@ -165,6 +165,12 @@ ModelOpt = Annotated[
         help="Model for the session (default: config cascade, then the harness's own)",
     ),
 ]
+LaunchDryOpt = Annotated[
+    bool,
+    typer.Option(
+        '--dry', help='Preview the launch — harness, prompt, injected context — changing nothing'
+    ),
+]
 
 
 @dataclass
@@ -349,6 +355,21 @@ def _context_file(project: Project | None, name: str) -> Path | None:
     except NotInWorkspaceError:
         return None
     return materialize(workspace, name, render(workspace, project))
+
+
+def _dry_preview(
+    spec: AgentSpec, prompt: str | None, extra: list[str], context: Path | None
+) -> None:
+    """What a --dry launch would inject: agent, prompt, passthrough and rendered context."""
+    typer.echo(f'harness: {spec.harness}' + (f'  model: {spec.model}' if spec.model else ''))
+    typer.echo(f'prompt: {prompt}' if prompt is not None else 'prompt: (interactive)')
+    if extra:
+        typer.echo(f'passthrough: {" ".join(extra)}')
+    if context is None:
+        typer.echo('context: (none)')
+    else:
+        typer.echo(f'context: {context}\n---')
+        typer.echo(context.read_text().rstrip())
 
 
 def _scope(
@@ -536,9 +557,13 @@ def review(
     ] = False,
     harness: HarnessOpt = None,
     model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context = _context_file(p, session_name(p.name, f'pr-{pr}', AGENT))
     worktree = _review(
         p.repo,
         p.worktrees,
@@ -549,18 +574,25 @@ def review(
         dangerous,
         Path.cwd(),
         launch=not no_agent,
-        spec=_spec(p, harness, model),
-        context=_context_file(p, session_name(p.name, f'pr-{pr}', AGENT)),
+        spec=spec,
+        context=context,
+        dry=dry_run,
     )
     if no_agent:
         goal = worktree.name.split(SEP, 1)[0]
-        typer.echo(f'Prepared review of {pr} in {worktree}')
+        typer.echo(f'{dry_run.verb("Prepared", "Would prepare")} review of {pr} in {worktree}')
         typer.echo(
             f'ch agent start -g {goal} launches an agent there; '
             f'ch review {goal.removeprefix("pr-")} runs the standard review'
         )
     else:
-        typer.echo(f'Reviewing {pr} in {worktree}')
+        typer.echo(f'{dry_run.verb("Reviewing", "Would review")} {pr} in {worktree}')
+        if dry:
+            override = p.prompts / 'review.md'
+            template = str(override) if override.exists() else 'packaged default'
+            _dry_preview(
+                spec, f'review template ({template}) + guardrail', _passthrough(ctx), context
+            )
 
 
 @app.command(
@@ -578,6 +610,7 @@ def chat(
     dangerous: DangerousOpt = False,
     harness: HarnessOpt = None,
     model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
     goal: GoalOpt = None,
 ) -> None:
@@ -591,6 +624,8 @@ def chat(
     else:
         spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
         text = render(scope.workspace, scope.project)
+    dry_run = Dry(dry)
+    context = materialize(scope.workspace, name, text)
     _chat(
         cwd,
         name,
@@ -598,10 +633,16 @@ def chat(
         _passthrough(ctx),
         dangerous,
         spec,
-        materialize(scope.workspace, name, text),
+        context,
         resume,
+        dry_run,
     )
-    typer.echo(f'{"Resumed" if resume else "Launched"} chat {name} in {cwd}')
+    verb = dry_run.verb(
+        'Resumed' if resume else 'Launched', 'Would resume' if resume else 'Would launch'
+    )
+    typer.echo(f'{verb} chat {name} in {cwd}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context)
 
 
 project_app = typer.Typer(
@@ -791,9 +832,13 @@ def goal_start(
     dangerous: DangerousOpt = False,
     harness: HarnessOpt = None,
     model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context = _context_file(p, session_name(p.name, goal, AGENT))
     worktree = _goal_start(
         p.repo,
         p.worktrees,
@@ -804,10 +849,13 @@ def goal_start(
         _passthrough(ctx),
         fetch=not offline,
         dangerous=dangerous,
-        spec=_spec(p, harness, model),
-        context=_context_file(p, session_name(p.name, goal, AGENT)),
+        spec=spec,
+        context=context,
+        dry=dry_run,
     )
-    typer.echo(f'Started {goal} in {worktree}')
+    typer.echo(f'{dry_run.verb("Started", "Would start")} {goal} in {worktree}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context)
 
 
 @goal_app.command(
@@ -823,9 +871,13 @@ def goal_adopt(
     dangerous: DangerousOpt = False,
     harness: HarnessOpt = None,
     model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context = _context_file(p, session_name(p.name, goal, AGENT))
     worktree = _goal_adopt(
         p.repo,
         p.worktrees,
@@ -834,10 +886,13 @@ def goal_adopt(
         prompt,
         _passthrough(ctx),
         dangerous,
-        _spec(p, harness, model),
-        _context_file(p, session_name(p.name, goal, AGENT)),
+        spec,
+        context,
+        dry_run,
     )
-    typer.echo(f'Adopted {goal} in {worktree}')
+    typer.echo(f'{dry_run.verb("Adopted", "Would adopt")} {goal} in {worktree}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context)
 
 
 @goal_app.command(
@@ -969,6 +1024,7 @@ def agent_start(
     dangerous: DangerousOpt = False,
     harness: HarnessOpt = None,
     model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
@@ -977,9 +1033,13 @@ def agent_start(
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
     name = session_name(p.name, g, actor)
+    dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, _context_file(p, name))
-    typer.echo(f'Launched agent in {worktree}')
+    context = _context_file(p, name)
+    _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, dry_run)
+    typer.echo(f'{dry_run.verb("Launched", "Would launch")} agent in {worktree}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context)
 
 
 @agent_app.command('resume', cls=PassthroughCommand, help="Reattach to an agent's session.")
@@ -992,6 +1052,7 @@ def agent_resume(
     dangerous: DangerousOpt = False,
     harness: HarnessOpt = None,
     model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
@@ -1000,9 +1061,13 @@ def agent_resume(
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
     name = session_name(p.name, g, actor)
+    dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, _context_file(p, name))
-    typer.echo(f'Resumed agent in {worktree}')
+    context = _context_file(p, name)
+    _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, dry_run)
+    typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context)
 
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')

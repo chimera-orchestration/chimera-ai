@@ -13,6 +13,7 @@ from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
+from chimera.dry import Dry
 from chimera.git import Git
 from chimera.worktrees import (
     ACTORS,
@@ -49,6 +50,7 @@ def review(
     launch: bool = True,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
+    dry: Dry = Dry(),
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
 
@@ -80,16 +82,18 @@ def review(
     _check_pr_repo(git, meta['url'], project)
     number, head_oid = int(str(meta['number'])), str(meta['headRefOid'])
     goal = f'pr-{number}'
-    tracking = _wire_upstream(git, number, head_oid)
+    tracking = f'origin/pr/{number}'
+    dry(_wire_upstream, git, number, head_oid, tracking)
     before = _goal_refs(git, goal)
-    agent_worktree = _ensure_goal(git, repo, worktrees_root, goal, head_oid, tracking)
+    agent_worktree = worktree_path(worktrees_root, goal, AGENT)
+    dry(_ensure_goal, git, repo, worktrees_root, goal, head_oid, tracking)
     logger.bind(
         goal=goal,
         git={'before': before, 'after': _goal_refs(git, goal)},
         worktree=str(agent_worktree),
     ).info('review: refs')
     if into is not None:
-        checkout_here(git, branch(goal, HUMAN), into, 'review')
+        dry(checkout_here, git, branch(goal, HUMAN), into, 'review')
     if launch:
         prompt = _prompt(prompts_dir, meta, goal, project)
         agent(
@@ -100,6 +104,7 @@ def review(
             dangerous,
             spec,
             context,
+            dry,
         )
     return agent_worktree
 
@@ -205,8 +210,8 @@ def _origin_slug(url: str) -> str:
     return ''  # a local-path origin has no remote identity to compare
 
 
-def _wire_upstream(git: Git, number: int, head_oid: str) -> str:
-    """Fetch ``refs/pull/<number>/head`` as ``origin/pr/<number>`` and verify it is ``head_oid``.
+def _wire_upstream(git: Git, number: int, head_oid: str, tracking: str) -> str:
+    """Fetch ``refs/pull/<number>/head`` as ``tracking`` and verify it is ``head_oid``.
 
     Fetches the PR head into the tracking ref *first* — a targeted fetch that touches no config —
     then persists the fetch refspec (once, idempotent) so the PR head stays a real remote-tracking
@@ -216,7 +221,6 @@ def _wire_upstream(git: Git, number: int, head_oid: str) -> str:
     ``headRefOid`` as the source of truth — a mismatch means a stale fetch and is refused. Returns
     the tracking ref name.
     """
-    tracking = f'origin/pr/{number}'
     spec = f'+refs/pull/{number}/head:refs/remotes/{tracking}'
     git('fetch', 'origin', spec)  # validate + create the ref without mutating config on failure
     try:
@@ -234,14 +238,12 @@ def _wire_upstream(git: Git, number: int, head_oid: str) -> str:
 
 def _ensure_goal(
     git: Git, repo: Path, worktrees_root: Path, goal: str, head_oid: str, tracking: str
-) -> Path:
+) -> None:
     """Create ``<goal>/{human,agent}`` at ``head_oid`` tracking ``tracking``; reuse if present."""
-    agent_worktree = worktree_path(worktrees_root, goal, AGENT)
-    if agent_worktree.resolve() not in registered_worktrees(git):
+    if worktree_path(worktrees_root, goal, AGENT).resolve() not in registered_worktrees(git):
         add(repo, worktrees_root, goal=goal, actors=ACTORS, frm=head_oid, fetch=False)
         for actor in ACTORS:
             git('branch', f'--set-upstream-to={tracking}', branch(goal, actor))
-    return agent_worktree
 
 
 def _goal_refs(git: Git, goal: str) -> dict[str, str]:

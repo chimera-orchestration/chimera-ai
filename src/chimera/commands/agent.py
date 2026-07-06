@@ -1,10 +1,10 @@
-import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 from chimera.agents import Session
 from chimera.agents.registry import AGENTS, AgentSpec
 from chimera.context import Scope
+from chimera.dry import Dry
 from chimera.worktrees import SEP
 
 
@@ -21,10 +21,18 @@ def agent(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
-) -> subprocess.CompletedProcess[bytes]:
+    dry: Dry = Dry(),
+) -> None:
     """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``)."""
-    return spec.agent.start(
-        worktree, name, prompt, extra, dangerous, model=spec.model, context=context
+    dry(
+        spec.agent.start,
+        worktree,
+        name,
+        prompt,
+        extra,
+        dangerous,
+        model=spec.model,
+        context=context,
     )
 
 
@@ -36,10 +44,18 @@ def resume(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
-) -> subprocess.CompletedProcess[bytes]:
+    dry: Dry = Dry(),
+) -> None:
     """Reattach to ``spec``'s agent session named ``name`` (see ``Agent.resume``)."""
-    return spec.agent.resume(
-        worktree, name, prompt, extra, dangerous, model=spec.model, context=context
+    dry(
+        spec.agent.resume,
+        worktree,
+        name,
+        prompt,
+        extra,
+        dangerous,
+        model=spec.model,
+        context=context,
     )
 
 

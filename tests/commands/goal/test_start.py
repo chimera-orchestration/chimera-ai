@@ -7,6 +7,7 @@ from giterator.testing import Repo
 from testfixtures import Replacer, TempDir, compare
 
 from chimera.agents.registry import AgentSpec
+from chimera.dry import Dry
 from chimera.commands.agent import agent
 from chimera.commands.goal import start as goal_start
 from chimera.commands.goal.start import start
@@ -31,11 +32,24 @@ def _stub_agent(replace: Replacer) -> list[object]:
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
+        dry: Dry = Dry(),
     ) -> None:
         calls.append((worktree, name, prompt, extra, dangerous, spec, context))
 
     replace.in_module(agent, record, module=goal_start)
     return calls
+
+
+def test_start_dry_creates_nothing(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    worktrees = tmpdir / 'worktrees'
+    calls = _stub_agent(replace)
+    compare(
+        start(git_repo.path, worktrees, 'g', 'proj@g@agent', dry=Dry(True)),
+        expected=worktrees / 'g@agent',
+    )
+    compare(worktrees.exists(), expected=False)  # no worktree dir
+    compare(Git(git_repo.path).branches(), expected=['main'])  # no branches
+    compare(len(calls), expected=1)  # the launch call still flows (itself dry-routed)
 
 
 def test_start_creates_worktrees_then_launches_the_agent(
@@ -95,6 +109,7 @@ def test_goal_start_cli(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'offline': False,
             },
         ),
@@ -124,6 +139,7 @@ def test_goal_start_cli_with_prompt(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'offline': False,
             },
         ),
@@ -155,6 +171,7 @@ def test_goal_start_cli_dangerous(
                 'dangerous': True,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'offline': False,
             },
         ),
@@ -183,6 +200,7 @@ def test_goal_start_cli_offline(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'offline': True,
             },
         ),
@@ -211,6 +229,7 @@ def test_goal_start_cli_passes_extra_flags_through(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
                 'offline': False,
             },
         ),
@@ -229,3 +248,35 @@ def test_goal_start_cli_passes_extra_flags_through(
             )
         ],
     )
+
+
+def test_goal_start_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    project = _project(tmpdir, git_repo)
+    worktree = Path.cwd() / 'worktrees' / 'g@agent'  # cwd resolves symlinks like the wrapper
+    command.run('goal', 'start', 'g', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would start g in {worktree}',
+                'harness: claude',
+                'prompt: (interactive)',
+                'context: (none)',
+            ]
+        ),
+        logging=action_logs(
+            'goal start',
+            'chimera.commands.goal.start.start',
+            {
+                'goal': 'g',
+                'prompt': None,
+                'frm': None,
+                'offline': False,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': True,
+                'project': None,
+            },
+        ),
+    )
+    compare((project / 'worktrees').exists(), expected=False)  # nothing created
+    compare(Git(git_repo.path).branches(), expected=['main'])

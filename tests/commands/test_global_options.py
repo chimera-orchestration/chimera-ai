@@ -75,6 +75,7 @@ def test_goal_and_actor_before_the_command(
                 'dangerous': False,
                 'harness': None,
                 'model': None,
+                'dry': False,
             },
         ),
     )

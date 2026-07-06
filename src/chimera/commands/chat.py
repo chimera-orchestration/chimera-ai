@@ -1,10 +1,10 @@
-import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 from chimera.agents.registry import AgentSpec
 from chimera.config import UserError
 from chimera.context import Scope
+from chimera.dry import Dry
 from chimera.worktrees import AGENT, SEP, session_name, worktree_path
 
 CHAT = 'chat'
@@ -43,16 +43,26 @@ def chat(
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
     resume: bool = False,
-) -> subprocess.CompletedProcess[bytes]:
+    dry: Dry = Dry(),
+) -> None:
     """Launch (or with ``resume`` revive) the chat session ``name`` in ``cwd``.
 
     A chat deliberately sits alongside whatever agent is working there, so the
     harness's one-session-per-cwd guard is off; the guard here is by *name* — the
     scope's chat already being live means attach, not launch, whichever was asked.
+    The guard fires under ``dry`` too, so a preview still reports the refusal.
     """
     if any(session.name == name for session in spec.agent.sessions()):
         raise ChatAlreadyLiveError(name)
     launch = spec.agent.resume if resume else spec.agent.start
-    return launch(
-        cwd, name, prompt, extra, dangerous, model=spec.model, context=context, exclusive=False
+    dry(
+        launch,
+        cwd,
+        name,
+        prompt,
+        extra,
+        dangerous,
+        model=spec.model,
+        context=context,
+        exclusive=False,
     )

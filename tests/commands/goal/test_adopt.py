@@ -8,6 +8,7 @@ from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.agents.registry import AgentSpec
+from chimera.dry import Dry
 from chimera.commands.agent import agent
 from chimera.commands.goal import adopt as goal_adopt
 from chimera.commands.goal.adopt import adopt
@@ -32,6 +33,7 @@ def _stub_agent(replace: Replacer) -> list[object]:
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
+        dry: Dry = Dry(),
     ) -> None:
         calls.append((worktree, name, prompt, extra, dangerous, spec, context))
 
@@ -41,6 +43,20 @@ def _stub_agent(replace: Replacer) -> list[object]:
 
 def _rev(repo_path: Path, ref: str) -> str:
     return Git(repo_path).rev_parse(ref, short=False)
+
+
+def test_adopt_dry_restructures_nothing(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    git_repo('checkout', '-b', 'feature')
+    git_repo.commit_content('feature-work')
+    git_repo('checkout', 'main')
+    worktrees = tmpdir / 'worktrees'
+    _stub_agent(replace)
+    compare(
+        adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent', dry=Dry(True)),
+        expected=worktrees / 'feature@agent',
+    )
+    compare(worktrees.exists(), expected=False)  # no worktree dir
+    compare(Git(git_repo.path).branches(), expected=['feature', 'main'])  # branch untouched
 
 
 def test_adopt_restructures_the_branch_then_launches_the_agent(
@@ -214,6 +230,7 @@ def _adopt_logs(base: str, worktree: object, *, dangerous: bool = False) -> list
             'dangerous': dangerous,
             'harness': None,
             'model': None,
+            'dry': False,
         },
     )
     event = {
@@ -291,3 +308,49 @@ def test_goal_adopt_cli_dangerous(
     compare(
         calls, expected=[(expected, 'project@feature-x@agent', None, [], True, AgentSpec(), None)]
     )
+
+
+def test_goal_adopt_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    git_repo('checkout', '-b', 'feature')
+    tip = git_repo.commit_content('feature-work', short=False)
+    git_repo('checkout', 'main')
+    project = _project(tmpdir, git_repo)
+    worktree = Path.cwd() / 'worktrees' / 'feature@agent'  # cwd resolves symlinks like the wrapper
+    command.run('goal', 'adopt', 'feature', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would adopt feature in {worktree}',
+                'harness: claude',
+                'prompt: (interactive)',
+                'context: (none)',
+            ]
+        ),
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'goal adopt',
+                'phase': 'start',
+                'function': 'chimera.commands.goal.adopt.adopt',
+                'params': {
+                    'goal': 'feature',
+                    'prompt': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': True,
+                    'project': None,
+                },
+            },
+            {
+                'level': 'INFO',
+                'message': 'goal adopt: refs',
+                'goal': 'feature',
+                # nothing moved: the bare branch is the state on both sides
+                'git': {'before': {'feature': tip}, 'after': {'feature': tip}},
+                'worktree': str(worktree),
+            },
+            {'level': 'INFO', 'command': 'goal adopt', 'phase': 'end'},
+        ],
+    )
+    compare((project / 'worktrees').exists(), expected=False)  # nothing created
+    compare(Git(git_repo.path).branches(), expected=['feature', 'main'])
