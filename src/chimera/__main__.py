@@ -42,7 +42,7 @@ from chimera.context import (
 )
 from chimera.dry import Dry
 from chimera.help import command_index, render_json, render_text
-from chimera.worktrees import AGENT, HUMAN, session_name, worktree_path
+from chimera.worktrees import AGENT, HUMAN, SEP, session_name, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -437,8 +437,17 @@ def _render_board(b: Board) -> None:
 @logs(_review)
 def review(
     ctx: typer.Context,
-    pr: Annotated[str, typer.Argument(help='Pull request number or URL')],
+    pr: Annotated[
+        str,
+        typer.Argument(
+            help='PR number, or URL — github or any review tool naming owner/repo and number'
+        ),
+    ],
     dangerous: DangerousOpt = False,
+    no_agent: Annotated[
+        bool,
+        typer.Option('--no-agent', help='Branch, fetch and check out the PR, but launch no agent'),
+    ] = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
@@ -451,8 +460,17 @@ def review(
         _passthrough(ctx),
         dangerous,
         Path.cwd(),
+        launch=not no_agent,
     )
-    typer.echo(f'Reviewing {pr} in {worktree}')
+    if no_agent:
+        goal = worktree.name.split(SEP, 1)[0]
+        typer.echo(f'Prepared review of {pr} in {worktree}')
+        typer.echo(
+            f'ch agent start -g {goal} launches an agent there; '
+            f'ch review {goal.removeprefix("pr-")} runs the standard review'
+        )
+    else:
+        typer.echo(f'Reviewing {pr} in {worktree}')
 
 
 project_app = typer.Typer(cls=alias_group({'list': 'ls'}), help='Manage projects.')

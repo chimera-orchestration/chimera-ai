@@ -45,6 +45,7 @@ def review(
     extra: Sequence[str] = (),
     dangerous: bool = False,
     into: Path | None = None,
+    launch: bool = True,
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
 
@@ -54,12 +55,20 @@ def review(
     ``prompts/review.md`` if present, else the packaged default, both behind a no-publish
     guardrail. ``into`` optionally lands the human branch in place (see ``checkout_here``).
 
+    ``launch=False`` (CLI ``--no-agent``) stops after the checkout: branches, worktree and
+    upstream all stand, but no agent runs — kick one off later with ``ch agent start``. The
+    agent-only knobs (``dangerous``, ``extra``) are refused with it: nothing would read them.
+
     Idempotent: an existing ``<goal>@agent`` worktree is reused, so a re-run only relaunches.
     The goal's branches are logged before/after creation (see ``agent-docs/logging.md``).
     Returns the agent worktree.
     """
+    if not launch and (dangerous or extra):
+        raise UserError(
+            '--no-agent launches no agent, so --dangerous and "-- …" have nothing to apply to.'
+        )
     git = Git(repo)
-    meta = _pr_metadata(repo, pr)
+    meta = _pr_metadata(repo, _pr_argument(git, pr, project))
     _check_pr_repo(git, meta['url'], project)
     number, head_oid = int(str(meta['number'])), str(meta['headRefOid'])
     goal = f'pr-{number}'
@@ -73,9 +82,57 @@ def review(
     ).info('review: refs')
     if into is not None:
         checkout_here(git, branch(goal, HUMAN), into, 'review')
-    prompt = _prompt(prompts_dir, meta, goal, project)
-    agent(agent_worktree, session_name(project, goal, AGENT), prompt, extra, dangerous)
+    if launch:
+        prompt = _prompt(prompts_dir, meta, goal, project)
+        agent(agent_worktree, session_name(project, goal, AGENT), prompt, extra, dangerous)
     return agent_worktree
+
+
+def _pr_argument(git: Git, pr: str, project: str) -> str:
+    """The argument to hand ``gh``: ``pr`` itself, or the number dug out of a review-tool URL.
+
+    ``gh`` understands numbers, branches and github URLs, so those pass straight through
+    (``_check_pr_repo`` still refuses a github URL for a foreign repo). Any other URL —
+    reviewable.io, graphite, … — embeds the same ``owner/repo`` and PR number somewhere in its
+    path, and the project's origin already names the repo: finding the origin's slug in the path
+    and taking the first numeric segment after it recovers the number generically, no per-tool
+    table. A URL that doesn't name the origin's repo is refused up front — stripping its number
+    anyway would silently review a different repo's PR of the same number.
+    """
+    if '://' not in pr:
+        return pr  # a number or branch: gh's to interpret
+    host = urlsplit(pr).hostname or ''
+    if host == 'github.com' or host.endswith('.github.com'):
+        return pr
+    try:
+        origin = git('remote', 'get-url', 'origin').strip()
+    except GitError:
+        origin = ''
+    if not (have := _origin_slug(origin)):
+        raise UserError(
+            f"project '{project}' has no github origin to match {pr} against — "
+            f'pass the PR number instead.'
+        )
+    if number := _number_after_slug(urlsplit(pr).path, have):
+        logger.bind(url=pr, number=number).info('review: pr number from url')
+        return number
+    raise UserError(
+        f"{pr} doesn't name a PR of {have}, which project '{project}' tracks — "
+        f'pass the PR number, or run ch review from the project tracking it (or pass -p).'
+    )
+
+
+def _number_after_slug(path: str, slug: str) -> str | None:
+    """The first numeric path segment after an adjacent ``owner/repo`` pair matching ``slug``."""
+    segments = path.strip('/').split('/')
+    lowered = [s.lower() for s in segments]
+    owner, repo = slug.split('/')
+    for i in range(len(segments) - 1):
+        if (lowered[i], lowered[i + 1]) == (owner, repo):
+            for segment in segments[i + 2 :]:
+                if segment.isdigit():
+                    return segment
+    return None
 
 
 def _pr_metadata(repo: Path, pr: str) -> dict[str, object]:
