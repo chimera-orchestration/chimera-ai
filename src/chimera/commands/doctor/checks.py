@@ -1,6 +1,6 @@
 import os
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
 
 from giterator import GitError
@@ -547,7 +547,7 @@ class ChimeraUpToDateCheck:
         remote_sha: str,
         fix: bool,
         exclude: Exclusions,
-    ) -> Iterator[Finding]:
+    ) -> Generator[Finding, None, str | None]:
         """Findings about the default branch; returns its sha once confirmed current."""
         if local_sha == remote_sha:
             return local_sha
