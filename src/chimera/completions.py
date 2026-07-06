@@ -14,6 +14,7 @@ from pathlib import Path
 
 from typer._click.core import Context
 
+from chimera.agents.registry import AGENTS
 from chimera.commands.doctor import CHECKS
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.project.ls import projects
@@ -60,3 +61,8 @@ def complete_actor(incomplete: str) -> list[str]:
 def complete_check(incomplete: str) -> list[str]:
     """Doctor check names matching the typed prefix."""
     return [check.name for check in CHECKS if check.name.startswith(incomplete)]
+
+
+def complete_harness(incomplete: str) -> list[str]:
+    """Registered harness names matching the typed prefix."""
+    return sorted(name for name in AGENTS if name.startswith(incomplete))

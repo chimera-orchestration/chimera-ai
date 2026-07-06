@@ -3,6 +3,7 @@ from pathlib import Path
 from testfixtures import ShouldRaise, TempDir, compare
 
 from chimera.config import (
+    AgentConfig,
     NotInProjectError,
     NotInWorkspaceError,
     ProjectConfig,
@@ -10,6 +11,7 @@ from chimera.config import (
     find_project,
     find_workspace,
     load_config,
+    workspace_config,
 )
 
 
@@ -30,6 +32,31 @@ def test_load_config_project(tmpdir: TempDir) -> None:
 
 def test_load_config_absent(tmpdir: TempDir) -> None:
     assert load_config(tmpdir.path) is None
+
+
+def test_load_config_agent_cascade_levels(tmpdir: TempDir) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'agent': {'harness': 'claude'}})
+    project = tmpdir.path / 'ws' / 'proj'
+    tmpdir.dump(
+        project / 'config.yaml', {'kind': 'project', 'repo': '/r', 'agent': {'model': 'opus'}}
+    )
+    compare(
+        load_config(tmpdir.path / 'ws'),
+        expected=WorkspaceConfig(kind='workspace', agent=AgentConfig(harness='claude')),
+    )
+    compare(
+        load_config(project),
+        expected=ProjectConfig(kind='project', repo=Path('/r'), agent=AgentConfig(model='opus')),
+    )
+
+
+def test_workspace_config_parses_the_root(workspace: Path) -> None:
+    compare(workspace_config(workspace), expected=WorkspaceConfig(kind='workspace'))
+
+
+def test_workspace_config_rejects_a_non_workspace(tmpdir: TempDir) -> None:
+    with ShouldRaise(NotInWorkspaceError(tmpdir.path)):
+        workspace_config(tmpdir.path)
 
 
 def test_find_workspace_at_start(workspace: Path) -> None:

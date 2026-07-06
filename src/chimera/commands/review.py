@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 from giterator import GitError
 from loguru import logger
 
+from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
@@ -46,6 +47,7 @@ def review(
     dangerous: bool = False,
     into: Path | None = None,
     launch: bool = True,
+    spec: AgentSpec = AgentSpec(),
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
 
@@ -89,7 +91,7 @@ def review(
         checkout_here(git, branch(goal, HUMAN), into, 'review')
     if launch:
         prompt = _prompt(prompts_dir, meta, goal, project)
-        agent(agent_worktree, session_name(project, goal, AGENT), prompt, extra, dangerous)
+        agent(agent_worktree, session_name(project, goal, AGENT), prompt, extra, dangerous, spec)
     return agent_worktree
 
 

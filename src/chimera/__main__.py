@@ -13,6 +13,7 @@ from typer.main import get_command
 from chimera import logging
 from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
 from chimera.agents import Session
+from chimera.agents.registry import AgentSpec, resolve_spec
 from chimera.commands.agent import agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
@@ -36,8 +37,14 @@ from chimera.commands.review import review as _review
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
-from chimera.completions import complete_actor, complete_check, complete_goal, complete_project
-from chimera.config import UserError
+from chimera.completions import (
+    complete_actor,
+    complete_check,
+    complete_goal,
+    complete_harness,
+    complete_project,
+)
+from chimera.config import NotInWorkspaceError, UserError, workspace_config
 from chimera.context import (
     Project,
     Scope,
@@ -137,6 +144,22 @@ DangerousOpt = Annotated[
         '--dangerous',
         help='Make bypass-permissions mode reachable via shift-tab, dropping auto-accept from '
         'the cycle. AGENTS: never pass this on your own — only with explicit user instruction.',
+    ),
+]
+HarnessOpt = Annotated[
+    str | None,
+    typer.Option(
+        '--harness',
+        help='Harness to launch (default: config cascade, then claude)',
+        autocompletion=complete_harness,
+    ),
+]
+ModelOpt = Annotated[
+    str | None,
+    typer.Option(
+        '--model',
+        '-m',
+        help="Model for the session (default: config cascade, then the harness's own)",
     ),
 ]
 
@@ -296,6 +319,19 @@ def _project(ctx: typer.Context, explicit: str | None) -> Project:
     return resolve_project(
         Path.cwd(), explicit if explicit is not None else _overrides(ctx).project
     )
+
+
+def _spec(project: Project, harness: str | None, model: str | None) -> AgentSpec:
+    """The agent to launch: flags, then the project's ``agent:``, then the workspace's.
+
+    A project is usable without a workspace around it (independence), so the workspace
+    level simply drops out of the cascade when none resolves.
+    """
+    try:
+        workspace = workspace_config(resolve_workspace(Path.cwd())).agent
+    except NotInWorkspaceError:
+        workspace = None
+    return resolve_spec(harness, model, project.config.agent, workspace)
 
 
 def _scope(
@@ -475,6 +511,8 @@ def review(
         bool,
         typer.Option('--no-agent', help='Branch, fetch and check out the PR, but launch no agent'),
     ] = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
@@ -488,6 +526,7 @@ def review(
         dangerous,
         Path.cwd(),
         launch=not no_agent,
+        spec=_spec(p, harness, model),
     )
     if no_agent:
         goal = worktree.name.split(SEP, 1)[0]
@@ -685,6 +724,8 @@ def goal_start(
     frm: FromOpt = None,
     offline: OfflineOpt = False,
     dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
@@ -698,6 +739,7 @@ def goal_start(
         _passthrough(ctx),
         fetch=not offline,
         dangerous=dangerous,
+        spec=_spec(p, harness, model),
     )
     typer.echo(f'Started {goal} in {worktree}')
 
@@ -713,6 +755,8 @@ def goal_adopt(
     goal: Annotated[str, typer.Argument(help='Existing branch to adopt as a goal')],
     prompt: PromptArg = None,
     dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
@@ -724,6 +768,7 @@ def goal_adopt(
         prompt,
         _passthrough(ctx),
         dangerous,
+        _spec(p, harness, model),
     )
     typer.echo(f'Adopted {goal} in {worktree}')
 
@@ -855,6 +900,8 @@ def agent_start(
     goal: GoalOpt = None,
     actor: ActorOpt = None,
     dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
@@ -862,7 +909,8 @@ def agent_start(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
-    _agent(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous)
+    spec = _spec(p, harness, model)
+    _agent(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous, spec)
     typer.echo(f'Launched agent in {worktree}')
 
 
@@ -874,6 +922,8 @@ def agent_resume(
     goal: GoalOpt = None,
     actor: ActorOpt = None,
     dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
@@ -881,7 +931,8 @@ def agent_resume(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = actor or overrides.actor or AGENT
     worktree = worktree_path(p.worktrees, g, actor)
-    _resume(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous)
+    spec = _spec(p, harness, model)
+    _resume(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous, spec)
     typer.echo(f'Resumed agent in {worktree}')
 
 

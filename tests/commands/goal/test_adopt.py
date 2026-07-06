@@ -7,6 +7,7 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
+from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.commands.goal import adopt as goal_adopt
 from chimera.commands.goal.adopt import adopt
@@ -29,8 +30,9 @@ def _stub_agent(replace: Replacer) -> list[object]:
         prompt: str | None = None,
         extra: Sequence[str] = (),
         dangerous: bool = False,
+        spec: AgentSpec = AgentSpec(),
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous))
+        calls.append((worktree, name, prompt, extra, dangerous, spec))
 
     replace.in_module(agent, record, module=goal_adopt)
     return calls
@@ -57,7 +59,12 @@ def test_adopt_restructures_the_branch_then_launches_the_agent(
     compare(Git(git_repo.path).branches(), expected=['feature/agent', 'feature/human', 'main'])
     compare(_rev(git_repo.path, 'feature/human'), expected=tip)
     compare(_rev(git_repo.path, 'feature/agent'), expected=tip)
-    compare(calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', None, (), False)])
+    compare(
+        calls,
+        expected=[
+            (worktrees / 'feature@agent', 'proj@feature@agent', None, (), False, AgentSpec())
+        ],
+    )
 
 
 def test_adopt_keeps_the_adopted_branchs_upstream(
@@ -104,7 +111,10 @@ def test_adopt_passes_the_prompt_to_the_agent(
     calls = _stub_agent(replace)
     adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent', prompt='do it')
     compare(
-        calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', 'do it', (), False)]
+        calls,
+        expected=[
+            (worktrees / 'feature@agent', 'proj@feature@agent', 'do it', (), False, AgentSpec())
+        ],
     )
 
 
@@ -188,7 +198,14 @@ def _adopt_logs(base: str, worktree: object, *, dangerous: bool = False) -> list
     start, end = action_logs(
         'goal adopt',
         'chimera.commands.goal.adopt.adopt',
-        {'goal': 'feature-x', 'prompt': None, 'project': None, 'dangerous': dangerous},
+        {
+            'goal': 'feature-x',
+            'prompt': None,
+            'project': None,
+            'dangerous': dangerous,
+            'harness': None,
+            'model': None,
+        },
     )
     event = {
         'level': 'INFO',
@@ -217,7 +234,7 @@ def test_goal_adopt_cli(
     )
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False)])
+    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False, AgentSpec())])
 
 
 def test_goal_adopt_cli_passes_extra_flags_through(
@@ -233,7 +250,10 @@ def test_goal_adopt_cli_passes_extra_flags_through(
         logging=_adopt_logs(base, expected),
     )
     compare(
-        calls, expected=[(expected, 'project@feature-x@agent', None, ['--model', 'opus'], False)]
+        calls,
+        expected=[
+            (expected, 'project@feature-x@agent', None, ['--model', 'opus'], False, AgentSpec())
+        ],
     )
 
 
@@ -249,4 +269,4 @@ def test_goal_adopt_cli_dangerous(
         output=f'Adopted feature-x in {expected}',
         logging=_adopt_logs(base, expected, dangerous=True),
     )
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], True)])
+    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], True, AgentSpec())])

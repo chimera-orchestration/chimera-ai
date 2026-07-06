@@ -67,7 +67,15 @@ def test_goal_and_actor_before_the_command(
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': None, 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': None,
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@reviewer']

@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from pathlib import Path
 
+from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.git import Git
 from chimera.worktrees import AGENT, HUMAN, branch, registered_worktrees, worktree_path
@@ -14,6 +15,7 @@ def adopt(
     prompt: str | None = None,
     extra: Sequence[str] = (),
     dangerous: bool = False,
+    spec: AgentSpec = AgentSpec(),
 ) -> Path:
     """Adopt an existing branch ``<goal>`` as a goal, then launch its agent.
 
@@ -37,7 +39,7 @@ def adopt(
         restructure(git, goal)
         agent_worktree = ensure_worktree(git, worktrees_root, goal)
         refs.bind(worktree=str(agent_worktree))
-    agent(agent_worktree, name, prompt, extra, dangerous)
+    agent(agent_worktree, name, prompt, extra, dangerous, spec)
     return agent_worktree
 
 

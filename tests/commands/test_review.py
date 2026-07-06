@@ -13,6 +13,7 @@ from testfixtures.mock import Mock
 
 import chimera.__main__ as main
 from chimera.commands import review as review_mod
+from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.commands.review import (
     GUARDRAIL,
@@ -67,8 +68,9 @@ def _stub_agent(replace: Replacer) -> list[object]:
         prompt: str | None = None,
         extra: Sequence[str] = (),
         dangerous: bool = False,
+        spec: AgentSpec = AgentSpec(),
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous))
+        calls.append((worktree, name, prompt, extra, dangerous, spec))
 
     replace.in_module(agent, record, module=review_mod)
     return calls
@@ -110,7 +112,9 @@ def test_review_builds_the_goal_tracking_the_pr_and_launches(
     )
     compare(
         calls,
-        expected=[(worktrees / 'pr-1@agent', 'proj@pr-1@agent', expected_prompt, (), False)],
+        expected=[
+            (worktrees / 'pr-1@agent', 'proj@pr-1@agent', expected_prompt, (), False, AgentSpec())
+        ],
     )
 
 
@@ -426,8 +430,9 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         dangerous: bool = False,
         into: Path | None = None,
         launch: bool = True,
+        spec: AgentSpec = AgentSpec(),
     ) -> Path:
-        calls.append((project, pr, list(extra), dangerous, into, launch))
+        calls.append((project, pr, list(extra), dangerous, into, launch, spec))
         return worktrees / 'pr-1@agent'
 
     replace(target=review, container=main, name='_review', replacement=record)
@@ -437,10 +442,20 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         logging=action_logs(
             'review',
             'chimera.commands.review.review',
-            {'pr': '1', 'dangerous': False, 'no_agent': False, 'project': None},
+            {
+                'pr': '1',
+                'dangerous': False,
+                'no_agent': False,
+                'harness': None,
+                'model': None,
+                'project': None,
+            },
         ),
     )
-    compare(calls, expected=[('project', '1', ['--model', 'opus'], False, Path.cwd(), True)])
+    compare(
+        calls,
+        expected=[('project', '1', ['--model', 'opus'], False, Path.cwd(), True, AgentSpec())],
+    )
     calls.clear()
     command.run('review', '1', '--no-agent').check(
         output=f'Prepared review of 1 in {expected}\n'
@@ -449,7 +464,14 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         logging=action_logs(
             'review',
             'chimera.commands.review.review',
-            {'pr': '1', 'dangerous': False, 'no_agent': True, 'project': None},
+            {
+                'pr': '1',
+                'dangerous': False,
+                'no_agent': True,
+                'harness': None,
+                'model': None,
+                'project': None,
+            },
         ),
     )
-    compare(calls, expected=[('project', '1', [], False, Path.cwd(), False)])
+    compare(calls, expected=[('project', '1', [], False, Path.cwd(), False, AgentSpec())])

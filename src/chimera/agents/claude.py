@@ -39,16 +39,18 @@ class Claude:
         prompt: str | None = None,
         extra: Sequence[str] = (),
         dangerous: bool = False,
+        *,
+        model: str | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         """Run a claude session named ``name``, with cwd set to ``cwd``.
 
         Runs interactively in the foreground unless ``prompt`` is given, in which case
-        it daemonizes (``claude --bg``) to work on the prompt autonomously. ``extra`` is
-        passed straight through to ``claude`` (e.g. ``--model``,
+        it daemonizes (``claude --bg``) to work on the prompt autonomously. ``model``
+        rides as ``--model``. ``extra`` is passed straight through to ``claude`` (e.g.
         ``--dangerously-skip-permissions``). ``dangerous`` makes bypass-permissions mode
         reachable (see ``_session_args``). Refuses if a session is already live in ``cwd``.
         """
-        return _launch(cwd, _session_args(['--name', name], prompt, extra, dangerous))
+        return _launch(cwd, _session_args(['--name', name], prompt, extra, dangerous, model))
 
     def resume(
         self,
@@ -57,6 +59,8 @@ class Claude:
         prompt: str | None = None,
         extra: Sequence[str] = (),
         dangerous: bool = False,
+        *,
+        model: str | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         """Resume the claude session named ``name``, with cwd set to ``cwd``.
 
@@ -68,7 +72,7 @@ class Claude:
         passes straight through; ``dangerous`` makes bypass-permissions mode reachable
         (see ``_session_args``). Refuses if a session is already live in ``cwd``.
         """
-        return _launch(cwd, _session_args(['--resume', name], prompt, extra, dangerous))
+        return _launch(cwd, _session_args(['--resume', name], prompt, extra, dangerous, model))
 
     def sessions(self) -> list[Session]:
         """Every live claude session, each enriched with a one-line summary.
@@ -129,9 +133,16 @@ def session_summary(cwd: str, name: str, projects: Path | None = None) -> str | 
 
 
 def _session_args(
-    lead: list[str], prompt: str | None, extra: Sequence[str], dangerous: bool
+    lead: list[str],
+    prompt: str | None,
+    extra: Sequence[str],
+    dangerous: bool,
+    model: str | None = None,
 ) -> list[str]:
     """The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, then prompt.
+
+    ``model`` rides as ``--model`` on the lead — unless ``extra`` already carries one, so
+    an explicit ``-- --model X`` passthrough always beats the resolved spec.
 
     With ``dangerous`` the session also gets ``--allow-dangerously-skip-permissions`` (unless
     ``extra`` already asks for bypass) so bypass-permissions mode is reachable with shift-tab.
@@ -141,6 +152,8 @@ def _session_args(
     availability is decided at *its* launch, so the flag has to ride the background launch too.
     The flag only enables the mode; the autonomous run keeps its resolved mode.
     """
+    if model is not None and '--model' not in extra:
+        lead = [*lead, '--model', model]
     allow = (ALLOW_BYPASS,) if dangerous and not _BYPASS_FLAGS.intersection(extra) else ()
     if prompt is not None:
         return ['--bg', *lead, *extra, *allow, prompt]

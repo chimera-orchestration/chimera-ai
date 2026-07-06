@@ -44,6 +44,8 @@ def test_new_dispatches_to_start(
                 'frm': None,
                 'project': None,
                 'dangerous': False,
+                'harness': None,
+                'model': None,
                 'offline': False,
             },
         ),

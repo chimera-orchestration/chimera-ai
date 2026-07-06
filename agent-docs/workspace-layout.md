@@ -49,6 +49,23 @@ Commands resolve four axes (see `chimera.context`), each with an explicit overri
 trusted for goal/actor only when it matches the `<goal>/<actor>` shape — never for a review or
 feature branch.
 
+## Choosing the harness and model
+
+Every launching command (`agent start`/`resume`, `goal start`/`adopt`, `review`) resolves an
+`AgentSpec` (`chimera.agents.registry.resolve_spec`): which registered harness runs the session
+(claude today) and which model it uses. Each field resolves independently, nearest wins:
+`--harness`/`-m/--model` flags → the project `config.yaml`'s `agent:` block → the workspace's →
+harness `claude`, model the harness's own default. A project standing alone (no workspace) just
+loses the workspace level. An explicit `-- --model X` passthrough beats the resolved model; an
+unknown harness name errors, listing what's registered.
+
+```yaml
+# config.yaml (workspace or project)
+agent:
+  harness: claude   # optional; must be registered
+  model: opus       # optional; harness-native name
+```
+
 The `-p/-g/-a` flags may appear at any level of a project-scoped command — before the group,
 between group and subcommand, or after it — so `ch -p chimera goal ls`, `ch goal -p chimera ls`
 and `ch goal ls -p chimera` are equivalent. A shared `_context` callback (in `chimera.__main__`)

@@ -5,13 +5,26 @@ import yaml
 from pydantic import BaseModel, Field, TypeAdapter
 
 
+class AgentConfig(BaseModel):
+    """A level of the agent cascade: which harness runs sessions, on which model.
+
+    Either field may be unset — resolution (``chimera.agents.registry.resolve_spec``)
+    takes each field from the nearest level that sets it.
+    """
+
+    harness: str | None = None
+    model: str | None = None
+
+
 class WorkspaceConfig(BaseModel):
     kind: Literal['workspace']
+    agent: AgentConfig = AgentConfig()
 
 
 class ProjectConfig(BaseModel):
     kind: Literal['project']
     repo: Path
+    agent: AgentConfig = AgentConfig()
 
 
 AnyConfig = Annotated[WorkspaceConfig | ProjectConfig, Field(discriminator='kind')]
@@ -45,6 +58,14 @@ def load_config(directory: Path) -> AnyConfig | None:
     if not path.exists():
         return None
     return _ADAPTER.validate_python(yaml.safe_load(path.read_text()))
+
+
+def workspace_config(workspace: Path) -> WorkspaceConfig:
+    """The parsed config of a resolved workspace root."""
+    config = load_config(workspace)
+    if not isinstance(config, WorkspaceConfig):
+        raise NotInWorkspaceError(workspace)
+    return config
 
 
 def find_workspace(start: Path) -> Path:

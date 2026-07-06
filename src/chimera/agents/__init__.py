@@ -45,9 +45,10 @@ class Agent(Protocol):
     """A harness that runs agent sessions: start or resume one, and list what's live.
 
     ``platform`` names the harness in config, flags and session records — session
-    identity is ``(platform, native id)``. ``dangerous`` asks the harness to make its
-    permissions-bypass mode *reachable* (never active); a harness without such a mode
-    ignores it. ``extra`` is forwarded to the harness binary verbatim.
+    identity is ``(platform, native id)``. ``model`` picks the model for the session
+    (the harness's own default when ``None``). ``dangerous`` asks the harness to make
+    its permissions-bypass mode *reachable* (never active); a harness without such a
+    mode ignores it. ``extra`` is forwarded to the harness binary verbatim.
     """
 
     platform: str
@@ -59,6 +60,8 @@ class Agent(Protocol):
         prompt: str | None = None,
         extra: Sequence[str] = (),
         dangerous: bool = False,
+        *,
+        model: str | None = None,
     ) -> CompletedProcess[bytes]:
         """Launch a new session named ``name`` in ``cwd``; background when ``prompt`` is given."""
         ...
@@ -70,6 +73,8 @@ class Agent(Protocol):
         prompt: str | None = None,
         extra: Sequence[str] = (),
         dangerous: bool = False,
+        *,
+        model: str | None = None,
     ) -> CompletedProcess[bytes]:
         """Reattach to the session named ``name``, reviving it in ``cwd`` if dead."""
         ...

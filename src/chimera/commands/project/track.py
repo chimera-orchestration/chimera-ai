@@ -23,5 +23,8 @@ def register(workspace: Path, name: str, repo: Path) -> Path:
     for sub in _PROJECT_DIRS:
         (project / sub).mkdir(parents=True, exist_ok=True)
     config = ProjectConfig(kind='project', repo=repo)
-    (project / 'config.yaml').write_text(yaml.safe_dump(config.model_dump(mode='json')))
+    # exclude_defaults: an unset cascade level (agent:) stays out of freshly-written config
+    (project / 'config.yaml').write_text(
+        yaml.safe_dump(config.model_dump(mode='json', exclude_defaults=True))
+    )
     return project

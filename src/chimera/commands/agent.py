@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from chimera.agents import Session
-from chimera.agents.registry import AGENTS, DEFAULT
+from chimera.agents.registry import AGENTS, AgentSpec
 from chimera.context import Scope
 from chimera.worktrees import SEP
 
@@ -19,9 +19,10 @@ def agent(
     prompt: str | None = None,
     extra: Sequence[str] = (),
     dangerous: bool = False,
+    spec: AgentSpec = AgentSpec(),
 ) -> subprocess.CompletedProcess[bytes]:
-    """Launch an agent session named ``name`` in the worktree (see ``Agent.start``)."""
-    return AGENTS[DEFAULT].start(worktree, name, prompt, extra, dangerous)
+    """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``)."""
+    return spec.agent.start(worktree, name, prompt, extra, dangerous, model=spec.model)
 
 
 def resume(
@@ -30,9 +31,10 @@ def resume(
     prompt: str | None = None,
     extra: Sequence[str] = (),
     dangerous: bool = False,
+    spec: AgentSpec = AgentSpec(),
 ) -> subprocess.CompletedProcess[bytes]:
-    """Reattach to the agent session named ``name`` (see ``Agent.resume``)."""
-    return AGENTS[DEFAULT].resume(worktree, name, prompt, extra, dangerous)
+    """Reattach to ``spec``'s agent session named ``name`` (see ``Agent.resume``)."""
+    return spec.agent.resume(worktree, name, prompt, extra, dangerous, model=spec.model)
 
 
 def scope_line(scope: Scope) -> str:

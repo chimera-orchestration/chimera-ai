@@ -8,6 +8,7 @@ from testfixtures import Replacer, ShouldRaise, TempDir, compare
 from chimera import __main__ as chimera_main
 from chimera.agents import Session
 from chimera.agents.claude import all_sessions, live_sessions
+from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import (
     agent,
     agents,
@@ -186,7 +187,15 @@ def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent']  # no bypass flag by default
@@ -204,7 +213,15 @@ def test_agent_start_cli_dangerous_makes_bypass_reachable(
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': True},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': True,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent', '--allow-dangerously-skip-permissions']
@@ -220,7 +237,15 @@ def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': 'do it', 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': 'do it',
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', 'do it']
@@ -237,7 +262,15 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command:
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': 'g', 'actor': 'reviewer', 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': 'reviewer',
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@reviewer']
@@ -256,7 +289,15 @@ def test_agent_start_cli_forwards_flags_after_dashdash(
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent', '--dangerously-skip-permissions']
@@ -274,7 +315,15 @@ def test_agent_start_cli_with_prompt_and_passthrough(
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': 'do it', 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': 'do it',
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', '--model', 'opus', 'do it']
@@ -290,7 +339,15 @@ def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) 
         logging=action_logs(
             'agent resume',
             'chimera.commands.agent.resume',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--resume', 'myproject@g@agent']  # no bypass flag by default
@@ -308,7 +365,15 @@ def test_agent_resume_cli_with_passthrough(
         logging=action_logs(
             'agent resume',
             'chimera.commands.agent.resume',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
         ),
     )
     claude_cmd = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
@@ -481,3 +546,143 @@ def test_agent_ls_cli_when_nothing_running(
             'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
         ),
     )
+
+
+def test_agent_spec_model_rides_as_model_flag(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(worktree, 'proj@goal@agent', spec=AgentSpec('claude', 'opus'))
+    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'opus']
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_agent_passthrough_model_beats_spec_model(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(
+        worktree, 'proj@goal@agent', extra=['--model', 'sonnet'], spec=AgentSpec('claude', 'opus')
+    )
+    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'sonnet']
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_resume_spec_model_rides_as_model_flag(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    resume(worktree, 'proj@goal@agent', spec=AgentSpec('claude', 'opus'))
+    expected = ['claude', '--resume', 'proj@goal@agent', '--model', 'opus']
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_agent_start_cli_with_model_flag(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'start', '-g', 'g', '-m', 'opus').check(
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': 'opus',
+            },
+        ),
+    )
+    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--model', 'opus']
+    compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+def test_agent_start_cli_model_from_project_config(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _project_with_worktree(tmpdir)
+    tmpdir.dump(
+        project / 'config.yaml',
+        {'kind': 'project', 'repo': str(project), 'agent': {'model': 'sonnet'}},
+    )
+    calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'start', '-g', 'g').check(
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
+        ),
+    )
+    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--model', 'sonnet']
+    compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+def test_agent_start_cli_model_from_workspace_config(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace', 'agent': {'model': 'ws-model'}})
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(project)
+    calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'start', '-g', 'g').check(
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+            },
+        ),
+    )
+    claude_cmd = ['claude', '--name', 'proj@g@agent', '--model', 'ws-model']
+    compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+def test_agent_start_cli_unknown_harness_errors(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    calls = _stub(replace)
+    command.run('agent', 'start', '-g', 'g', '--harness', 'codex').check(
+        output="Error: no harness 'codex' (available: claude)",
+        return_code=1,
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': 'codex',
+                'model': None,
+            },
+            error="UnknownHarnessError: no harness 'codex' (available: claude)",
+        ),
+    )
+    compare(calls, expected=[])  # never launched
