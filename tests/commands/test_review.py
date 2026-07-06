@@ -433,7 +433,9 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
     compare(calls, expected=[('project', '1', ['--model', 'opus'], False, Path.cwd(), True)])
     calls.clear()
     command.run('review', '1', '--no-agent').check(
-        output=f'Prepared review of 1 in {expected}',
+        output=f'Prepared review of 1 in {expected}\n'
+        f'ch agent start -g pr-1 launches an agent there; '
+        f'ch review 1 runs the standard review',
         logging=action_logs(
             'review',
             'chimera.commands.review.review',
