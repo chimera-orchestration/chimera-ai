@@ -640,6 +640,69 @@ def test_materialises_a_custom_actor(tmpdir: TempDir, git_repo: Repo) -> None:
     compare(_full(git_repo, 'g/reviewer'), expected=_full(git_repo, 'g/agent'))
 
 
+def test_infers_to_from_the_goals_only_other_actor(tmpdir: TempDir, git_repo: Repo) -> None:
+    _goal(tmpdir, git_repo)  # only g/agent exists — the sole candidate for --to
+    result = sync(git_repo.path, 'g', mover='reviewer')
+    compare(
+        result,
+        expected=SyncResult(Outcome.CREATED, 'reviewer', 'agent', _short(git_repo, 'g/agent')),
+    )
+
+
+def test_infers_move_from_the_goals_only_other_actor(tmpdir: TempDir, git_repo: Repo) -> None:
+    _goal(tmpdir, git_repo)  # only g/agent exists
+    sync(git_repo.path, 'g', mover='reviewer', target='agent')  # actors now: agent, reviewer
+    result = sync(git_repo.path, 'g', target='agent')  # --move omitted, only other actor: reviewer
+    compare(
+        result, expected=SyncResult(Outcome.NOOP, 'reviewer', 'agent', _short(git_repo, 'g/agent'))
+    )
+
+
+def test_to_inference_refuses_with_no_other_actor(tmpdir: TempDir, git_repo: Repo) -> None:
+    _goal(tmpdir, git_repo)  # only g/agent exists — 'agent' has no other actor to sync with
+    with ShouldRaise(
+        UserError("no other actor branch exists for 'agent' to sync with — pass --to explicitly")
+    ):
+        sync(git_repo.path, 'g', mover='agent')
+
+
+def test_move_inference_refuses_with_no_other_actor(tmpdir: TempDir, git_repo: Repo) -> None:
+    _goal(tmpdir, git_repo)
+    with ShouldRaise(
+        UserError("no other actor branch exists for 'agent' to sync with — pass --move explicitly")
+    ):
+        sync(git_repo.path, 'g', target='agent')
+
+
+def _three_actors(tmpdir: TempDir, git_repo: Repo) -> None:
+    """A goal with three actor branches: agent, human, reviewer."""
+    _goal(tmpdir, git_repo)
+    sync(git_repo.path, 'g')  # materialises human at agent
+    sync(git_repo.path, 'g', mover='reviewer', target='agent')  # materialises reviewer at agent
+
+
+def test_to_inference_refuses_when_ambiguous(tmpdir: TempDir, git_repo: Repo) -> None:
+    _three_actors(tmpdir, git_repo)  # agent's other actors: human, reviewer — can't pick
+    with ShouldRaise(
+        UserError(
+            "goal 'g' has multiple actors besides 'agent' ('human', 'reviewer') — "
+            '--to must be given explicitly'
+        )
+    ):
+        sync(git_repo.path, 'g', mover='agent')
+
+
+def test_move_inference_refuses_when_ambiguous(tmpdir: TempDir, git_repo: Repo) -> None:
+    _three_actors(tmpdir, git_repo)
+    with ShouldRaise(
+        UserError(
+            "goal 'g' has multiple actors besides 'agent' ('human', 'reviewer') — "
+            '--move must be given explicitly'
+        )
+    ):
+        sync(git_repo.path, 'g', target='agent')
+
+
 def test_lands_the_mover_in_a_clean_checkout(tmpdir: TempDir, git_repo: Repo) -> None:
     _goal(tmpdir, git_repo)
     result = sync(git_repo.path, 'g', into=git_repo.path)  # the repo's own clean checkout
@@ -746,7 +809,7 @@ def test_goal_sync_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> Non
     start, end = action_logs(
         'goal sync',
         'chimera.commands.goal.sync.sync',
-        {'goal': 'g', 'move': 'human', 'to': 'agent', 'force': False, 'project': None},
+        {'goal': 'g', 'move': None, 'to': None, 'force': False, 'project': None},
     )
     command.run('goal', 'sync', 'g').check(
         output=f'Created human at agent ({_short(git_repo, "g/agent")})',
@@ -764,6 +827,55 @@ def test_goal_sync_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> Non
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'main'])
 
 
+def test_goal_sync_cli_infers_the_omitted_flag(
+    tmpdir: TempDir, git_repo: Repo, command: Command
+) -> None:
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    command.run('worktree', 'add', '--goal', 'g')  # only g/agent exists yet
+    agent = _full(git_repo, 'g/agent')
+    start, end = action_logs(
+        'goal sync',
+        'chimera.commands.goal.sync.sync',
+        {'goal': 'g', 'move': 'reviewer', 'to': None, 'force': False, 'project': None},
+    )
+    command.run('goal', 'sync', 'g', '--move', 'reviewer').check(
+        output=f'Created reviewer at agent ({_short(git_repo, "g/agent")})',
+        logging=[
+            start,
+            {
+                'level': 'INFO',
+                'goal': 'g',
+                'git': {'before': {}, 'after': {'g/reviewer': agent, _wm('reviewer'): agent}},
+                'message': 'goal sync: refs',
+            },
+            end,
+        ],
+    )
+
+
+def test_goal_sync_cli_ambiguous_inference_reports_the_actors(
+    tmpdir: TempDir, git_repo: Repo, command: Command
+) -> None:
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    command.run('worktree', 'add', '--goal', 'g')
+    command.run('goal', 'sync', 'g')  # materialises human at agent
+    command.run('goal', 'sync', 'g', '--move', 'reviewer', '--to', 'agent')  # and reviewer
+    error = (
+        "goal 'g' has multiple actors besides 'agent' ('human', 'reviewer') — "
+        '--to must be given explicitly'
+    )
+    command.run('goal', 'sync', 'g', '--move', 'agent').check(
+        output=f'Error: {error}',
+        logging=action_logs(
+            'goal sync',
+            'chimera.commands.goal.sync.sync',
+            {'goal': 'g', 'move': 'agent', 'to': None, 'force': False, 'project': None},
+            error=f'UserError: {error}',
+        ),
+        return_code=1,
+    )
+
+
 def test_goal_sync_cli_conflict_exits_nonzero(
     tmpdir: TempDir, git_repo: Repo, command: Command
 ) -> None:
@@ -776,7 +888,7 @@ def test_goal_sync_cli_conflict_exits_nonzero(
         logging=action_logs(
             'goal sync',
             'chimera.commands.goal.sync.sync',
-            {'goal': 'g', 'move': 'human', 'to': 'agent', 'force': False, 'project': None},
+            {'goal': 'g', 'move': None, 'to': None, 'force': False, 'project': None},
         ),
         return_code=1,
     )
@@ -789,7 +901,7 @@ def test_goal_sync_cli_force(tmpdir: TempDir, git_repo: Repo, command: Command) 
     start, end = action_logs(
         'goal sync',
         'chimera.commands.goal.sync.sync',
-        {'goal': 'g', 'move': 'human', 'to': 'agent', 'force': True, 'project': None},
+        {'goal': 'g', 'move': None, 'to': None, 'force': True, 'project': None},
     )
     command.run('goal', 'sync', 'g', '--force').check(
         output=f'Forced human onto agent ({_short(git_repo, "g/agent")}) — '

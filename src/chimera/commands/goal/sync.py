@@ -14,6 +14,7 @@ from chimera.worktrees import (
     branch,
     checkout_here,
     checkout_of,
+    goal_branch_actors,
     is_dirty,
 )
 
@@ -51,12 +52,20 @@ class SyncResult:
 def sync(
     repo: Path,
     goal: str,
-    mover: str = HUMAN,
-    target: str = AGENT,
+    mover: str | None = None,
+    target: str | None = None,
     into: Path | None = None,
     force: bool = False,
 ) -> SyncResult:
     """Bring the goal's ``mover`` actor branch up to its ``target`` branch's work.
+
+    ``mover``/``target`` are actor names, not literal ``human``/``agent`` — any goal actor
+    (``reviewer``, a second agent, …) works. Passing neither defaults to ``human`` catching up
+    to ``agent``. Passing exactly one infers the other from the goal's existing actor branches
+    (:func:`chimera.worktrees.goal_branch_actors`): the one branch that isn't the actor you gave,
+    when there's exactly one — with more than one candidate (a goal with a third actor already in
+    play) inference is refused, listing them, so you pick with the other flag instead of getting
+    silently pointed at the wrong one.
 
     Fast-forwards when it can; when ``mover`` has *diverged* — the common case after you squash the
     agent's commits on the human branch — it appends only the target commits made *since the last
@@ -105,9 +114,10 @@ def sync(
     is never landed anywhere new after the fact — though an append that pre-landed in ``into``
     leaves you there, mid-conflict, to resolve.
     """
+    git = Git(repo)
+    mover, target = _resolve_actors(git, goal, mover, target)
     if mover == target:
         raise UserError(f'nothing to sync — --move and --to are both {mover!r}')
-    git = Git(repo)
     mover_branch, target_branch = branch(goal, mover), branch(goal, target)
     if not git.ref_exists(target_branch):
         raise UserError(f'no branch {target_branch} to sync from')
@@ -161,6 +171,36 @@ def _apply(
     if force:
         return _force(git, mover_branch, target_branch, watermark, refs)
     return _append(git, goal, mover, mover_branch, target_branch, watermark, into)
+
+
+def _resolve_actors(git: Git, goal: str, mover: str | None, target: str | None) -> tuple[str, str]:
+    """Fill in whichever of ``mover``/``target`` was omitted (see :func:`sync`)."""
+    match mover, target:
+        case None, None:
+            return HUMAN, AGENT
+        case str() as m, str() as t:
+            return m, t
+        case str() as m, None:
+            return m, _infer_other(git, goal, m, '--to')
+        case None, str() as t:
+            return _infer_other(git, goal, t, '--move'), t
+
+
+def _infer_other(git: Git, goal: str, given: str, missing_flag: str) -> str:
+    """The one other actor branch on ``goal`` besides ``given`` — refused when that's not unique."""
+    candidates = sorted(goal_branch_actors(git, goal) - {given})
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        raise UserError(
+            f'no other actor branch exists for {given!r} to sync with — pass {missing_flag} '
+            f'explicitly'
+        )
+    listed = ', '.join(repr(c) for c in candidates)
+    raise UserError(
+        f"goal {goal!r} has multiple actors besides {given!r} ({listed}) — {missing_flag} "
+        f'must be given explicitly'
+    )
 
 
 def _record(

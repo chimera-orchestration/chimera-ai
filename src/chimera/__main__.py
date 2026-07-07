@@ -44,7 +44,7 @@ from chimera.context import (
 )
 from chimera.dry import Dry
 from chimera.help import command_index, render_json, render_text
-from chimera.worktrees import AGENT, HUMAN, SEP, session_name, worktree_path
+from chimera.worktrees import AGENT, SEP, session_name, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -83,15 +83,21 @@ PromptArg = Annotated[
     typer.Argument(help='Prompt; its presence runs the agent in background'),
 ]
 MoveOpt = Annotated[
-    str,
+    str | None,
     typer.Option(
-        '--move', help='Actor branch to move (default: human)', autocompletion=complete_actor
+        '--move',
+        help='Actor branch to move (default: human; inferred from --to when it names the '
+        "goal's only other actor)",
+        autocompletion=complete_actor,
     ),
 ]
 ToOpt = Annotated[
-    str,
+    str | None,
     typer.Option(
-        '--to', help='Actor branch to catch up to (default: agent)', autocompletion=complete_actor
+        '--to',
+        help='Actor branch to catch up to (default: agent; inferred from --move when it names '
+        "the goal's only other actor)",
+        autocompletion=complete_actor,
     ),
 ]
 WorktreeForceOpt = Annotated[
@@ -686,8 +692,8 @@ def goal_adopt(
 def goal_sync(
     ctx: typer.Context,
     goal: Annotated[str | None, typer.Argument(autocompletion=complete_goal)] = None,
-    move: MoveOpt = HUMAN,
-    to: ToOpt = AGENT,
+    move: MoveOpt = None,
+    to: ToOpt = None,
     force: SyncForceOpt = False,
     project: ProjectOpt = None,
 ) -> None:
