@@ -85,6 +85,46 @@ def test_cleanup_dispatches_to_finish(
     tmpdir.compare(path='worktrees', expected=())
 
 
+def test_mv_dispatches_to_rename(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    project = _project(tmpdir, git_repo)
+    replace.in_module(agent, lambda *a, **k: None, module=goal_start)
+    replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
+    command.run('goal', 'start', 'feature-x')
+    base = Git(git_repo.path)('rev-parse', 'feature-x/agent').strip()
+    old_wt = (project / 'worktrees' / 'feature-x@agent').resolve()
+    new_wt = (project / 'worktrees' / 'feature-y@agent').resolve()
+    start, end = action_logs(
+        'goal rename',
+        'chimera.commands.goal.rename.rename',
+        {'old': 'feature-x', 'new': 'feature-y', 'project': None},
+    )
+    command.run('goal', 'mv', 'feature-x', 'feature-y').check(
+        output=f'Renamed branch feature-x/agent to feature-y/agent\nMoved {old_wt} to {new_wt}',
+        logging=[
+            start,
+            {
+                'level': 'INFO',
+                'goal': 'feature-x',
+                'renamed_to': 'feature-y',
+                'git': {
+                    'before': {'feature-x/agent': base},
+                    'after': {'feature-y/agent': base},
+                },
+                'message': 'goal rename: refs',
+            },
+            {
+                'level': 'INFO',
+                'moved': {str(old_wt): str(new_wt)},
+                'message': 'goal rename: worktrees',
+            },
+            end,
+        ],
+    )
+    tmpdir.compare(['feature-y@agent'], path='worktrees', recursive=False)
+
+
 def test_synonyms_are_hidden_from_help(command: Command) -> None:
     output = command.run('goal', '--help').output.captured  # --help is not a logged action
     assert ('new' in output) is False
