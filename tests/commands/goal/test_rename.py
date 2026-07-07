@@ -7,7 +7,7 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.commands.agent import live_sessions
+from chimera.agents.claude import live_sessions
 from chimera.commands.goal.rename import RenameResult, rename
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
