@@ -60,6 +60,24 @@ def test_adopt_restructures_the_branch_then_launches_the_agent(
     compare(calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', None, (), False)])
 
 
+def test_adopt_keeps_the_adopted_branchs_upstream(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    git_repo('checkout', '-b', 'feature')
+    git_repo.commit_content('feature-work')
+    git_repo('checkout', 'main')
+    git_repo('init', '--bare', str(tmpdir / 'origin'))
+    git_repo('remote', 'add', 'origin', str(tmpdir / 'origin'))
+    git_repo('push', '-u', 'origin', 'feature')
+    _stub_agent(replace)
+    adopt(git_repo.path, tmpdir / 'worktrees', 'feature', 'proj@feature@agent')
+    # the rename carries the branch's config section, so the human branch keeps tracking
+    compare(
+        Git(git_repo.path)('rev-parse', '--abbrev-ref', 'feature/human@{upstream}').strip(),
+        expected='origin/feature',
+    )
+
+
 def test_adopt_agent_worktree_checks_out_the_adopted_work(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
