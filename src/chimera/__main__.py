@@ -8,8 +8,10 @@ import typer
 from typer._click.core import Command, Context
 from typer._click.shell_completion import CompletionItem
 from typer.core import TyperCommand, TyperGroup
+from typer.main import get_command
 
 from chimera import logging
+from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
 from chimera.commands.agent import Agent, agents, scope_line, scoped
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
@@ -832,5 +834,24 @@ def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
         typer.echo(f'Nothing to remove for {goal}')
 
 
+def _strip_restricted_options(command: Command) -> None:
+    """Remove agent-restricted options from the Click tree — not merely hidden, unparseable:
+    Click's own parser and ``--help`` no longer know they exist."""
+    command.params = [
+        p for p in command.params if not RESTRICTED_OPTIONS.intersection(getattr(p, 'opts', ()))
+    ]
+    for sub in getattr(command, 'commands', {}).values():
+        _strip_restricted_options(sub)
+
+
+def main() -> None:
+    if running_under_ai_agent():
+        command = get_command(app)
+        _strip_restricted_options(command)
+        command()
+    else:
+        app()
+
+
 if __name__ == '__main__':  # pragma: no cover
-    app()
+    main()

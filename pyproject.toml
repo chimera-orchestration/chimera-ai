@@ -17,8 +17,8 @@ Homepage = "https://github.com/chimera-orchestration/chimera-ai"
 Repository = "https://github.com/chimera-orchestration/chimera-ai"
 
 [project.scripts]
-chimera = "chimera.__main__:app"
-ch = "chimera.__main__:app"
+chimera = "chimera.__main__:main"
+ch = "chimera.__main__:main"
 
 [dependency-groups]
 dev = [

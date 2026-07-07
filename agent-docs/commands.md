@@ -86,6 +86,20 @@ command — but only when it actually withheld something *and* `-v` wasn't given
 hidden exactly when an agent would otherwise have no way to discover it: `ch help` trails
 `ch help -v also lists…`; `ch doctor` reveals the count of passing checks it suppressed.
 
+## Agent-restricted options
+
+An option too risky to trust to an AI agent's own judgement (`--force`, `--dangerous`) is named
+in `chimera.agent_env.RESTRICTED_OPTIONS`. When `chimera.agent_env.running_under_ai_agent()` is
+true (currently: `CLAUDECODE` is set), `__main__.main()` builds the Click command tree via
+`typer.main.get_command(app)` and strips any parameter matching `RESTRICTED_OPTIONS` from every
+command's `.params` before invoking it (`_strip_restricted_options`) — not hidden, physically
+absent, so Click's own parser, `--help`, and `ch help`/`ch help -v`/`--json` (which all read
+`command.get_params(ctx)`) stop knowing the option exists. No pure function needs a check: Click
+never parses the flag, so it never reaches one. A future high-risk option joins the same
+frozenset rather than inventing a new mechanism. This only works because console-script entry
+points point at `main()`, not `app` directly — `Typer.__call__` rebuilds an unstripped tree from
+scratch on every call, so stripping has to happen on a tree we build and invoke ourselves.
+
 ## Destructive commands preview with --dry
 
 A command that deletes or discards (worktree/branch removal, project removal, …) must offer
