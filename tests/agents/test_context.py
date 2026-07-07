@@ -128,7 +128,7 @@ def test_materialize_sanitizes_a_url_bearing_name(tmpdir: TempDir) -> None:
 def test_materialize_none_when_nothing_to_inject(tmpdir: TempDir, full_logs: LogCapture) -> None:
     ws = tmpdir.makedir('lycia')
     assert materialize(ws, 'n', '') is None
-    compare((ws / 'logs').exists(), expected=False)  # no file either
+    assert not (ws / 'logs').exists()  # no file either
     full_logs.check()  # and no log line: nothing was rendered
 
 

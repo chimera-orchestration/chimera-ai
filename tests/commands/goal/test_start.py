@@ -47,7 +47,7 @@ def test_start_dry_creates_nothing(tmpdir: TempDir, git_repo: Repo, replace: Rep
         start(git_repo.path, worktrees, 'g', 'proj@g@agent', dry=Dry(True)),
         expected=worktrees / 'g@agent',
     )
-    compare(worktrees.exists(), expected=False)  # no worktree dir
+    assert not worktrees.exists()  # no worktree dir
     compare(Git(git_repo.path).branches(), expected=['main'])  # no branches
     compare(len(calls), expected=1)  # the launch call still flows (itself dry-routed)
 
@@ -278,5 +278,5 @@ def test_goal_start_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
             },
         ),
     )
-    compare((project / 'worktrees').exists(), expected=False)  # nothing created
+    assert not (project / 'worktrees').exists()  # nothing created
     compare(Git(git_repo.path).branches(), expected=['main'])

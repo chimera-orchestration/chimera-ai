@@ -437,8 +437,8 @@ def test_review_dry_wires_nothing(tmpdir: TempDir, replace: Replacer) -> None:
         expected=worktrees / 'pr-1@agent',
     )
     git = Git(clone)
-    compare(worktrees.exists(), expected=False)  # no worktree dir
-    compare(git.ref_exists('origin/pr/1'), expected=False)  # tracking ref never fetched
+    assert not worktrees.exists()  # no worktree dir
+    assert not git.ref_exists('origin/pr/1')  # tracking ref never fetched
     compare(  # and no PR refspec persisted alongside the clone's default one
         git('config', '--get-all', 'remote.origin.fetch').splitlines(),
         expected=['+refs/heads/*:refs/remotes/origin/*'],

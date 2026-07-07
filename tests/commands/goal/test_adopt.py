@@ -55,7 +55,7 @@ def test_adopt_dry_restructures_nothing(tmpdir: TempDir, git_repo: Repo, replace
         adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent', dry=Dry(True)),
         expected=worktrees / 'feature@agent',
     )
-    compare(worktrees.exists(), expected=False)  # no worktree dir
+    assert not worktrees.exists()  # no worktree dir
     compare(Git(git_repo.path).branches(), expected=['feature', 'main'])  # branch untouched
 
 
@@ -352,5 +352,5 @@ def test_goal_adopt_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
             {'level': 'INFO', 'command': 'goal adopt', 'phase': 'end'},
         ],
     )
-    compare((project / 'worktrees').exists(), expected=False)  # nothing created
+    assert not (project / 'worktrees').exists()  # nothing created
     compare(Git(git_repo.path).branches(), expected=['feature', 'main'])

@@ -14,7 +14,7 @@ isn't built yet — the vocabulary stands regardless; what's implemented is the 
 - **Actor** — a participant in a goal: a **human** or an **agent**. Each works on its own **branch**; an agent additionally always works in a **worktree** (a human checks their branch out wherever they like).
 - **Branch** — a git branch named `<goal>/<actor>`
 - **Worktree** — a git worktree named `<goal>@<actor>` (agents only)
-- **Principle** — context an agent must load before beginning a process, task or step
+- **Principle** — context an agent must always load before beginning work (inlined at launch)
 - **Knowledge** — named, versioned context loaded on demand (e.g. "load knowledge for testfixtures")
 - **Reference** — a project used only for tracking knowledge
 - **Service** — a long-running system process managed by Chimera (e.g. a tmux session or docker container); distinct from the workflow concept "Process"

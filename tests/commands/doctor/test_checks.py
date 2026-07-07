@@ -311,7 +311,7 @@ class TestWorkspaceDirs:
                 Finding('workspace-dirs', f'{ws / "roles"} missing', resolved=False, fixable=True)
             ],
         )
-        compare((ws / 'roles').exists(), expected=False)
+        assert not (ws / 'roles').exists()
 
 
 class TestProjectConfig:
