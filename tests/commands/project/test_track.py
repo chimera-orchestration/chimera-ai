@@ -56,7 +56,7 @@ def test_track_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None
             {'source': str(repo), 'checkout': None},
         ),
     )
-    assert (workspace / 'myrepo' / 'config.yaml').is_file() is True
+    assert (workspace / 'myrepo' / 'config.yaml').is_file()
 
 
 def test_track_cli_outside_a_workspace(tmpdir: TempDir, command: Command) -> None:

@@ -31,7 +31,7 @@ def test_every_command_logs_its_action(path: str) -> None:
     # The guard for "every CLI action must be logged": a command that isn't a
     # LoggingCommand silently skips the chokepoint. Adding one without cls=LoggingCommand
     # (directly or via PassthroughCommand) fails here.
-    assert isinstance(_leaf_commands()[path], LoggingCommand) is True
+    assert isinstance(_leaf_commands()[path], LoggingCommand)
 
 
 def _tagged_wrappers() -> dict[str, FunctionType]:
@@ -56,7 +56,7 @@ def test_logged_delegate_is_called_in_its_wrapper(name: str) -> None:
         for global_name in wrapper.__code__.co_names
         if isinstance(fn := vars(main).get(global_name), FunctionType)
     }
-    assert (wrapper.__dict__['delegate'] in referenced) is True
+    assert wrapper.__dict__['delegate'] in referenced
 
 
 def test_command_logs_the_action(command: Command, tmpdir: TempDir, replace: Replacer) -> None:

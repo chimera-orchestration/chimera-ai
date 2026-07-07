@@ -591,13 +591,13 @@ def test_scope_line_reports_the_pinned_target(tmpdir: TempDir) -> None:
 
 def test_under_and_in_goal(tmpdir: TempDir) -> None:
     root = tmpdir.makedir('r')
-    compare(under(root, root), expected=True)
-    compare(under(root / 'a' / 'b', root), expected=True)
-    compare(under(tmpdir / 'other', root), expected=False)
+    assert under(root, root)
+    assert under(root / 'a' / 'b', root)
+    assert not under(tmpdir / 'other', root)
     worktrees = tmpdir.makedir('wt')
-    compare(in_goal(worktrees / 'g@agent', worktrees, 'g'), expected=True)
-    compare(in_goal(worktrees / 'goal@agent', worktrees, 'g'), expected=False)  # 'g' ≠ 'goal'
-    compare(in_goal(worktrees, worktrees, 'g'), expected=False)  # the dir itself is not in a goal
+    assert in_goal(worktrees / 'g@agent', worktrees, 'g')
+    assert not in_goal(worktrees / 'goal@agent', worktrees, 'g')  # 'g' ≠ 'goal'
+    assert not in_goal(worktrees, worktrees, 'g')  # the dir itself is not in a goal
 
 
 def _scoped_cli(tmpdir: TempDir, replace: Replacer) -> Path:

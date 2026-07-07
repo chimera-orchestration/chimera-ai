@@ -52,7 +52,7 @@ class TestGoalMode:
         main = _head(git_repo.path)
         git_repo('checkout', '-b', 'feature')
         git_repo.commit_content('feature-work')
-        assert (_head(git_repo.path) == main) is False  # repo is parked on a different commit
+        assert _head(git_repo.path) != main  # repo is parked on a different commit
         worktrees = tmpdir / 'worktrees'
         [created] = add(git_repo.path, worktrees, goal='g')
         compare(_head(created), expected=main)
@@ -65,7 +65,7 @@ class TestGoalMode:
         origin.commit_content('remote-ahead', datetime(2022, 1, 1))
         local('fetch', 'origin')
         expected = local.rev_parse('origin/main', short=False)
-        assert (expected == local.rev_parse('main', short=False)) is False
+        assert expected != local.rev_parse('main', short=False)
         worktrees = tmpdir / 'worktrees'
         [created] = add(local.path, worktrees, goal='g')
         compare(_head(created), expected=expected)
@@ -77,7 +77,7 @@ class TestGoalMode:
         local = Repo.clone(origin, tmpdir / 'repo')
         local.commit_content('local-ahead', datetime(2022, 1, 1))
         expected = local.rev_parse('main', short=False)
-        assert (expected == local.rev_parse('origin/main', short=False)) is False
+        assert expected != local.rev_parse('origin/main', short=False)
         worktrees = tmpdir / 'worktrees'
         [created] = add(local.path, worktrees, goal='g')
         compare(_head(created), expected=expected)
@@ -145,7 +145,7 @@ class TestGoalMode:
             )
         ):
             add(git_repo.path, worktrees, goal='g')
-        assert worktrees.exists() is False  # refused before touching anything
+        assert not worktrees.exists()  # refused before touching anything
 
     def test_from_rescues_a_repo_without_a_default_branch(
         self, tmpdir: TempDir, git_repo: Repo
@@ -161,7 +161,7 @@ class TestGoalMode:
         worktrees = tmpdir / 'worktrees'
         with ShouldRaise(RuntimeError, match='no commits'):  # message embeds `git status` output
             add(repo.path, worktrees, goal='g')
-        assert worktrees.exists() is False
+        assert not worktrees.exists()
 
     def test_refuses_bare_repo_without_commits(self, tmpdir: TempDir) -> None:
         bare = tmpdir / 'bare.git'

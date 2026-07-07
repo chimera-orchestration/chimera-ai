@@ -11,14 +11,26 @@ Module-level helpers stay at module scope, above the class that uses them.
 
 ## Assertions
 
-`assert a is b` (identity/singletons only: `is None`, `is True`, `is obj`) is the **only**
-permitted `assert`. Every other check uses `compare` from testfixtures:
-- `compare(actual, expected=<>)` — name the `expected=` side so failures read correctly.
-- **Compare whole objects, once.** One `compare` of the full object beats several asserts on
-  its attributes — compare the Finding, not `finding.fixable` then `finding.message`.
-- Equality, membership, contents — all `compare`, never `assert ==` or `assert in`.
-- Only when an exact whole-object compare is genuinely impossible, narrow with `like(Cls, attr=…)`
-  (a typed partial `Comparison`) — never fall back to a bare `assert`.
+Two tools, split by what the check *is*:
+
+- **A value → `compare`** (from testfixtures): `compare(actual, expected=<>)` — name the
+  `expected=` side so failures read correctly. Equality of data always goes through `compare`,
+  never `assert ==` — its failure output diffs the two values.
+  - **Compare whole objects, once.** One `compare` of the full object beats several checks on
+    its attributes — compare the Finding, not `finding.fixable` then `finding.message`.
+  - Only when an exact whole-object compare is genuinely impossible, narrow with
+    `like(Cls, attr=…)` (a typed partial `Comparison`) — never fall back to comparing pieces.
+- **A boolean fact → plain `assert`**: membership, existence, identity, inequality and
+  predicates — `assert 'x' in text`, `assert not path.exists()`, `assert result is None`,
+  `assert a != b`, `assert is_merged(git, ref, base)`.
+  - **Never launder a boolean through compare** — `compare('x' in text, expected=True)` fails
+    as an unreadable `False != True`. If you're typing `expected=True`, `expected=False` or
+    `expected=None`, you wanted `assert x` / `assert not x` / `assert x is None`.
+  - Nor pad the assert — `assert ('x' in text) is True` is the same truth test with noise on;
+    reserve `is` for identity itself (`is None`, `is sentinel`).
+
+The line: `compare` when a failure should show a *diff of values*; `assert` when the check is
+inherently True/False and a failure needs no diff to read.
 
 ## Exceptions
 

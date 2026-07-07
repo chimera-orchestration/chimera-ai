@@ -50,10 +50,9 @@ class TestRename:
             expected='h/agent',
         )
         # and git's own repo-side registration points at the moved path
-        compare(
+        assert (
             f'worktree {(worktrees / "h@agent").resolve()}'
-            in git_repo('worktree', 'list', '--porcelain').splitlines(),
-            expected=True,
+            in git_repo('worktree', 'list', '--porcelain').splitlines()
         )
 
     def test_renames_every_actor(self, tmpdir: TempDir, git_repo: Repo) -> None:
@@ -96,7 +95,7 @@ class TestRename:
     def test_cwd_outside_the_goal_is_untouched(self, tmpdir: TempDir, git_repo: Repo) -> None:
         worktrees = _goal(tmpdir, git_repo)
         result = rename(git_repo.path, worktrees, 'g', 'h', cwd=tmpdir.path)
-        compare(result.cwd_moved_to, expected=None)
+        assert result.cwd_moved_to is None
 
     def test_warns_about_an_unregistered_worktree_dir(
         self, tmpdir: TempDir, git_repo: Repo

@@ -119,34 +119,34 @@ class TestIsMerged:
     def test_ancestor_of_base(self, git_repo: Repo) -> None:
         git = Git(git_repo.path)
         git('branch', 'feature', 'HEAD')  # points at main → reachable from it
-        assert is_merged(git, 'feature', 'main') is True
+        assert is_merged(git, 'feature', 'main')
 
     def test_branch_ahead_is_unmerged(self, tmpdir: TempDir) -> None:
         repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
-        assert is_merged(Git(repo.path), 'feature', 'main') is False
+        assert not is_merged(Git(repo.path), 'feature', 'main')
 
     def test_regular_merge(self, tmpdir: TempDir) -> None:
         repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
         repo('merge', '-q', '--no-ff', 'feature', '-m', 'merge')
-        assert is_merged(Git(repo.path), 'feature', 'main') is True
+        assert is_merged(Git(repo.path), 'feature', 'main')
 
     def test_squash_merge_of_several_commits(self, tmpdir: TempDir) -> None:
         repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
         repo('merge', '-q', '--squash', 'feature')
         repo('commit', '-qm', 'squash feature')  # one commit carrying the whole branch diff
-        assert is_merged(Git(repo.path), 'feature', 'main') is True
+        assert is_merged(Git(repo.path), 'feature', 'main')
 
     def test_rebase_merge(self, tmpdir: TempDir) -> None:
         repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
         git = Git(repo.path)
         git('cherry-pick', *git('rev-list', '--reverse', 'main..feature').split())
-        assert is_merged(git, 'feature', 'main') is True
+        assert is_merged(git, 'feature', 'main')
 
 
 def test_is_dirty(git_repo: Repo) -> None:
-    assert is_dirty(git_repo.path) is False
+    assert not is_dirty(git_repo.path)
     (git_repo.path / 'scratch.txt').write_text('wip')
-    assert is_dirty(git_repo.path) is True
+    assert is_dirty(git_repo.path)
 
 
 class TestDefaultBranch:
@@ -184,7 +184,7 @@ class TestBaseRef:
 
     def test_none_when_neither_ref_exists(self, tmpdir: TempDir) -> None:
         repo = _renamed(Repo.make(tmpdir / 'x'), 'trunk')  # default resolves to main, but absent
-        compare(base_ref(Git(repo.path)), expected=None)
+        assert base_ref(Git(repo.path)) is None
 
 
 class TestFetchOrigin:

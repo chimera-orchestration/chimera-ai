@@ -127,8 +127,8 @@ def test_mv_dispatches_to_rename(
 
 def test_synonyms_are_hidden_from_help(command: Command) -> None:
     output = command.run('goal', '--help').output.captured  # --help is not a logged action
-    assert ('new' in output) is False
-    assert ('cleanup' in output) is False
+    assert 'new' not in output
+    assert 'cleanup' not in output
 
 
 def _synonyms(group: Typer) -> dict[str, str]:

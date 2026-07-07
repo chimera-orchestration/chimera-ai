@@ -26,25 +26,25 @@ class TestStripRestrictedOptions:
         command = get_command(app)
         _strip_restricted_options(command)
         rm = _leaf(command, 'worktree', 'rm')
-        compare('--force' in _option_names(rm), expected=False)
+        assert '--force' not in _option_names(rm)
 
     def test_removes_force_from_goal_finish(self) -> None:
         command = get_command(app)
         _strip_restricted_options(command)
         finish = _leaf(command, 'goal', 'finish')
-        compare('--force' in _option_names(finish), expected=False)
+        assert '--force' not in _option_names(finish)
 
     def test_removes_dangerous_from_goal_start(self) -> None:
         command = get_command(app)
         _strip_restricted_options(command)
         start = _leaf(command, 'goal', 'start')
-        compare('--dangerous' in _option_names(start), expected=False)
+        assert '--dangerous' not in _option_names(start)
 
     def test_leaves_unrelated_options_alone(self) -> None:
         command = get_command(app)
         _strip_restricted_options(command)
         rm = _leaf(command, 'worktree', 'rm')
-        compare({'--offline', '--dry', '--project', '-p'} <= _option_names(rm), expected=True)
+        assert {'--offline', '--dry', '--project', '-p'} <= _option_names(rm)
 
 
 class TestMain:
@@ -63,7 +63,7 @@ class TestMain:
         compare(excinfo.value.code, expected=2)
         # Rich styles "--force" as separate colored spans, splitting the literal
         # substring — assert on the unstyled lead-in text instead.
-        compare('No such option' in capsys.readouterr().err, expected=True)
+        assert 'No such option' in capsys.readouterr().err
 
     def test_force_recognized_without_agent_context(
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]
@@ -79,4 +79,4 @@ class TestMain:
             main()
         compare(excinfo.value.code, expected=0)
         # same styling caveat as above — assert on the help text, not the flag itself.
-        compare('Skip the live-agent check' in capsys.readouterr().out, expected=True)
+        assert 'Skip the live-agent check' in capsys.readouterr().out

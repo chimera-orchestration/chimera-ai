@@ -93,7 +93,7 @@ def test_new_goal_arguments_do_not_complete(tmpdir: TempDir, workspace_with_env:
 def test_synonyms_are_offered_alongside_canonical() -> None:
     offered = _complete(['goal'])
     # the canonical 'finish' and its synonyms 'new'/'cleanup' all complete
-    compare({'finish', 'new', 'cleanup'} <= set(offered), expected=True)
+    assert {'finish', 'new', 'cleanup'} <= set(offered)
 
 
 def test_synonym_prefix_filtered() -> None:
@@ -105,7 +105,7 @@ def test_zsh_and_bash_scripts_emit() -> None:
         shell = get_completion_class(shell_name)
         assert shell is not None
         script = shell(get_command(app), {}, 'ch', '_CH_COMPLETE').source()
-        assert ('_CH_COMPLETE' in script) is True  # generated script too large to pin exactly
+        assert '_CH_COMPLETE' in script  # generated script too large to pin exactly
 
 
 def test_complete_actor_directly() -> None:

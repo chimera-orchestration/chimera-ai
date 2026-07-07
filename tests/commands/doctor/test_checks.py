@@ -85,7 +85,7 @@ class TestWorkspaceConfig:
                 )
             ],
         )
-        assert (ws / 'config.yaml').exists() is False  # report only, nothing written
+        assert not (ws / 'config.yaml').exists()  # report only, nothing written
 
     def test_missing_fixed(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
@@ -125,7 +125,7 @@ class TestWorkspaceConfig:
                 )
             ],
         )
-        assert (ws / 'config.yaml').exists() is False  # the excluded fix never ran
+        assert not (ws / 'config.yaml').exists()  # the excluded fix never ran
 
     def test_already_current_is_silent(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
@@ -655,7 +655,7 @@ class TestWorktreeBranch:
                 ],
             )
         tmpdir.compare(path='lycia/proj/worktrees', expected=())
-        compare('parked/g/agent' in git.branches(), expected=True)  # the work survives
+        assert 'parked/g/agent' in git.branches()  # the work survives
         log.check(
             (
                 'worktree-branch: removed',
@@ -817,7 +817,7 @@ class TestInertBranch:
                     )
                 ],
             )
-        compare('g/human' in set(Git(repo.path).branches()), expected=False)
+        assert 'g/human' not in set(Git(repo.path).branches())
         log.check(('inert-branches: refs', {'git': {'before': {'g/human': seed}, 'after': {}}}))
 
     def test_report_only_leaves_it(self, tmpdir: TempDir) -> None:
@@ -836,7 +836,7 @@ class TestInertBranch:
                 )
             ],
         )
-        compare('g/human' in set(Git(repo.path).branches()), expected=True)
+        assert 'g/human' in set(Git(repo.path).branches())
 
     def test_excluded_branch_reported_but_kept(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
@@ -854,7 +854,7 @@ class TestInertBranch:
                 )
             ],
         )
-        compare('g/human' in set(Git(repo.path).branches()), expected=True)
+        assert 'g/human' in set(Git(repo.path).branches())
 
     def test_ancestor_of_local_default_deleted_without_a_remote(
         self, tmpdir: TempDir, git_repo: Repo
@@ -874,7 +874,7 @@ class TestInertBranch:
                 )
             ],
         )
-        compare('g/human' in set(Git(git_repo.path).branches()), expected=False)
+        assert 'g/human' not in set(Git(git_repo.path).branches())
 
     def test_branch_with_unique_unpushed_work_kept(self, tmpdir: TempDir, git_repo: Repo) -> None:
         ws = _ws(tmpdir)
@@ -915,7 +915,7 @@ class TestInertBranch:
                 )
             ],
         )
-        compare('g/reviewer' in set(Git(repo.path).branches()), expected=False)
+        assert 'g/reviewer' not in set(Git(repo.path).branches())
 
     def test_ignores_a_branch_whose_goal_has_no_agent_worktree(
         self, tmpdir: TempDir, git_repo: Repo
@@ -1010,7 +1010,7 @@ class TestChimeraRepoDiscovery:
 
     def test_none_without_a_checkout(self, tmpdir: TempDir) -> None:
         nested = tmpdir.makedir('a/b/c')
-        compare(doctor_checks.chimera_repo(nested / 'checks.py'), expected=None)
+        assert doctor_checks.chimera_repo(nested / 'checks.py') is None
 
 
 def _chimera_clone(tmpdir: TempDir, replace: Replacer) -> tuple[Repo, Git]:
@@ -1275,7 +1275,7 @@ class TestChimeraUpToDate:
         repo = Repo.make(tmpdir / 'r')
         repo.commit_content('seed')
         repo('branch', 'deploy')  # exists, but no worktree has it checked out
-        compare(doctor_checks._advance_checkout(Git(repo.path), 'deploy', 'main'), expected=None)
+        assert doctor_checks._advance_checkout(Git(repo.path), 'deploy', 'main') is None
 
 
 def _shell_home(tmpdir: TempDir, replace: Replacer, shell: str):
@@ -1381,7 +1381,7 @@ class TestWorkspaceClean:
                 )
             ],
         )
-        compare(is_dirty(ws), expected=True)  # reported only, nothing committed
+        assert is_dirty(ws)  # reported only, nothing committed
 
     def test_fix_stages_commits_and_logs(self, tmpdir: TempDir, replace: Replacer) -> None:
         repo = _git_ws(tmpdir)
@@ -1402,7 +1402,7 @@ class TestWorkspaceClean:
                     )
                 ],
             )
-        compare(is_dirty(ws), expected=False)
+        assert not is_dirty(ws)
         compare(repo('log', '-1', '--format=%s').strip(), expected='Add a knowledge note')
         log.check(
             (
