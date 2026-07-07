@@ -18,13 +18,21 @@ SUMMARY_LIMIT = 100
 
 
 @dataclass(frozen=True)
+class OptionEntry:
+    """One option, fully derived from its Click parameter object."""
+
+    signature: str  # e.g. '--force' or '--project/-p TEXT'
+    help: str  # the option's help= text; '' if none was set
+
+
+@dataclass(frozen=True)
 class HelpEntry:
     """One leaf command, fully derived from its Click command object."""
 
     path: str  # canonical command path, e.g. 'goal finish'
     usage: str  # positional metavars only, e.g. 'GOAL' (never '[OPTIONS]')
     summary: str  # the command's own short help
-    options: tuple[str, ...]  # option signatures, e.g. '--project/-p TEXT' (for -v / json)
+    options: tuple[OptionEntry, ...]  # for -v / json
     synonyms: tuple[str, ...]  # other names that dispatch here, e.g. 'cleanup' (for -v / json)
 
 
@@ -71,9 +79,10 @@ def _wanted(param: Parameter) -> bool:
     return param.param_type_name == 'option' and not hidden and '--help' not in param.opts
 
 
-def _option(param: Parameter, ctx: Context) -> str:
+def _option(param: Parameter, ctx: Context) -> OptionEntry:
     names = '/'.join(param.opts)
-    return names if getattr(param, 'is_flag', False) else f'{names} {param.make_metavar(ctx)}'
+    signature = names if getattr(param, 'is_flag', False) else f'{names} {param.make_metavar(ctx)}'
+    return OptionEntry(signature=signature, help=getattr(param, 'help', None) or '')
 
 
 def render_text(entries: list[HelpEntry], *, verbose: bool) -> str:
@@ -83,7 +92,7 @@ def render_text(entries: list[HelpEntry], *, verbose: bool) -> str:
     for entry in entries:
         lines.append(f'{_signature(entry):<{width}}  {entry.summary}'.rstrip())
         if verbose:
-            lines.extend(f'    {option}' for option in entry.options)
+            lines.extend(f'    {opt.signature}  {opt.help}'.rstrip() for opt in entry.options)
             if entry.synonyms:
                 lines.append(f'    (also: {", ".join(entry.synonyms)})')
     if not verbose and any(e.options or e.synonyms for e in entries):

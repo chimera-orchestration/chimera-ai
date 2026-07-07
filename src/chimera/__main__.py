@@ -92,7 +92,22 @@ ToOpt = Annotated[
         '--to', help='Actor branch to catch up to (default: agent)', autocompletion=complete_actor
     ),
 ]
-ForceOpt = Annotated[bool, typer.Option('--force')]
+WorktreeForceOpt = Annotated[
+    bool,
+    typer.Option(
+        '--force',
+        help='Skip the live-agent check, dirty/unmerged safety checks, and fetch; '
+        'discards uncommitted or unmerged work',
+    ),
+]
+ProjectForceOpt = Annotated[
+    bool,
+    typer.Option(
+        '--force',
+        help='Force-finish every goal in the project (discarding unmerged/uncommitted work '
+        'per goal); the live-agent check is never skipped',
+    ),
+]
 SyncForceOpt = Annotated[
     bool,
     typer.Option(
@@ -502,7 +517,7 @@ def project_add(
 @logs(_project_remove)
 def project_rm(
     name: Annotated[str, typer.Argument(autocompletion=complete_project)],
-    force: ForceOpt = False,
+    force: ProjectForceOpt = False,
     dry: DryOpt = False,
 ) -> None:
     dry_run = Dry(dry)
@@ -575,7 +590,7 @@ def worktree_add(
 def worktree_rm(
     ctx: typer.Context,
     goal: ExistingGoalArg,
-    force: ForceOpt = False,
+    force: WorktreeForceOpt = False,
     offline: OfflineOpt = False,
     dry: DryOpt = False,
     project: ProjectOpt = None,
@@ -724,7 +739,7 @@ def _sync_line(result: SyncResult) -> str:
 def goal_finish(
     ctx: typer.Context,
     goal: ExistingGoalArg,
-    force: ForceOpt = False,
+    force: WorktreeForceOpt = False,
     offline: OfflineOpt = False,
     dry: DryOpt = False,
     project: ProjectOpt = None,

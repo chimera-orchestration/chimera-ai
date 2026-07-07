@@ -5,7 +5,7 @@ from testfixtures import compare
 from typer.main import get_command
 
 from chimera.__main__ import app
-from chimera.help import HelpEntry, command_index, render_json, render_text
+from chimera.help import HelpEntry, OptionEntry, command_index, render_json, render_text
 from tests.cli import Command, action_logs
 
 
@@ -29,7 +29,23 @@ def test_finish_entry_is_fully_derived() -> None:
             path='goal finish',
             usage='GOAL',
             summary="Remove a goal's worktrees and branches.",
-            options=('--force', '--offline', '--dry', '--project/-p TEXT'),
+            options=(
+                OptionEntry(
+                    signature='--force',
+                    help='Skip the live-agent check, dirty/unmerged safety checks, and fetch; '
+                    'discards uncommitted or unmerged work',
+                ),
+                OptionEntry(
+                    signature='--offline',
+                    help="Don't fetch origin first; use the refs already present",
+                ),
+                OptionEntry(
+                    signature='--dry', help='Preview what would be removed; change nothing'
+                ),
+                OptionEntry(
+                    signature='--project/-p TEXT', help='Project name (default: inferred from cwd)'
+                ),
+            ),
             synonyms=('cleanup',),
         ),
     )
@@ -42,7 +58,13 @@ def test_help_lists_itself() -> None:
             path='help',
             usage='',
             summary='List every command in one chunk (derived from the live tree).',
-            options=('--verbose/-v', '--json'),
+            options=(
+                OptionEntry(
+                    signature='--verbose/-v',
+                    help="Also show each command's options and synonyms",
+                ),
+                OptionEntry(signature='--json', help='Emit the index as JSON'),
+            ),
             synonyms=(),
         ),
     )
