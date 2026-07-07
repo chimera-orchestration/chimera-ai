@@ -51,7 +51,7 @@ def test_add_checkout_stands_up_a_plain_worktree_of_the_default_branch(tmpdir: T
     compare(
         add(workspace, f'file://{origin.path}', checkout=checkout), expected=workspace / 'origin'
     )
-    compare((checkout / 'seed').is_file(), expected=True)  # a real working tree, files present
+    assert (checkout / 'seed').is_file()  # a real working tree, files present
     git = Git(checkout)
     compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
     upstream = git('for-each-ref', '--format=%(upstream:short)', 'refs/heads/main').strip()
@@ -68,8 +68,8 @@ def test_add_checkout_refuses_for_a_local_path(tmpdir: TempDir) -> None:
         )
     ):
         add(workspace, str(repo), checkout=checkout)
-    compare(checkout.exists(), expected=False)
-    compare((workspace / 'myrepo').exists(), expected=False)  # refused before touching anything
+    assert not checkout.exists()
+    assert not (workspace / 'myrepo').exists()  # refused before touching anything
 
 
 def test_add_checkout_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -87,4 +87,4 @@ def test_add_checkout_cli(tmpdir: TempDir, replace: Replacer, command: Command) 
             {'source': f'file://{origin.path}', 'checkout': str(checkout)},
         ),
     )
-    compare((checkout / 'seed').is_file(), expected=True)
+    assert (checkout / 'seed').is_file()

@@ -468,7 +468,7 @@ def test_conflict_leaves_the_cherry_pick_in_the_checkout(tmpdir: TempDir, git_re
             conflict=checkout.resolve(),
         ),
     )
-    compare(Git(checkout).ref_exists('CHERRY_PICK_HEAD'), expected=True)  # left mid cherry-pick
+    assert Git(checkout).ref_exists('CHERRY_PICK_HEAD')  # left mid cherry-pick
     compare(_full(git_repo, _wm()), expected=watermark)  # watermark NOT advanced
 
 
@@ -559,7 +559,7 @@ def test_force_cleans_up_a_stranded_append(tmpdir: TempDir, git_repo: Repo) -> N
     compare(_full(git_repo, 'g/human'), expected=tip)
     compare(Git(checkout)('rev-parse', 'HEAD').strip(), expected=tip)
     compare(Git(checkout)('status', '--porcelain').strip(), expected='')  # no mess left behind
-    compare(_sequencer(checkout).exists(), expected=False)  # the stray sequence is gone
+    assert not _sequencer(checkout).exists()  # the stray sequence is gone
     compare(sync(git_repo.path, 'g').outcome, expected=Outcome.NOOP)  # sync is healthy again
 
 
@@ -595,7 +595,7 @@ def test_replay_death_without_a_conflict_rolls_back(
         sync(git_repo.path, 'g')
     compare(_full(git_repo, 'g/human'), expected=human)  # the half-applied replay was backed out
     compare(Git(checkout)('status', '--porcelain').strip(), expected='')
-    compare(_sequencer(checkout).exists(), expected=False)
+    assert not _sequencer(checkout).exists()
     compare(_full(git_repo, _wm()), expected=watermark)  # nothing recorded as integrated
 
 

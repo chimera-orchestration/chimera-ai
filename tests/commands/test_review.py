@@ -207,7 +207,7 @@ def test_prompt_uses_the_packaged_default_without_an_override(tmpdir: TempDir) -
 
 
 def test_default_template_ships_as_package_data() -> None:
-    compare('$PR_TITLE' in _default_template(), expected=True)  # importlib.resources found it
+    assert '$PR_TITLE' in _default_template()  # importlib.resources found it
 
 
 def test_pr_metadata_parses_gh_json(tmpdir: TempDir, replace: Replacer) -> None:
@@ -274,28 +274,21 @@ def test_check_pr_repo_refuses_a_url_for_another_repo(tmpdir: TempDir) -> None:
 
 def test_check_pr_repo_passes_when_the_scp_origin_matches(tmpdir: TempDir) -> None:
     git = _repo_with_origin(tmpdir, 'git@github.com:simplistix/giterator.git')
-    compare(
-        _check_pr_repo(git, 'https://github.com/simplistix/giterator/pull/2', 'proj'), expected=None
-    )
+    assert _check_pr_repo(git, 'https://github.com/simplistix/giterator/pull/2', 'proj') is None
 
 
 def test_check_pr_repo_skips_a_local_path_origin(tmpdir: TempDir) -> None:
     git = _repo_with_origin(tmpdir, str(tmpdir / 'somewhere' / 'origin'))
-    compare(
-        _check_pr_repo(git, 'https://github.com/simplistix/giterator/pull/2', 'proj'), expected=None
-    )
+    assert _check_pr_repo(git, 'https://github.com/simplistix/giterator/pull/2', 'proj') is None
 
 
 def test_check_pr_repo_skips_without_an_origin(tmpdir: TempDir) -> None:
-    compare(
-        _check_pr_repo(Git(Repo.make(tmpdir / 'r').path), 'https://x/o/r/pull/1', 'p'),
-        expected=None,
-    )
+    assert _check_pr_repo(Git(Repo.make(tmpdir / 'r').path), 'https://x/o/r/pull/1', 'p') is None
 
 
 def test_check_pr_repo_skips_an_unparseable_pr_url(tmpdir: TempDir) -> None:
     git = _repo_with_origin(tmpdir, 'https://github.com/o/r.git')
-    compare(_check_pr_repo(git, '', 'proj'), expected=None)  # number-only PR: no comparable URL
+    assert _check_pr_repo(git, '', 'proj') is None  # number-only PR: no comparable URL
 
 
 class TestPrArgument:

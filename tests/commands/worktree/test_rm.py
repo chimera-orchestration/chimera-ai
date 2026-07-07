@@ -114,7 +114,7 @@ def test_remove_sweeps_the_goals_sync_watermarks(tmpdir: TempDir, git_repo: Repo
     compare(
         git('for-each-ref', '--format=%(refname)', 'refs/chimera/synced/g/').strip(), expected=''
     )
-    assert marker.exists() is False
+    assert not marker.exists()
 
 
 def test_remove_refuses_uncommitted_changes(tmpdir: TempDir, git_repo: Repo) -> None:

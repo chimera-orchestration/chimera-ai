@@ -31,7 +31,7 @@ def test_init_cli(tmpdir: TempDir, command: Command) -> None:
         output=f'Initialized workspace at {path}',
         logging=action_logs('init', 'chimera.commands.init.init', {'path': str(path)}),
     )
-    assert (path / '.git').is_dir() is True
+    assert (path / '.git').is_dir()
 
 
 def test_init_cli_existing_path(tmpdir: TempDir, command: Command) -> None:

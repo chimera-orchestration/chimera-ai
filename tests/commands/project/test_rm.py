@@ -39,14 +39,14 @@ def test_remove_refuses_a_dir_that_is_not_a_tracked_project(tmpdir: TempDir) -> 
     stray.mkdir()
     with ShouldRaise(RuntimeError(f'{stray} is not a tracked project (no config.yaml)')):
         remove(workspace, 'stray')
-    assert stray.is_dir() is True
+    assert stray.is_dir()
 
 
 def test_remove_takes_out_a_project_with_no_goals(tmpdir: TempDir, git_repo: Repo) -> None:
     workspace, project = _project(tmpdir, git_repo)
     compare(remove(workspace, 'myproj'), expected=project)
-    assert project.exists() is False
-    assert git_repo.path.is_dir() is True  # the external tracked repo is left untouched
+    assert not project.exists()
+    assert git_repo.path.is_dir()  # the external tracked repo is left untouched
 
 
 def test_remove_refuses_while_goals_exist(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -66,7 +66,7 @@ def test_remove_force_finishes_goals_then_removes_the_project(
     Repo(project / 'worktrees' / 'g@agent').commit_content('work')  # unmerged
     (project / 'worktrees' / 'g@agent' / 'scratch.txt').write_text('wip')  # uncommitted
     compare(remove(workspace, 'myproj', force=True), expected=project)
-    assert project.exists() is False
+    assert not project.exists()
     compare(Git(git_repo.path).branches(), expected=['main'])
 
 
@@ -94,7 +94,7 @@ def test_remove_dry_previews_the_whole_teardown(tmpdir: TempDir, git_repo: Repo)
     workspace, project = _project(tmpdir, git_repo, with_goal=True)
     Repo(project / 'worktrees' / 'g@agent').commit_content('work')  # unmerged, would need force
     compare(remove(workspace, 'myproj', force=True, dry=Dry(on=True)), expected=project)
-    assert project.is_dir() is True  # nothing removed
+    assert project.is_dir()  # nothing removed
     tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)  # goal intact
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
@@ -112,7 +112,7 @@ def test_project_rm_cli(
             {'name': 'myproj', 'force': False, 'dry': False},
         ),
     )
-    assert project.exists() is False
+    assert not project.exists()
 
 
 def test_project_rm_cli_dry_previews(
@@ -128,7 +128,7 @@ def test_project_rm_cli_dry_previews(
             {'name': 'myproj', 'force': False, 'dry': True},
         ),
     )
-    assert project.is_dir() is True  # untouched
+    assert project.is_dir()  # untouched
 
 
 def test_project_rm_cli_reports_nothing_to_remove(

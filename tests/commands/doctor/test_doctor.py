@@ -371,7 +371,7 @@ def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command)
             },
         ),
     )
-    assert (ws / 'config.yaml').exists() is False  # report only, nothing written
+    assert not (ws / 'config.yaml').exists()  # report only, nothing written
 
 
 def test_doctor_cli_fix_resolves_and_exits_zero(
@@ -487,7 +487,7 @@ def test_doctor_cli_check_fixes_only_the_named_checks(
             },
         ),
     )
-    assert (ws / 'config.yaml').exists() is False  # the unselected check touched nothing
+    assert not (ws / 'config.yaml').exists()  # the unselected check touched nothing
 
 
 def test_doctor_cli_check_unknown_name(
@@ -545,7 +545,7 @@ def test_doctor_cli_exclude_prevents_the_fix(
             excluded={'workspace-config': [dropped]},
         ),
     )
-    assert (ws / 'config.yaml').exists() is False  # excluded, so --fix never wrote it
+    assert not (ws / 'config.yaml').exists()  # excluded, so --fix never wrote it
 
 
 def test_doctor_cli_exclude_unmatched_warns(

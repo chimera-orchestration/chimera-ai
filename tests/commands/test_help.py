@@ -89,25 +89,22 @@ def test_groups_are_not_entries() -> None:
 
 def test_text_default_omits_options_and_synonyms() -> None:
     text = render_text(_index(), verbose=False)
-    compare('goal finish' in text, expected=True)
-    compare('--force' in text, expected=False)
-    compare('cleanup' in text, expected=False)
+    assert 'goal finish' in text
+    assert '--force' not in text
+    assert 'cleanup' not in text
 
 
 def test_text_default_signposts_verbose() -> None:
-    compare(
-        render_text(_index(), verbose=False).endswith(
-            "ch help -v also lists each command's options & synonyms"
-        ),
-        expected=True,
+    assert render_text(_index(), verbose=False).endswith(
+        "ch help -v also lists each command's options & synonyms"
     )
 
 
 def test_text_verbose_shows_options_and_synonyms() -> None:
     text = render_text(_index(), verbose=True)
-    compare('    --force' in text, expected=True)
-    compare('    (also: cleanup)' in text, expected=True)
-    compare('also lists' in text, expected=False)  # no signpost when nothing is hidden
+    assert '    --force' in text
+    assert '    (also: cleanup)' in text
+    assert 'also lists' not in text  # no signpost when nothing is hidden
 
 
 def test_json_includes_synonyms() -> None:

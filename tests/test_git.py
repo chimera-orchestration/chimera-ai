@@ -102,8 +102,8 @@ class TestEnv:
 class TestRefHelpers:
     def test_ref_exists(self, git_repo: Repo) -> None:
         git = Git(git_repo.path)
-        compare(git.ref_exists('HEAD'), expected=True)
-        compare(git.ref_exists('no-such-ref'), expected=False)
+        assert git.ref_exists('HEAD')
+        assert not git.ref_exists('no-such-ref')
 
     def test_ref_shas_maps_only_existing_refs_to_full_shas(self, git_repo: Repo) -> None:
         git = Git(git_repo.path)

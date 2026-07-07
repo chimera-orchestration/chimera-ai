@@ -20,6 +20,7 @@ from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
+from chimera.commands.goal.rename import rename as _goal_rename
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
@@ -621,7 +622,7 @@ def worktree_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
 
 goal_app = typer.Typer(
     callback=_context,
-    cls=alias_group({'new': 'start', 'cleanup': 'finish', 'list': 'ls'}),
+    cls=alias_group({'new': 'start', 'cleanup': 'finish', 'list': 'ls', 'mv': 'rename'}),
     help='Work on goals.',
 )
 app.add_typer(goal_app, name='goal')
@@ -740,6 +741,31 @@ def _sync_line(result: SyncResult) -> str:
         f'{line}\n(note: uncommitted changes — {c.branch} not checked out; '
         f'commit/stash then `git checkout {c.branch}`)'
     )
+
+
+@goal_app.command(
+    'rename',
+    cls=LoggingCommand,
+    help='Rename a goal — its branches, worktrees and sync state; remote branches are only '
+    'warned about, never changed.',
+)
+@logs(_goal_rename)
+def goal_rename(
+    ctx: typer.Context,
+    old: ExistingGoalArg,
+    new: Annotated[str, typer.Argument(help='New goal name')],
+    project: ProjectOpt = None,
+) -> None:
+    p = _project(ctx, project)
+    result = _goal_rename(p.repo, p.worktrees, old, new, Path.cwd())
+    for old_ref, new_ref in result.branches:
+        typer.echo(f'Renamed branch {old_ref} to {new_ref}')
+    for old_wt, new_wt in result.worktrees:
+        typer.echo(f'Moved {old_wt} to {new_wt}')
+    for warning in result.warnings:
+        typer.echo(f'warning: {warning}')
+    if result.cwd_moved_to is not None:
+        typer.echo(f'note: your cwd moved — cd {result.cwd_moved_to}')
 
 
 @goal_app.command('finish', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")
