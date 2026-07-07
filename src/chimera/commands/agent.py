@@ -1,9 +1,12 @@
 import json
+import os
 import re
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from loguru import logger
 
 from chimera.context import Scope
 from chimera.worktrees import SEP
@@ -211,12 +214,12 @@ def _launch(worktree: Path, args: Sequence[str]) -> subprocess.CompletedProcess[
 
 
 def live_sessions(worktree: Path) -> list[dict[str, object]]:
-    """Claude sessions currently live under the worktree."""
+    """Claude sessions verified still live (pid actually running) under the worktree."""
     return _sessions('--cwd', str(worktree))
 
 
 def all_sessions() -> list[dict[str, object]]:
-    """Claude sessions currently live anywhere (across all projects)."""
+    """Claude sessions verified still live (pid actually running) anywhere."""
     return _sessions()
 
 
@@ -227,4 +230,30 @@ def _sessions(*scope: str) -> list[dict[str, object]]:
         text=True,
         check=True,
     )
-    return json.loads(result.stdout)
+    return [session for session in json.loads(result.stdout) if _verify_live(session)]
+
+
+def _verify_live(session: dict[str, object]) -> bool:
+    """Whether session's reported pid names a process that's actually still running.
+
+    Claude's own background-agent registry (``claude agents --json``) can report a
+    stale, degraded entry for some time after its process has already died — pid
+    and status may be missing entirely (observed after killing a backgrounded agent
+    directly by pid) — before it's eventually pruned. Rather than trust an entry's
+    mere presence, re-verify: ``os.kill(pid, 0)`` sends no signal, only probes.
+    A missing/non-int pid can't be probed, so it's treated as stale like a dead one;
+    either case is logged (with the full session) for anyone debugging a liveness
+    check that looked wrong.
+    """
+    pid = session.get('pid')
+    if not isinstance(pid, int):
+        logger.bind(session=session).warning('agent: session has no pid, treating as stale')
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        logger.bind(session=session).warning('agent: session pid is dead, treating as stale')
+        return False
+    except PermissionError:
+        logger.bind(session=session).info('agent: session pid owned by another user')
+    return True

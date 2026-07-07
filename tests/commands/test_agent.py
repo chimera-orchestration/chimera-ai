@@ -175,30 +175,81 @@ def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
 def test_live_sessions_queries_claude_by_cwd(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
     captured: dict[str, object] = {}
+    pid = os.getpid()
 
     def fake_run(
         cmd: object, capture_output: bool = False, text: bool = False, check: bool = False
     ):
         captured['cmd'] = cmd
-        return SimpleNamespace(stdout='[{"sessionId": "x", "status": "idle"}]')
+        return SimpleNamespace(stdout=f'[{{"sessionId": "x", "status": "idle", "pid": {pid}}}]')
 
     replace.in_module(subprocess.run, fake_run)
-    compare(live_sessions(worktree), expected=[{'sessionId': 'x', 'status': 'idle'}])
+    compare(live_sessions(worktree), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': pid}])
     compare(captured['cmd'], expected=['claude', 'agents', '--json', '--cwd', str(worktree)])
 
 
 def test_all_sessions_queries_claude_unscoped(replace: Replacer) -> None:
     captured: dict[str, object] = {}
+    pid = os.getpid()
 
     def fake_run(
         cmd: object, capture_output: bool = False, text: bool = False, check: bool = False
     ):
         captured['cmd'] = cmd
-        return SimpleNamespace(stdout='[{"sessionId": "x", "status": "idle"}]')
+        return SimpleNamespace(stdout=f'[{{"sessionId": "x", "status": "idle", "pid": {pid}}}]')
 
     replace.in_module(subprocess.run, fake_run)
-    compare(all_sessions(), expected=[{'sessionId': 'x', 'status': 'idle'}])
+    compare(all_sessions(), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': pid}])
     compare(captured['cmd'], expected=['claude', 'agents', '--json'])  # no --cwd → every project
+
+
+def _dead(pid: int, sig: int) -> None:
+    raise ProcessLookupError
+
+
+def _foreign(pid: int, sig: int) -> None:
+    raise PermissionError
+
+
+def test_sessions_filters_out_an_entry_whose_pid_has_died(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    replace.in_module(
+        subprocess.run,
+        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
+            stdout='[{"sessionId": "x", "status": "idle", "pid": 999999}]'
+        ),
+    )
+    replace.in_module(os.kill, _dead, module=os)
+    compare(live_sessions(worktree), expected=[])
+
+
+def test_sessions_filters_out_an_entry_with_no_pid_at_all(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    replace.in_module(
+        subprocess.run,
+        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
+            stdout='[{"kind": "background", "startedAt": 1781247747055, "name": "x"}]'
+        ),
+    )  # the degraded shape claude's registry reports briefly after a killed pid is pruned
+    compare(live_sessions(worktree), expected=[])
+
+
+def test_sessions_keeps_an_entry_whose_pid_belongs_to_another_user(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    replace.in_module(
+        subprocess.run,
+        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
+            stdout='[{"sessionId": "x", "status": "idle", "pid": 1}]'
+        ),
+    )
+    replace.in_module(os.kill, _foreign, module=os)
+    compare(live_sessions(worktree), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': 1}])
 
 
 def _project_with_worktree(tmpdir: TempDir) -> Path:
