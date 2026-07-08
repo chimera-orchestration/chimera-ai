@@ -70,6 +70,8 @@ from chimera.context import (
 )
 from chimera.dry import Dry
 from chimera.help import command_index, render_json, render_text
+from chimera.prime import prime as _prime
+from chimera.prime import resolve_role
 from chimera.worktrees import AGENT, SEP, session_name, worktree_path
 
 # Reusable option types — declared once, shared across commands (callables never see them).
@@ -456,6 +458,24 @@ def help_(
 ) -> None:
     entries = command_index(ctx.find_root().command)
     typer.echo(render_json(entries) if as_json else render_text(entries, verbose=verbose))
+
+
+@app.command(
+    'prime',
+    cls=LoggingCommand,
+    help='How to work here, right now — the golden path for this scope.',
+)
+@logs(_prime)
+def prime(ctx: typer.Context) -> None:
+    scope = _scope(ctx, None, None)
+    typer.echo(
+        _prime(
+            resolve_role(session_role(), scope),
+            project=scope.project.name if scope.project else None,
+            goal=scope.goal,
+            persona=workspace_config(scope.workspace).captain.name,
+        )
+    )
 
 
 @app.command(cls=LoggingCommand, help='Check and (with --fix) repair workspace health.')

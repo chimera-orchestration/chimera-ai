@@ -27,6 +27,7 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
     ROLE_MANAGER: frozenset(
         {
             'help',
+            'prime',
             'ls',
             'goal ls',
             'agent ls',
@@ -40,7 +41,7 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
             'review',
         }
     ),
-    ROLE_AGENT: frozenset({'help'}),  # 'prime' joins later in the arc
+    ROLE_AGENT: frozenset({'help', 'prime'}),  # empty would be admonishment by another name
 }
 
 

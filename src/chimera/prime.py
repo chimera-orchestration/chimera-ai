@@ -1,0 +1,85 @@
+"""Scope-resolved orientation: the golden path for wherever ``ch prime`` runs.
+
+``ch help`` is the *reference* — what exists, derived from the live tree, exhaustive.
+``ch prime`` is the *orientation* — how to work here, right now: an editorial golden path
+per role whose cited commands are pinned by a test against that role's stripped command
+tree (see ``tests/test_prime.py``), so it provably never mentions fenced capability. The
+role comes from the session's ``CHIMERA_ROLE`` stamp when chimera launched it, else from
+the shape of the cwd scope — making prime the pull path for sessions chimera didn't
+launch, and for humans. Every template ends by signposting ``ch help``.
+"""
+
+from chimera.agent_env import ROLE_AGENT, ROLE_CAPTAIN, ROLE_MANAGER
+from chimera.context import Scope
+
+CAPTAIN_PRIME = """\
+You are {persona}, the captain of this workspace: you direct all work across its projects.
+
+The loop:
+- `ch ls` — survey the workspace: every project, goal and agent.
+- `ch goal start <goal> "<prompt>" -p <project>` — set an agent working on something new;
+  `ch goal adopt <branch>` brings an existing branch under management.
+- `ch review <PR>` — stand up a pre-human review of a pull request.
+- `ch goal sync <goal>` — bring the human branch up to the agent's work.
+- `ch goal finish <goal>` — sweep a done goal's branches and worktrees.
+
+`ch help` is the full reference; `ch help -v` adds each command's options."""
+
+MANAGER_PRIME = """\
+You are the manager of the {project} project: its goals and their agents are yours to run.
+
+The loop:
+- `ch ls` / `ch goal ls` / `ch agent ls` — survey the project's goals and agents.
+- `ch goal start <goal> "<prompt>"` — set an agent working on a goal;
+  `ch goal adopt <branch>` brings an existing branch under management.
+- `ch agent resume -g <goal>` — talk to a goal's agent.
+- `ch review <PR>` — stand up a pre-human review of a pull request.
+- `ch goal sync <goal>` — bring the human branch up to the agent's work.
+- `ch goal finish <goal>` — sweep a done goal's branches and worktrees.
+
+Anything beyond {project} is the captain's to direct — escalate rather than reach.
+`ch help` is the full reference; `ch help -v` adds each command's options."""
+
+AGENT_PRIME = """\
+You are the agent for goal {goal} on {project}; this worktree and branch are your entire
+workspace.
+
+Work the goal here, committing as you go, so the branch always tells the story of the
+work. The branch is also how your work is picked up: your manager integrates and reviews
+it from their side — none of that happens from here.
+
+`ch help` lists what you can run."""
+
+PRIMES: dict[str, str] = {
+    ROLE_CAPTAIN: CAPTAIN_PRIME,
+    ROLE_MANAGER: MANAGER_PRIME,
+    ROLE_AGENT: AGENT_PRIME,
+}
+
+
+def resolve_role(env_role: str | None, scope: Scope) -> str:
+    """The role to orient for: the session's stamp when set, else the shape of the scope.
+
+    Standing in a goal worktree makes you that goal's agent, a project dir its manager,
+    the bare workspace the captain — so prime works for sessions chimera didn't launch.
+    """
+    if env_role is not None:
+        return env_role
+    if scope.goal is not None:
+        return ROLE_AGENT
+    if scope.project is not None:
+        return ROLE_MANAGER
+    return ROLE_CAPTAIN
+
+
+def prime(
+    role: str, *, project: str | None = None, goal: str | None = None, persona: str = 'captain'
+) -> str:
+    """Render ``role``'s golden path with the scope's names substituted.
+
+    A name the scope couldn't pin renders as its ``<placeholder>``, so the text stays
+    honest wherever it's pulled from.
+    """
+    return PRIMES[role].format(
+        persona=persona, project=project or '<project>', goal=goal or '<goal>'
+    )

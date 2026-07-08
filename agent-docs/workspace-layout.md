@@ -125,6 +125,10 @@ sha256: the audit record of exactly what a session was launched with. No workspa
 project) → nothing rendered, nothing injected, no log line; with one, the role section always
 renders, so every workspace launch injects context.
 
+`ch prime` is the *pull* counterpart of this pushed context: run anywhere, it prints the
+scope's role-shaped golden path (the role from `CHIMERA_ROLE` when the session was launched
+by chimera, else inferred from cwd) — see `agent-docs/commands.md`, *Self-documentation*.
+
 The `-p/-g/-a` flags may appear at any level of a project-scoped command — before the group,
 between group and subcommand, or after it — so `ch -p chimera goal ls`, `ch goal -p chimera ls`
 and `ch goal ls -p chimera` are equivalent. A shared `_context` callback (in `chimera.__main__`)

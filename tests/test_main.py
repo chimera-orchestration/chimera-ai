@@ -102,15 +102,15 @@ class TestStripToRole:
     def test_manager_tree_is_the_within_project_lifecycle(self) -> None:
         tree = _role_tree(ROLE_MANAGER)
         # chat/init/doctor gone; project and worktree emptied by the prune, so gone whole
-        compare(set(tree.commands), expected={'help', 'ls', 'review', 'goal', 'agent'})
+        compare(set(tree.commands), expected={'help', 'prime', 'ls', 'review', 'goal', 'agent'})
         goal = cast(TyperGroup, _leaf(tree, 'goal'))
         compare(set(goal.commands), expected={'start', 'adopt', 'sync', 'finish', 'rename', 'ls'})
         compare(
             set(cast(TyperGroup, _leaf(tree, 'agent')).commands), expected={'start', 'resume', 'ls'}
         )
 
-    def test_agent_tree_is_exactly_help(self) -> None:
-        compare(set(_role_tree(ROLE_AGENT).commands), expected={'help'})
+    def test_agent_tree_is_exactly_help_and_prime(self) -> None:
+        compare(set(_role_tree(ROLE_AGENT).commands), expected={'help', 'prime'})
 
     def test_synonyms_survive_iff_their_canonical_does(self) -> None:
         manager = _role_tree(ROLE_MANAGER)

@@ -79,6 +79,16 @@ list, so it can't drift. Default lists canonical leaf commands + summaries; `-v`
 command's options and synonyms; `--json` emits the structured index. A leaf with no `help=`
 shows blank — a test (`test_every_command_has_a_summary`) fails on it.
 
+`ch prime` is `ch help`'s editorial counterpart: help is the *reference* (what exists —
+derived, exhaustive), prime the *orientation* (how to work here, right now — the golden path
+for the scope you stand in). Its per-role templates (`chimera/prime.py`) are editorial prose,
+so they *could* drift — a test (`tests/test_prime.py`) pins every backtick-cited `ch …`
+command to a live leaf of that role's **stripped** tree (the captain's against the full
+tree), so prime provably never mentions fenced capability. The role is the session's
+`CHIMERA_ROLE` stamp when set, else inferred from cwd (goal worktree → agent, project dir →
+manager, bare workspace → captain) — the pull path for sessions chimera didn't launch, and
+for humans. Every template ends by signposting `ch help`.
+
 **Terse-default `-v` hint** (the *Terse defaults signpost their depth* principle). A view that
 hides detail behind `-v` (`ch help`, `ch doctor`, `ch agent ls`) must end with a one-line hint
 naming the `-v` command — but only when it actually withheld something *and* `-v` wasn't given.
