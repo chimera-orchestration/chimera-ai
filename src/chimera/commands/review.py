@@ -68,6 +68,11 @@ def review(
             '--no-agent launches no agent, so --dangerous and "-- …" have nothing to apply to.'
         )
     git = Git(repo)
+    if 'origin' not in git('remote').split():
+        raise UserError(
+            f"project '{project}' has no origin to fetch a PR from — "
+            f'publish it first: ch project push <url>'
+        )
     meta = _pr_metadata(repo, _pr_argument(git, pr, project))
     _check_pr_repo(git, meta['url'], project)
     number, head_oid = int(str(meta['number'])), str(meta['headRefOid'])
