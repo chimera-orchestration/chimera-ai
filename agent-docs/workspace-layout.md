@@ -75,7 +75,8 @@ chat, `agent` for the goal-scoped launchers — plus `CHIMERA_ROLE_SCOPE` naming
 to (`<project>` for a manager, `<project>@<goal>` for an agent; the captain gets none —
 unfenced). The overlay wins over the launching session's own values, so a captain running
 `ch goal start` hands the child `agent`, never its own `captain`. The stamp drives the per-role
-command strip (see `agent-docs/commands.md`, *Role-scoped commands*); `--dry` previews it as a
+command strip and, for a scoped manager, the arg-level project fence (both under
+`agent-docs/commands.md`, *Role-scoped commands*); `--dry` previews the stamp as a
 `role:` line. Honesty: env identity is a fence, not a wall — unset-able, like `CLAUDECODE`; the
 wall is the harness permission layer — the fence's value is not advertising footguns.
 

@@ -127,6 +127,22 @@ narrowed one. Honesty: env-based identity is a fence, not a wall (unset-able, li
 `CLAUDECODE`) — the wall is the harness permission layer; the fence's real value is not
 advertising footguns.
 
+**Arg-level scope fencing** — policy the strip can't express: a command fine in-scope whose
+`-p` could reach another project. The fence arms when `session_role()` is `manager` and
+`role_scope()` names a project (`chimera.agent_env.fenced_project`; the agent role needs no
+fence — its tree carries no `-p` anywhere — but is fenced identically anyway, its scope's
+first `@` segment naming the project, since the symmetry costs one membership test and a
+split). The chokepoint is `_project()` in `__main__.py` — the single funnel every
+project-scoped **action** resolves through: after `resolve_project` returns,
+`refuse_cross_scope` compares the **resolved** project against the fence, so an explicit
+cross-scope `-p` and a cwd standing in another project refuse identically. Listers are
+**never** fenced: `ls`/`goal ls`/`agent ls` resolve through `_scope()`, untouched —
+cross-project listing is knowledge, not capability. There is deliberately no `-g` rule: a
+goal resolves inside the already-fenced project, and `chat -g` is stripped for managers
+anyway — a decision, not an accident. The refusal is `scoped to <project>; ask the captain`
+(a `UserError`, exit 1): *signpost depth, never privilege* — it states identity and
+escalates, never narrating the prevented operation or a flag that would permit it.
+
 ## Destructive commands preview with --dry
 
 A command that deletes or discards (worktree/branch removal, project removal, …) must offer

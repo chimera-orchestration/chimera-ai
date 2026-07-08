@@ -5,6 +5,9 @@ environment for this purpose, so a future harness-agnostic detector is a one-fil
 
 import os
 
+from chimera.config import UserError
+from chimera.worktrees import SEP
+
 _AGENT_ENV_VARS = ('CLAUDECODE',)  # Claude Code sets this for every subprocess it launches
 
 RESTRICTED_OPTIONS = frozenset({'--force', '--dangerous'})
@@ -54,6 +57,43 @@ def session_role() -> str | None:
 def role_scope() -> str | None:
     """The scope the session's role is fenced to, or None when unset/empty."""
     return os.environ.get(ROLE_SCOPE_ENV_VAR) or None
+
+
+class CrossScopeError(UserError):
+    """A project-scoped action resolved a project outside the session's fence.
+
+    *Signpost depth, never privilege*: the message states identity and escalates — it
+    never narrates the prevented operation or a flag that would permit it.
+    """
+
+    def __init__(self, fenced: str) -> None:
+        super().__init__(f'scoped to {fenced}; ask the captain')
+
+
+def fenced_project() -> str | None:
+    """The project this session's actions are fenced to, or ``None`` when unfenced.
+
+    Arms for a scoped manager; the agent — though its stripped tree carries no ``-p``
+    anywhere today — is fenced identically for symmetry (its scope's first ``@`` segment
+    names the project), so a command later joining its tree can't quietly widen it.
+    The captain, and any unstamped or unscoped session, is unfenced.
+    """
+    if session_role() not in (ROLE_MANAGER, ROLE_AGENT):
+        return None
+    scope = role_scope()
+    return scope.split(SEP)[0] if scope is not None else None
+
+
+def refuse_cross_scope(resolved: str) -> None:
+    """Refuse when project ``resolved`` falls outside the session's fence; else a no-op.
+
+    Called with the project an action *resolved* — so an explicit cross-scope ``-p`` and
+    a cwd standing in another project refuse identically. Listers are never fenced:
+    cross-project listing is knowledge, not capability.
+    """
+    fenced = fenced_project()
+    if fenced is not None and resolved != fenced:
+        raise CrossScopeError(fenced)
 
 
 def role_env(role: str, scope: str | None = None) -> dict[str, str]:

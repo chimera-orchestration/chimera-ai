@@ -19,6 +19,7 @@ from chimera.agent_env import (
     ROLE_ENV_VAR,
     ROLE_MANAGER,
     ROLE_SCOPE_ENV_VAR,
+    refuse_cross_scope,
     role_env,
     running_under_ai_agent,
     session_role,
@@ -336,9 +337,18 @@ def _passthrough(ctx: typer.Context) -> list[str]:
 
 
 def _project(ctx: typer.Context, explicit: str | None) -> Project:
-    return resolve_project(
+    """The project an action targets, held to the session's scope fence.
+
+    The single funnel every project-scoped *action* resolves through, so the fence
+    (``refuse_cross_scope``) checks the project actually resolved — an explicit
+    cross-scope ``-p`` and a cwd in another project refuse identically. Listers
+    resolve through ``_scope`` instead and are never fenced.
+    """
+    project = resolve_project(
         Path.cwd(), explicit if explicit is not None else _overrides(ctx).project
     )
+    refuse_cross_scope(project.name)
+    return project
 
 
 def _spec(project: Project, harness: str | None, model: str | None) -> AgentSpec:

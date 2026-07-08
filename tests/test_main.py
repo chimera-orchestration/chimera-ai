@@ -1,6 +1,8 @@
 import json
+import os
 import sys
 from collections.abc import Iterator
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -11,6 +13,8 @@ from typer.main import get_command
 
 from chimera.__main__ import _strip_restricted_options, _strip_to_role, app, main
 from chimera.agent_env import ROLE_AGENT, ROLE_COMMANDS, ROLE_MANAGER
+from tests.cli import Command as CliCommand
+from tests.cli import action_logs
 
 
 def _leaf(root: Command, *path: str) -> Command:
@@ -129,6 +133,79 @@ class TestStripToRole:
         _strip_to_role(command, ROLE_COMMANDS[ROLE_MANAGER])
         finish = _leaf(command, 'goal', 'finish')  # present for a manager…
         assert '--force' not in _option_names(finish)  # …with the restricted option gone
+
+
+def _fenced_manager(tmpdir: TempDir, replace: Replacer) -> Path:
+    """A workspace with two projects, the session fenced to 'proj' as its manager."""
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    for name in ('proj', 'other'):
+        project = ws / name
+        (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+        tmpdir.dump(f'lycia/{name}/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_ROLE', ROLE_MANAGER)
+    replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
+    os.chdir(ws / 'proj')
+    return ws
+
+
+class TestScopeFence:
+    def test_lister_crosses_the_fence(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        _fenced_manager(tmpdir, replace)
+        # cross-project listing is knowledge, not capability — never fenced
+        command.run('goal', 'ls', '-p', 'other').check(
+            output='g',
+            logging=action_logs(
+                'goal ls', 'chimera.commands.goal.ls.goals_in_scope', {'project': 'other'}
+            ),
+        )
+
+    def test_action_with_explicit_project_refuses(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        _fenced_manager(tmpdir, replace)
+        command.run('worktree', 'ls', '-p', 'other').check(
+            output='Error: scoped to proj; ask the captain',
+            return_code=1,
+            logging=action_logs(
+                'worktree ls',
+                'chimera.commands.worktree.ls.ls',
+                {'project': 'other'},
+                error='CrossScopeError: scoped to proj; ask the captain',
+            ),
+        )
+
+    def test_action_in_scope_proceeds(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        _fenced_manager(tmpdir, replace)
+        command.run('worktree', 'ls').check(
+            output=str(Path.cwd() / 'worktrees' / 'g@agent'),
+            logging=action_logs(
+                'worktree ls', 'chimera.commands.worktree.ls.ls', {'project': None}
+            ),
+        )
+
+    def test_cwd_inferred_cross_scope_refuses(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        # the fence checks the *resolved* project: standing in another project's dir
+        # refuses exactly like an explicit -p
+        ws = _fenced_manager(tmpdir, replace)
+        os.chdir(ws / 'other')
+        command.run('worktree', 'ls').check(
+            output='Error: scoped to proj; ask the captain',
+            return_code=1,
+            logging=action_logs(
+                'worktree ls',
+                'chimera.commands.worktree.ls.ls',
+                {'project': None},
+                error='CrossScopeError: scoped to proj; ask the captain',
+            ),
+        )
 
 
 class TestMainRole:
