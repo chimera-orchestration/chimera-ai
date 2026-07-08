@@ -65,7 +65,8 @@ def review(
     agent-only knobs (``dangerous``, ``extra``) are refused with it: nothing would read them.
 
     Idempotent: an existing ``<goal>@agent`` worktree is reused, so a re-run only relaunches.
-    The goal's branches are logged before/after creation (see ``agent-docs/logging.md``).
+    The goal's branches are logged before/after creation (see ``agent-docs/logging.md``) —
+    quiet when nothing changed, so a re-run or ``dry`` lands no ref line.
     Returns the agent worktree.
     """
     if not launch and (dangerous or extra):
@@ -84,14 +85,15 @@ def review(
     goal = f'pr-{number}'
     tracking = f'origin/pr/{number}'
     dry(_wire_upstream, git, number, head_oid, tracking)
-    before = _goal_refs(git, goal)
     agent_worktree = worktree_path(worktrees_root, goal, AGENT)
-    dry(_ensure_goal, git, repo, worktrees_root, goal, head_oid, tracking)
-    logger.bind(
+    with git.ref_log(
+        'review: refs',
+        branch(goal, HUMAN),
+        branch(goal, AGENT),
         goal=goal,
-        git={'before': before, 'after': _goal_refs(git, goal)},
         worktree=str(agent_worktree),
-    ).info('review: refs')
+    ):
+        dry(_ensure_goal, git, repo, worktrees_root, goal, head_oid, tracking)
     if into is not None:
         dry(checkout_here, git, branch(goal, HUMAN), into, 'review')
     if launch:
@@ -244,11 +246,6 @@ def _ensure_goal(
         add(repo, worktrees_root, goal=goal, actors=ACTORS, frm=head_oid, fetch=False)
         for actor in ACTORS:
             git('branch', f'--set-upstream-to={tracking}', branch(goal, actor))
-
-
-def _goal_refs(git: Git, goal: str) -> dict[str, str]:
-    """The goal's actor branches that exist, each mapped to its full sha (for logging)."""
-    return git.ref_shas(branch(goal, HUMAN), branch(goal, AGENT))
 
 
 def _prompt(prompts_dir: Path, meta: dict[str, object], goal: str, project: str) -> str:

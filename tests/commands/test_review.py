@@ -432,10 +432,11 @@ def test_review_dry_wires_nothing(tmpdir: TempDir, replace: Replacer) -> None:
     _stub_meta(replace, _meta(head))
     _stub_agent(replace)
     worktrees = tmpdir / 'wt'
-    compare(
-        review(clone, worktrees, 'proj', tmpdir / 'prompts', '1', dry=Dry(True)),
-        expected=worktrees / 'pr-1@agent',
-    )
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(
+            review(clone, worktrees, 'proj', tmpdir / 'prompts', '1', dry=Dry(True)),
+            expected=worktrees / 'pr-1@agent',
+        )
     git = Git(clone)
     assert not worktrees.exists()  # no worktree dir
     assert not git.ref_exists('origin/pr/1')  # tracking ref never fetched
@@ -443,6 +444,7 @@ def test_review_dry_wires_nothing(tmpdir: TempDir, replace: Replacer) -> None:
         git('config', '--get-all', 'remote.origin.fetch').splitlines(),
         expected=['+refs/heads/*:refs/remotes/origin/*'],
     )
+    log.check()  # no refs changed, so no 'review: refs' line
 
 
 def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command) -> None:
