@@ -164,6 +164,24 @@ Reports findings and exits non-zero while any remain unresolved.
 
 ## Adding and removing projects
 
+`ch project new <name>` creates a **workspace-only** project: a fresh bare repo at
+`{project}/repo/` — no URL, no remote. `git init -b main` (forced — `default_branch` only
+knows main/master), seeded with an empty-tree commit via plumbing (the user's own git
+identity, no README) so the first `goal start` has a commit to branch from; then the same
+`register()` as `project add`. Everything downstream is byte-identical to a URL-added
+project; the repo's remote list is the single source of truth for whether it has
+graduated — no config marker. `--checkout <path>` stands up a plain worktree of `main`
+there, as `project add --checkout` does. Refuses if the project already exists.
+
+`ch project push <url>` graduates a workspace-only project into an ordinary remote-backed
+one: pushes the default branch (only — `{goal}/{actor}` branches stay local scratch)
+straight to the URL *before* writing any config, so a failed push leaves zero config
+behind; then `remote add origin`, `fetch --prune`, `remote set-head` to the pushed branch
+(explicit, not `-a` — an empty remote's unborn `HEAD` may name a branch that doesn't exist
+yet, which `-a` can't resolve), and upstream wired for the default branch only. Takes
+`--dry`. Refuses when an origin already exists.
+After it, nothing distinguishes the project from a URL-added one.
+
 `ch project add <url|path>` (run anywhere in the workspace) dispatches on its argument:
 - a git URL — bare-clones into `{project}/repo/` (no working tree there; all work happens in
   goal worktrees). The fetch refspec, an initial fetch and `origin/HEAD` are set up by hand
