@@ -17,8 +17,10 @@ def remove(workspace: Path, name: str, force: bool = False, dry: Dry = Dry()) ->
     A no-op returning None if the project is already gone. Refuses while the
     project still has goals unless ``force``, which first finishes every goal —
     discarding unmerged/uncommitted work — before removing the project directory.
-    A live agent in any worktree always aborts, even with ``force`` (unlike goal
-    finish, whose --force bypasses the liveness check for a single goal). Only the
+    A live agent in any worktree — or a project chat, which runs in the project dir
+    itself — always aborts, even with ``force`` (unlike goal finish, whose --force
+    bypasses the liveness check for a single goal); the project dir is swept even
+    when there are no goals to check. Only the
     workspace's project directory is removed; a tracked repo living outside it is
     left untouched. A workspace-only repo (under the project dir, no remote) holding
     real work is the *sole* copy of that work — removal would be unrecoverable loss,
@@ -46,12 +48,17 @@ def remove(workspace: Path, name: str, force: bool = False, dry: Dry = Dry()) ->
             f'{name} holds the only copy of its work (no remote to recover from); '
             f'publish it first (ch project push) or use --force to discard it'
         )
-    for goal in sorted(existing):  # check every goal's worktrees before touching any of them
-        refuse_if_agents_running(
+    # check the project dir (where <project>@chat runs) and every goal's worktrees
+    # before touching any of them
+    refuse_if_agents_running(
+        [project]
+        + [
             wt
+            for goal in sorted(existing)
             for actor in sorted(goal_actors(git, worktrees_root, goal))
             if (wt := worktree_path(worktrees_root, goal, actor)).is_dir()
-        )
+        ]
+    )
     for goal in sorted(existing):
         remove_worktrees(repo, worktrees_root, goal, force=True, dry=dry)
     dry(shutil.rmtree, project)

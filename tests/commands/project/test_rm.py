@@ -80,7 +80,9 @@ def test_remove_force_aborts_when_an_agent_is_running(
     workspace, project = _project(tmpdir, git_repo, with_goal=True)
     replace.in_module(
         live,
-        lambda worktree: [Session('x', 'x', 'idle', worktree, None)],
+        lambda worktree: (
+            [Session('x', 'x', 'idle', worktree, None)] if worktree.name == 'g@agent' else []
+        ),
         module=worktree_rm,
     )
     with ShouldRaise(
@@ -92,6 +94,27 @@ def test_remove_force_aborts_when_an_agent_is_running(
     ):
         remove(workspace, 'myproj', force=True)  # not even force nukes a live agent
     tmpdir.compare(['g@agent'], path='lycia/myproj/worktrees', recursive=False)
+
+
+def test_remove_aborts_when_a_project_chat_is_live(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    workspace, project = _project(tmpdir, git_repo)  # no goals: the dir is still swept
+    replace.in_module(
+        live,
+        lambda worktree: [Session('x', 'myproj@chat', 'idle', worktree, None)],
+        module=worktree_rm,
+    )
+    message = (
+        f'an agent is live in {project}:\n'
+        '  pid ?  idle  myproj@chat\n'
+        'find its terminal or kill the pid, then re-run'
+    )
+    with ShouldRaise(RuntimeError(message)):
+        remove(workspace, 'myproj')
+    with ShouldRaise(RuntimeError(message)):  # a live chat blocks force too
+        remove(workspace, 'myproj', force=True)
+    assert project.is_dir()
 
 
 def test_remove_dry_previews_the_whole_teardown(tmpdir: TempDir, git_repo: Repo) -> None:
