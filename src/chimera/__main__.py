@@ -354,10 +354,20 @@ def _spec(project: Project, harness: str | None, model: str | None) -> AgentSpec
     return resolve_spec(harness, model, project.config.agent, workspace)
 
 
-def _context_file(project: Project | None, name: str) -> Path | None:
+def _agent_intro(project: str, goal: str) -> str:
+    """The agent role's affirmative identity line — what the session is, never a prohibition."""
+    return (
+        f'You are the agent for goal {goal} on {project}; '
+        'this worktree and branch are your entire workspace.'
+    )
+
+
+def _context_file(project: Project | None, name: str, role: str, intro: str) -> Path | None:
     """Render and store session ``name``'s launch context; ``None`` when there is none.
 
-    The render needs a workspace both for its workspace-level sources and as the home of
+    Role directives + the ``intro`` identity line lead the render (every chimera-launched
+    session knows what it is before anything else), then principles and knowledge. The
+    render needs a workspace both for the role/workspace-level sources and as the home of
     the stored artifact (``logs/context/``), so a project standing outside any workspace
     launches without injected context rather than failing.
     """
@@ -365,7 +375,10 @@ def _context_file(project: Project | None, name: str) -> Path | None:
         workspace = resolve_workspace(Path.cwd())
     except NotInWorkspaceError:
         return None
-    return materialize(workspace, name, render(workspace, project))
+    text = '\n\n'.join(
+        part for part in (role_context(workspace, role, intro), render(workspace, project)) if part
+    )
+    return materialize(workspace, name, text)
 
 
 def _dry_preview(
@@ -597,7 +610,8 @@ def review(
         # keyed by the session name _review resolves (pr-<N>, even from a URL argument);
         # the handle is kept so the --dry preview shows the artifact rendered exactly once
         nonlocal context
-        context = _context_file(p, name)
+        goal = name.split(SEP)[1]  # only the resolved name knows the goal, as with _role_stamp
+        context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
         return context
 
     def _role_stamp(name: str) -> Mapping[str, str]:
@@ -666,15 +680,25 @@ def chat(
     cwd, name = chat_target(
         scope, config.captain.name, goal if goal is not None else _overrides(ctx).goal
     )
-    if scope.project is None:  # the captain: role directives lead, all projects index
+    if scope.project is None:
         spec = resolve_spec(harness, model, config.captain, config.agent)
-        role = role_context(scope.workspace, 'captain', name)
-        text = '\n\n'.join(part for part in (role, render(scope.workspace, None)) if part)
+        role = ROLE_CAPTAIN
+        intro = f'You are {name}, the captain of the {scope.workspace.name} workspace.'
         env = role_env(ROLE_CAPTAIN)  # no scope: the captain is unfenced
     else:
         spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
-        text = render(scope.workspace, scope.project)
+        role = ROLE_MANAGER
+        intro = f'You are the manager of the {scope.project.name} project.'
         env = role_env(ROLE_MANAGER, scope.project.name)
+    # role directives + identity lead, then principles and the scope's knowledge index
+    text = '\n\n'.join(
+        part
+        for part in (
+            role_context(scope.workspace, role, intro),
+            render(scope.workspace, scope.project),
+        )
+        if part
+    )
     dry_run = Dry(dry)
     context = materialize(scope.workspace, name, text)
     _chat(
@@ -890,7 +914,9 @@ def goal_start(
     p = _project(ctx, project)
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(p, session_name(p.name, goal, AGENT))
+    context = _context_file(
+        p, session_name(p.name, goal, AGENT), ROLE_AGENT, _agent_intro(p.name, goal)
+    )
     env = role_env(ROLE_AGENT, f'{p.name}{SEP}{goal}')
     worktree = _goal_start(
         p.repo,
@@ -931,7 +957,9 @@ def goal_adopt(
     p = _project(ctx, project)
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(p, session_name(p.name, goal, AGENT))
+    context = _context_file(
+        p, session_name(p.name, goal, AGENT), ROLE_AGENT, _agent_intro(p.name, goal)
+    )
     env = role_env(ROLE_AGENT, f'{p.name}{SEP}{goal}')
     worktree = _goal_adopt(
         p.repo,
@@ -1091,7 +1119,7 @@ def agent_start(
     name = session_name(p.name, g, actor)
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(p, name)
+    context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, g))
     env = role_env(ROLE_AGENT, f'{p.name}{SEP}{g}')
     _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
     typer.echo(f'{dry_run.verb("Launched", "Would launch")} agent in {worktree}')
@@ -1120,7 +1148,7 @@ def agent_resume(
     name = session_name(p.name, g, actor)
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(p, name)
+    context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, g))
     env = role_env(ROLE_AGENT, f'{p.name}{SEP}{g}')
     _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')

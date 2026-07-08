@@ -1,4 +1,5 @@
 import subprocess
+from hashlib import sha256
 from pathlib import Path
 
 from testfixtures import Replacer, TempDir, compare
@@ -64,22 +65,46 @@ def test_goal_and_actor_before_the_command(
         subprocess.run, lambda cmd, cwd=None, check=False, env=None: calls.append((cmd, cwd))
     )
     worktree = workspace_with_env / 'myproject' / 'worktrees' / 'g@reviewer'
+    text = (
+        '# Role: agent\n\nYou are the agent for goal g on myproject; '
+        'this worktree and branch are your entire workspace.'
+    )
+    digest = sha256(text.encode()).hexdigest()
+    context = workspace_with_env / 'logs' / 'context' / f'myproject@g@reviewer-{digest[:8]}.md'
     command.run('agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start').check(
         output=f'Launched agent in {worktree}',
-        logging=action_logs(
-            'agent start',
-            'chimera.commands.agent.agent',
+        logging=[
             {
-                'prompt': None,
-                'goal': None,
-                'actor': None,
-                'project': None,
-                'dangerous': False,
-                'harness': None,
-                'model': None,
-                'dry': False,
+                'level': 'INFO',
+                'command': 'agent start',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.agent',
+                'params': {
+                    'prompt': None,
+                    'goal': None,
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': False,
+                },
             },
-        ),
+            {
+                'level': 'INFO',
+                'session': 'myproject@g@reviewer',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+        ],
     )
-    claude_cmd = ['claude', '--name', 'myproject@g@reviewer']
+    claude_cmd = [
+        'claude',
+        '--name',
+        'myproject@g@reviewer',
+        '--append-system-prompt-file',
+        str(context),
+    ]
     compare(calls, expected=[(claude_cmd, worktree)])

@@ -1,5 +1,6 @@
 import os
 from collections.abc import Mapping, Sequence
+from hashlib import sha256
 from pathlib import Path
 
 from giterator import Git
@@ -298,6 +299,65 @@ def test_goal_start_cli_passes_extra_flags_through(
             )
         ],
     )
+
+
+def test_goal_start_cli_dry_role_leads_the_context(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(ws / 'proj')
+    worktree = Path.cwd() / 'worktrees' / 'g@agent'  # cwd resolves symlinks like the wrapper
+    text = (
+        '# Role: agent\n\nYou are the agent for goal g on proj; '
+        'this worktree and branch are your entire workspace.'
+    )
+    digest = sha256(text.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    command.run('goal', 'start', 'g', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would start g in {worktree}',
+                'harness: claude',
+                'role: agent (scope: proj@g)',
+                'prompt: (interactive)',
+                f'context: {context}',
+                '---',
+                text,
+            ]
+        ),
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'goal start',
+                'phase': 'start',
+                'function': 'chimera.commands.goal.start.start',
+                'params': {
+                    'goal': 'g',
+                    'prompt': None,
+                    'frm': None,
+                    'offline': False,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': True,
+                    'project': None,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@g@agent',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'goal start', 'phase': 'end'},
+        ],
+    )
+    assert not (ws / 'proj' / 'worktrees').exists()  # nothing created
+    compare(Git(git_repo.path).branches(), expected=['main'])
 
 
 def test_goal_start_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:

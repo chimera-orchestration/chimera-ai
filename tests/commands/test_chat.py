@@ -206,6 +206,9 @@ def test_chat_cli_launches_the_captain(
     compare(calls, expected=[(claude_cmd, ws, True)])
 
 
+MANAGER_TEXT = '# Role: manager\n\nYou are the manager of the proj project.'
+
+
 def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
     project = ws / 'proj'
@@ -214,24 +217,41 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
     os.chdir(project)
     project = Path.cwd()  # resolves symlinks like the wrapper
     calls = _stub(replace)
+    # role directives lead every chimera-launched session's context — the manager's too
+    digest = sha256(MANAGER_TEXT.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@manager-{digest[:8]}.md'
     command.run('chat').check(
         output=f'Launched chat proj@manager in {project}',
-        logging=action_logs(
-            'chat',
-            'chimera.commands.chat.chat',
+        logging=[
             {
-                'prompt': None,
-                'resume': False,
-                'dangerous': False,
-                'harness': None,
-                'model': None,
-                'dry': False,
-                'project': None,
-                'goal': None,
+                'level': 'INFO',
+                'command': 'chat',
+                'phase': 'start',
+                'function': 'chimera.commands.chat.chat',
+                'params': {
+                    'prompt': None,
+                    'resume': False,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': False,
+                    'project': None,
+                    'goal': None,
+                },
             },
-        ),
+            {
+                'level': 'INFO',
+                'session': 'proj@manager',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
+        ],
     )
-    compare(calls, expected=[(['claude', '--name', 'proj@manager'], project, True)])
+    compare(context.read_text(), expected=MANAGER_TEXT)
+    claude_cmd = ['claude', '--name', 'proj@manager', '--append-system-prompt-file', str(context)]
+    compare(calls, expected=[(claude_cmd, project, True)])
 
 
 def test_chat_cli_goal_scope_refuses(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -381,6 +401,60 @@ def test_chat_cli_dry_previews_without_launching(
             {
                 'level': 'INFO',
                 'session': 'pegasus',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
+        ],
+    )
+    compare(calls, expected=[])  # nothing launched
+
+
+def test_chat_cli_dry_project_scope_leads_with_the_manager_role(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
+    project = ws / 'proj'
+    project.mkdir()
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    os.chdir(project)
+    project = Path.cwd()  # resolves symlinks like the wrapper
+    calls = _stub(replace)
+    digest = sha256(MANAGER_TEXT.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@manager-{digest[:8]}.md'
+    command.run('chat', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would launch chat proj@manager in {project}',
+                'harness: claude',
+                'role: manager (scope: proj)',
+                'prompt: (interactive)',
+                f'context: {context}',
+                '---',
+                MANAGER_TEXT,
+            ]
+        ),
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'chat',
+                'phase': 'start',
+                'function': 'chimera.commands.chat.chat',
+                'params': {
+                    'prompt': None,
+                    'resume': False,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': True,
+                    'project': None,
+                    'goal': None,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@manager',
                 'path': str(context),
                 'sha256': digest,
                 'message': 'context: rendered',

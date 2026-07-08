@@ -87,9 +87,9 @@ workspace-level agent that directs all work. Session names carry the role at eve
 captain's bare persona, a project's `<project>@manager`, a goal's `<project>@<goal>@agent`. The captain has no goal, branch or worktree: it
 works on the workspace as a whole. Its persona name comes from `config.yaml` (`captain: pegasus`,
 or the full form `captain: {name: …, harness: …, model: …}` to also override the agent cascade;
-`ch init --captain pegasus` sets it at creation) and *is* the session name. Role directives in
-`roles/captain/*.md` lead the captain's rendered context, after an intro line carrying the
-persona name; the workspace-wide knowledge index (every project, qualified) follows.
+`ch init --captain pegasus` sets it at creation) and *is* the session name. The captain's
+context indexes workspace-wide knowledge (every project, qualified); a manager's is the
+project render (see *Launch context* below for the role section both lead with).
 
 A chat deliberately sits *alongside* whatever agent is working in the same cwd, so the
 one-session-per-worktree guard is off; instead the scope's chat itself being live refuses with
@@ -102,19 +102,27 @@ side conversation — inside the goal worktree, cwd re-pins the goal, so `-p` ca
 
 ## Launch context: principles inline, knowledge indexes
 
-The same launching commands inject a rendered launch context (`chimera.agents.context`),
-following the Principle/Knowledge split: workspace + project `principles/*.md` inline whole
-(always-on, small), while `knowledge/*.md` lands as an *index* of trigger lines (`- topic:
-<abs path>`) the agent reads on demand with its own tools — a pinned project indexes only its
-own knowledge, an unpinned scope indexes every project's, qualified by name. `prompts/` is
-*not* injected — those are hand-curated prompt templates (e.g. `review.md`).
+The same launching commands inject a rendered launch context (`chimera.agents.context`).
+A `# Role:` section leads *every* chimera-launched session's context: an **affirmative**
+identity line stating what the session is, never what it must not do — the captain's
+`You are <persona>, the captain of the <workspace> workspace.`, a manager's `You are the
+manager of the <project> project.`, an agent's `You are the agent for goal <goal> on
+<project>; this worktree and branch are your entire workspace.` — followed by the workspace's
+`roles/<role>/*.md` directives, inlined whole (`role_context`; an absent dir still
+introduces). The rest follows the Principle/Knowledge split: workspace + project
+`principles/*.md` inline whole (always-on, small), while `knowledge/*.md` lands as an *index*
+of trigger lines (`- topic: <abs path>`) the agent reads on demand with its own tools — a
+pinned project indexes only its own knowledge, an unpinned scope indexes every project's,
+qualified by name. `prompts/` is *not* injected — those are hand-curated prompt templates
+(e.g. `review.md`).
 
 The render is a build product, never committed: it's written content-addressed to
 `<workspace>/logs/context/<session>-<sha8>.md` (gitignored; identical re-renders land on the
 same file) and handed to the harness by path — claude gets `--append-system-prompt-file` — so
 the repo and worktree stay untouched. The `context: rendered` log line binds the path and full
 sha256: the audit record of exactly what a session was launched with. No workspace (a lone
-project) or no sources → nothing rendered, nothing injected, no log line.
+project) → nothing rendered, nothing injected, no log line; with one, the role section always
+renders, so every workspace launch injects context.
 
 The `-p/-g/-a` flags may appear at any level of a project-scoped command — before the group,
 between group and subcommand, or after it — so `ch -p chimera goal ls`, `ch goal -p chimera ls`

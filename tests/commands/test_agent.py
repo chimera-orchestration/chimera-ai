@@ -825,6 +825,13 @@ def test_agent_start_cli_model_from_project_config(
     compare(calls, expected=[(claude_cmd, expected, True)])
 
 
+# The role section leading every launched agent's context (see agent-docs/workspace-layout.md).
+AGENT_ROLE_TEXT = (
+    '# Role: agent\n\n'
+    'You are the agent for goal g on proj; this worktree and branch are your entire workspace.'
+)
+
+
 def test_agent_start_cli_model_from_workspace_config(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
@@ -837,24 +844,46 @@ def test_agent_start_cli_model_from_workspace_config(
     os.chdir(project)
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
+    digest = sha256(AGENT_ROLE_TEXT.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected}',
-        logging=action_logs(
-            'agent start',
-            'chimera.commands.agent.agent',
+        logging=[
             {
-                'prompt': None,
-                'goal': 'g',
-                'actor': None,
-                'project': None,
-                'dangerous': False,
-                'harness': None,
-                'model': None,
-                'dry': False,
+                'level': 'INFO',
+                'command': 'agent start',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.agent',
+                'params': {
+                    'prompt': None,
+                    'goal': 'g',
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': False,
+                },
             },
-        ),
+            {
+                'level': 'INFO',
+                'session': 'proj@g@agent',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+        ],
     )
-    claude_cmd = ['claude', '--name', 'proj@g@agent', '--model', 'ws-model']
+    claude_cmd = [
+        'claude',
+        '--name',
+        'proj@g@agent',
+        '--model',
+        'ws-model',
+        '--append-system-prompt-file',
+        str(context),
+    ]
     compare(calls, expected=[(claude_cmd, expected, True)])
 
 
@@ -912,7 +941,7 @@ def test_agent_start_cli_injects_rendered_context(
     os.chdir(project)
     calls = _stub(replace)
     expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
-    text = '# Principles\n\nVerify before done.'
+    text = f'{AGENT_ROLE_TEXT}\n\n# Principles\n\nVerify before done.'
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     command.run('agent', 'start', '-g', 'g').check(
@@ -962,7 +991,7 @@ def test_agent_start_cli_dry_previews_without_launching(
     os.chdir(project)
     calls = _stub(replace)
     expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
-    text_ = '# Principles\n\nVerify before done.'
+    text_ = f'{AGENT_ROLE_TEXT}\n\n# Principles\n\nVerify before done.'
     digest = sha256(text_.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     command.run('agent', 'start', 'do it', '-g', 'g', '-m', 'opus', '--dry').check(
