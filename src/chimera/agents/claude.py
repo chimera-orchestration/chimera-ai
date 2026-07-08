@@ -83,12 +83,13 @@ class Claude(Agent):
         return self._launch(cwd, args, exclusive)
 
     def sessions(self) -> list[Session]:
-        """Every verified-live claude session, enriched with a one-line summary.
+        """Every checked claude session, enriched with a one-line summary.
 
+        Checked, not merely live: stale entries ride along marked, never dropped.
         The summary is the session's title or last prompt (see :func:`session_summary`),
         read from its transcript under ``projects``.
         """
-        return [self._enriched(session) for session in self.live()]
+        return [self._enriched(session) for session in self.checked()]
 
     def reported(self, cwd: Path | None = None) -> list[Session]:
         """What claude's own registry (``claude agents --json``) claims is live.

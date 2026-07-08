@@ -18,6 +18,7 @@ from chimera.commands.agent import (
     resume,
     scope_line,
     scoped,
+    shown,
     under,
 )
 from chimera.config import ProjectConfig, UserError
@@ -397,6 +398,25 @@ def test_agents_aggregates_registered_harnesses(replace: Replacer) -> None:
     compare(agents(), expected=[lonely])
 
 
+def _ghost_at(cwd: Path, name: str = 'ghost') -> Session:
+    return Session(name, name, 'idle', cwd, None, stale='claimed pid 999 is not running')
+
+
+def test_shown_default_withholds_stale_sessions(tmpdir: TempDir) -> None:
+    running, ghost = _agent_at(tmpdir / 'wt'), _ghost_at(tmpdir / 'wt')
+    compare(shown([running, ghost], verbose=False), expected=([running], 1))
+
+
+def test_shown_verbose_withholds_nothing(tmpdir: TempDir) -> None:
+    running, ghost = _agent_at(tmpdir / 'wt'), _ghost_at(tmpdir / 'wt')
+    compare(shown([running, ghost], verbose=True), expected=([running, ghost], 0))
+
+
+def test_shown_default_with_nothing_stale_withholds_nothing(tmpdir: TempDir) -> None:
+    running = _agent_at(tmpdir / 'wt')
+    compare(shown([running], verbose=False), expected=([running], 0))
+
+
 def test_live_aggregates_registered_harnesses(tmpdir: TempDir, replace: Replacer) -> None:
     # cleanup's question is "is *any* harness's agent live here" — claude's answer flows through
     worktree = tmpdir.makedir('wt')
@@ -527,7 +547,9 @@ def test_agent_ls_cli_unpinned_lists_every_agent(
             ]
         ),
         logging=action_logs(
-            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
         ),
     )
 
@@ -546,7 +568,9 @@ def test_agent_ls_cli_trims_long_detail(
     command.run('agent', 'ls').check(
         output='scope: all agents\naaa  named  busy  ' + 'x' * 79 + '…',
         logging=action_logs(
-            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
         ),
     )
 
@@ -567,7 +591,9 @@ def test_agent_ls_cli_pinned_to_project_filters_strays(
     command.run('agent', 'ls', '-p', 'proj').check(
         output='scope: proj\naaa  proj@g@agent  busy  fix it',
         logging=action_logs(
-            'agent ls', 'chimera.commands.agent.scoped', {'project': 'proj', 'goal': None}
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': 'proj', 'goal': None},
         ),
     )
 
@@ -580,7 +606,116 @@ def test_agent_ls_cli_when_nothing_running(
     command.run('agent', 'ls').check(
         output='scope: all agents\nNo agents running',
         logging=action_logs(
-            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
+        ),
+    )
+
+
+def test_agent_ls_cli_default_withholds_stale_and_hints(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _scoped_cli(tmpdir, replace)
+    worktree = project / 'worktrees' / 'g@agent'
+    replace.in_module(
+        agents,
+        lambda: [
+            Session(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            _ghost_at(worktree, 'bbb'),
+        ],
+        module=chimera_main,
+    )
+    command.run('agent', 'ls').check(  # the stale row never shows; only the hint betrays it
+        output='\n'.join(
+            [
+                'scope: all agents',
+                'aaa  proj@g@agent  busy  fix it',
+                '(+1 stale session — ch agent ls -v to show)',
+            ]
+        ),
+        logging=action_logs(
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
+        ),
+    )
+
+
+def test_agent_ls_cli_verbose_shows_stale_with_reason(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _scoped_cli(tmpdir, replace)
+    worktree = project / 'worktrees' / 'g@agent'
+    replace.in_module(
+        agents,
+        lambda: [
+            Session(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            _ghost_at(worktree, 'bbb'),
+        ],
+        module=chimera_main,
+    )
+    command.run('agent', 'ls', '-v').check(  # live rows unchanged; no hint — nothing is hidden
+        output='\n'.join(
+            [
+                'scope: all agents',
+                'aaa  proj@g@agent  busy   fix it',
+                'bbb                stale  claimed pid 999 is not running',  # name blanked: echoes id
+            ]
+        ),
+        logging=action_logs(
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': True, 'project': None, 'goal': None},
+        ),
+    )
+
+
+def test_agent_ls_cli_only_stale_reports_nothing_running_plus_hint(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _scoped_cli(tmpdir, replace)
+    worktree = project / 'worktrees' / 'g@agent'
+    replace.in_module(
+        agents,
+        lambda: [_ghost_at(worktree, 'bbb'), _ghost_at(worktree, 'ccc')],
+        module=chimera_main,
+    )
+    command.run('agent', 'ls').check(
+        output='\n'.join(
+            [
+                'scope: all agents',
+                'No agents running',
+                '(+2 stale sessions — ch agent ls -v to show)',
+            ]
+        ),
+        logging=action_logs(
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
+        ),
+    )
+
+
+def test_agent_ls_cli_out_of_scope_stale_earns_no_hint(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _scoped_cli(tmpdir, replace)
+    worktree = project / 'worktrees' / 'g@agent'
+    replace.in_module(
+        agents,
+        lambda: [
+            Session(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            _ghost_at(tmpdir / 'outside', 'bbb'),  # scoped out before the withhold count
+        ],
+        module=chimera_main,
+    )
+    command.run('agent', 'ls', '-p', 'proj').check(
+        output='scope: proj\naaa  proj@g@agent  busy  fix it',
+        logging=action_logs(
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': 'proj', 'goal': None},
         ),
     )
 

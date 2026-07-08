@@ -11,8 +11,25 @@ from chimera.worktrees import SEP
 
 
 def agents() -> list[Session]:
-    """Every live agent session across all harnesses, enriched for listing."""
+    """Every checked agent session across all harnesses, enriched for listing.
+
+    Stale entries ride along marked (``Session.stale``), never dropped, so a lister
+    can surface them; a view wanting only the live decides through :func:`shown`.
+    """
     return [session for harness in AGENTS.values() for session in harness.sessions()]
+
+
+def shown(listing: list[Session], verbose: bool) -> tuple[list[Session], int]:
+    """The rows a listing shows, and how many stale sessions it withheld.
+
+    The default view keeps today's row set — live sessions only — counting the stale
+    entries it withheld so the caller can end with the ``-v`` hint (terse defaults
+    signpost their depth); ``verbose`` shows everything, so nothing is ever withheld.
+    """
+    if verbose:
+        return listing, 0
+    rows = [session for session in listing if session.stale is None]
+    return rows, len(listing) - len(rows)
 
 
 def live(worktree: Path) -> list[Session]:

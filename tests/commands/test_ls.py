@@ -63,7 +63,11 @@ def test_ls_cli_renders_the_tree(
     worktree = workspace_with_env / 'alpha' / 'worktrees' / 'g@agent'
     replace.in_module(
         agents,
-        lambda: [Session('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug')],
+        lambda: [
+            Session('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug'),
+            # a stale-marked corpse never lands on the dashboard — agent ls -v is its surface
+            Session('deadbeef', 'ghost', 'idle', worktree, None, stale='claimed pid 9 dead'),
+        ],
         module=chimera_main,
     )
     command.run('ls').check(

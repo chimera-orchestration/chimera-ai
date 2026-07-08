@@ -28,7 +28,7 @@ def _stub(replace: Replacer, live: Iterable[Session] = ()) -> list[object]:
             return calls.append((cmd, cwd, check))
         return real_run(cmd, *args, cwd=cwd, check=check, **kw)
 
-    replace.on_class(Claude.sessions, lambda self: list(live))
+    replace.on_class(Claude.live, lambda self, cwd=None: list(live))
     replace.in_module(subprocess.run, fake_run)
     return calls
 

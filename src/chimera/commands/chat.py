@@ -58,12 +58,13 @@ def chat(
     """Launch (or with ``resume`` revive) the chat session ``name`` in ``cwd``.
 
     A chat deliberately sits alongside whatever agent is working there, so the
-    harness's one-session-per-cwd guard is off; the guard here is by *name* — the
-    scope's chat already being live means attach, not launch, whichever was asked.
+    harness's one-session-per-cwd guard is off; the guard here is by *name* over the
+    live tier (a stale remnant of an old chat never blocks) — the scope's chat already
+    being live means attach, not launch, whichever was asked.
     The guards fire under ``dry`` too, so a preview still reports the refusal.
     """
     refuse_restricted(spec, extra)
-    if any(session.name == name for session in spec.agent.sessions()):
+    if any(session.name == name for session in spec.agent.live()):
         raise ChatAlreadyLiveError(name)
     launch = spec.agent.resume if resume else spec.agent.start
     dry(

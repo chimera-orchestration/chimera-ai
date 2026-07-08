@@ -15,7 +15,7 @@ from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
 from chimera.agents import Session
 from chimera.agents.context import materialize, render, role_context
 from chimera.agents.registry import AgentSpec, resolve_spec
-from chimera.commands.agent import agents, scope_line, scoped
+from chimera.commands.agent import agents, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
 from chimera.commands.chat import chat as _chat
@@ -495,7 +495,9 @@ def _tag(finding: Finding) -> str:
 )
 @logs(board)
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
-    _render_board(board(_scope(ctx, project, goal, infer=False), agents()))
+    scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
+    rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
+    _render_board(board(scope, rows))
 
 
 # Detail (session title / last prompt) past this many chars is trimmed for listings.
@@ -508,8 +510,17 @@ def _name(a: Session) -> str:
 
 
 def _detail(a: Session) -> str:
-    """The session's one-line detail, trimmed to ``DETAIL_MAX`` with an ellipsis."""
-    return a.detail if len(a.detail) <= DETAIL_MAX else a.detail[: DETAIL_MAX - 1] + '…'
+    """The session's one-line detail, trimmed to ``DETAIL_MAX`` with an ellipsis.
+
+    A stale row's detail is its reason — the mark is what the row is showing.
+    """
+    detail = a.stale if a.stale is not None else a.detail
+    return detail if len(detail) <= DETAIL_MAX else detail[: DETAIL_MAX - 1] + '…'
+
+
+def _status(a: Session) -> str:
+    """The status column: ``stale`` displaces the registry's claim on a marked row."""
+    return 'stale' if a.stale is not None else a.status
 
 
 def _summary(a: Session) -> str:
@@ -1072,19 +1083,30 @@ def agent_resume(
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')
 @logs(scoped)
-def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
+def agent_ls(
+    ctx: typer.Context,
+    verbose: Annotated[
+        bool,
+        typer.Option('--verbose', '-v', help='Also show stale sessions, each with why it is stale'),
+    ] = False,
+    project: ProjectOpt = None,
+    goal: GoalOpt = None,
+) -> None:
     scope = _scope(ctx, project, goal)
     typer.echo(scope_line(scope))
-    listing = scoped(agents(), scope, otherwise=None)
-    if not listing:
+    rows, withheld = shown(scoped(agents(), scope, otherwise=None), verbose)
+    if not rows:
         typer.echo('No agents running')
-        return
-    id_w = max(len(a.short) for a in listing)
-    name_w = max(len(_name(a)) for a in listing)
-    status_w = max(len(a.status) for a in listing)
-    for a in listing:
-        row = f'{a.short:<{id_w}}  {_name(a):<{name_w}}  {a.status:<{status_w}}  {_detail(a)}'
-        typer.echo(row.rstrip())
+    else:
+        id_w = max(len(a.short) for a in rows)
+        name_w = max(len(_name(a)) for a in rows)
+        status_w = max(len(_status(a)) for a in rows)
+        for a in rows:
+            row = f'{a.short:<{id_w}}  {_name(a):<{name_w}}  {_status(a):<{status_w}}  {_detail(a)}'
+            typer.echo(row.rstrip())
+    if withheld:
+        plural = 's' if withheld != 1 else ''
+        typer.echo(f'(+{withheld} stale session{plural} — ch agent ls -v to show)')
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:

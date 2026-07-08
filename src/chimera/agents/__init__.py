@@ -113,7 +113,11 @@ class Agent(ABC):
 
     @abstractmethod
     def sessions(self) -> list[Session]:
-        """Every verified-live session this harness is running, enriched for listing."""
+        """Every :meth:`checked` session this harness reports, enriched for listing.
+
+        Checked, not merely live: stale entries ride along marked (``Session.stale``),
+        never dropped, so the listing surface decides whether to show them.
+        """
         ...
 
     @abstractmethod

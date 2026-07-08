@@ -80,11 +80,12 @@ command's options and synonyms; `--json` emits the structured index. A leaf with
 shows blank — a test (`test_every_command_has_a_summary`) fails on it.
 
 **Terse-default `-v` hint** (the *Terse defaults signpost their depth* principle). A view that
-hides detail behind `-v` (`ch help`, `ch doctor`) must end with a one-line hint naming the `-v`
-command — but only when it actually withheld something *and* `-v` wasn't given. Never under `-v`
-(nothing left to reveal) and never in machine output (`--json`). So the hint reveals what's
-hidden exactly when an agent would otherwise have no way to discover it: `ch help` trails
-`ch help -v also lists…`; `ch doctor` reveals the count of passing checks it suppressed.
+hides detail behind `-v` (`ch help`, `ch doctor`, `ch agent ls`) must end with a one-line hint
+naming the `-v` command — but only when it actually withheld something *and* `-v` wasn't given.
+Never under `-v` (nothing left to reveal) and never in machine output (`--json`). So the hint
+reveals what's hidden exactly when an agent would otherwise have no way to discover it: `ch help`
+trails `ch help -v also lists…`; `ch doctor` reveals the count of passing checks it suppressed;
+`ch agent ls` the count of stale sessions it withheld.
 
 ## Agent-restricted options
 

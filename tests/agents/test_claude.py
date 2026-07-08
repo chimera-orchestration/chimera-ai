@@ -242,18 +242,23 @@ def test_session_summary_when_transcript_has_no_title_or_prompt(tmpdir: TempDir)
     assert session_summary('/work/proj', 'agent', projects) is None
 
 
-def test_sessions_enriches_live_sessions_with_a_summary(tmpdir: TempDir, replace: Replacer) -> None:
+def test_sessions_enriches_checked_sessions_with_a_summary(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
     projects = tmpdir.makedir('projects')
     _transcript(
         projects / '-work-proj', 'a.jsonl', '{"type": "last-prompt", "lastPrompt": "do it"}\n', 1000
     )
-    live = [
+    checked = [
         Session(
             id='a', name='proj@goal@agent', status='busy', cwd=Path('/work/proj'), summary=None
         ),
         Session(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
+        Session(  # a marked corpse rides through enrichment, mark intact — never dropped
+            id='ghost', name='ghost', status='?', cwd=Path('/gone'), summary=None, stale='dead pid'
+        ),
     ]
-    replace.on_class(Claude.live, lambda self, cwd=None: list(live))
+    replace.on_class(Claude.checked, lambda self, cwd=None: list(checked))
     compare(
         Claude(projects).sessions(),
         expected=[
@@ -265,6 +270,14 @@ def test_sessions_enriches_live_sessions_with_a_summary(tmpdir: TempDir, replace
                 summary='do it',  # from the transcript; 'bare' has none to find
             ),
             Session(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
+            Session(
+                id='ghost',
+                name='ghost',
+                status='?',
+                cwd=Path('/gone'),
+                summary=None,
+                stale='dead pid',
+            ),
         ],
     )
 
@@ -272,5 +285,5 @@ def test_sessions_enriches_live_sessions_with_a_summary(tmpdir: TempDir, replace
 def test_sessions_skips_enrichment_when_the_registry_had_no_cwd(replace: Replacer) -> None:
     # a cwd-less record parses to Path('.') — there is no transcript folder to read
     lonely = Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
-    replace.on_class(Claude.live, lambda self, cwd=None: [lonely])
+    replace.on_class(Claude.checked, lambda self, cwd=None: [lonely])
     compare(Claude().sessions(), expected=[lonely])

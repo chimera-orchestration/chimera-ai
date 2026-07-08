@@ -136,6 +136,9 @@ the workspace. Two rules:
     is given), else the project, else **every** agent on the machine (the flat global list; the
     workspace tree is `ch ls`'s job); `-p/-g` filter explicitly. A `scope:` banner heads the
     output naming what it's bounded to (`<project>@<goal>`, `<project>`, or `all agents`).
+    Stale-marked sessions (registry corpses — `Session.stale`) surface only under `-v`, status
+    `stale` with the reason as the detail; the default withholds them, ending with a one-line
+    `-v` hint when any were in scope.
   - `ch ls` — the workspace-wide dashboard (project → goal → agent tree), the same wherever you
     run it; `-p` focuses on one project, `-g` on one goal (by name, across projects). Agents not
     under any goal/project surface as `loose` so a running agent is never hidden.
