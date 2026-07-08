@@ -108,6 +108,23 @@ and `chimera.commands.agent.refuse_restricted` — called by every launcher once
 resolved — refuses them (never silently drops: a session launched *without* the bypass its
 caller asked for would just be confusing).
 
+## Role-scoped commands
+
+The same machinery one level up: where `RESTRICTED_OPTIONS` strips options, per-role command
+allowlists (`chimera.agent_env.ROLE_COMMANDS`, canonical leaf paths keyed by role) strip whole
+commands. When `CHIMERA_ROLE` names a listed role (`session_role()`; empty counts as unset),
+`main()` prunes the tree it built (`_strip_to_role`) before invoking: a leaf not in the role's
+set is deleted from its group's `commands` dict, a group emptied by that is deleted too —
+absent from parsing, `--help`, `ch help` and completion alike, and a synonym dies with its
+canonical target (`alias_group` resolves through the pruned dict). *Strip, don't admonish*:
+anything needing a "must not" in prose is instead absent from the session's world — written
+prohibitions advertise targets. The captain has no `ROLE_COMMANDS` entry — full tree (the
+option strip still applies under `CLAUDECODE`); an **unknown role fails hard and early** — `ch`
+refuses to run at all, before any command parses — never a silent full tree, never a silently
+narrowed one. Honesty: env-based identity is a fence, not a wall (unset-able, like
+`CLAUDECODE`) — the wall is the harness permission layer; the fence's real value is not
+advertising footguns.
+
 ## Destructive commands preview with --dry
 
 A command that deletes or discards (worktree/branch removal, project removal, …) must offer

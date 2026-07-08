@@ -1,13 +1,16 @@
+import json
 import sys
+from collections.abc import Iterator
 from typing import cast
 
 import pytest
-from testfixtures import Replacer, compare, not_there
-from typer._click.core import Command
+from testfixtures import Replacer, TempDir, compare, not_there
+from typer._click.core import Command, Context
 from typer.core import TyperGroup
 from typer.main import get_command
 
-from chimera.__main__ import _strip_restricted_options, app, main
+from chimera.__main__ import _strip_restricted_options, _strip_to_role, app, main
+from chimera.agent_env import ROLE_AGENT, ROLE_COMMANDS, ROLE_MANAGER
 
 
 def _leaf(root: Command, *path: str) -> Command:
@@ -19,6 +22,25 @@ def _leaf(root: Command, *path: str) -> Command:
 
 def _option_names(command: Command) -> set[str]:
     return {opt for p in command.params for opt in p.opts}
+
+
+def _leaf_paths(command: Command, path: str = '') -> Iterator[str]:
+    subs = cast('dict[str, Command] | None', getattr(command, 'commands', None))
+    if subs is None:
+        yield path.strip()
+    else:
+        for name, sub in subs.items():
+            yield from _leaf_paths(sub, f'{path}{name} ')
+
+
+def _role_tree(role: str) -> TyperGroup:
+    command = get_command(app)
+    _strip_to_role(command, ROLE_COMMANDS[role])
+    return cast(TyperGroup, command)
+
+
+def _argv(replace: Replacer, *argv: str) -> None:
+    replace(target=sys.argv, container=sys, name='argv', replacement=['ch', *argv])
 
 
 class TestStripRestrictedOptions:
@@ -52,12 +74,7 @@ class TestMain:
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', '1')
-        replace(
-            target=sys.argv,
-            container=sys,
-            name='argv',
-            replacement=['ch', 'worktree', 'rm', 'somegoal', '--force'],
-        )
+        _argv(replace, 'worktree', 'rm', 'somegoal', '--force')
         with pytest.raises(SystemExit) as excinfo:
             main()
         compare(excinfo.value.code, expected=2)
@@ -69,14 +86,106 @@ class TestMain:
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', not_there)
-        replace(
-            target=sys.argv,
-            container=sys,
-            name='argv',
-            replacement=['ch', 'worktree', 'rm', '--help'],
-        )
+        _argv(replace, 'worktree', 'rm', '--help')
         with pytest.raises(SystemExit) as excinfo:
             main()
         compare(excinfo.value.code, expected=0)
         # same styling caveat as above — assert on the help text, not the flag itself.
         assert 'Skip the live-agent check' in capsys.readouterr().out
+
+
+class TestStripToRole:
+    def test_manager_tree_is_the_within_project_lifecycle(self) -> None:
+        tree = _role_tree(ROLE_MANAGER)
+        # chat/init/doctor gone; project and worktree emptied by the prune, so gone whole
+        compare(set(tree.commands), expected={'help', 'ls', 'review', 'goal', 'agent'})
+        goal = cast(TyperGroup, _leaf(tree, 'goal'))
+        compare(set(goal.commands), expected={'start', 'adopt', 'sync', 'finish', 'rename', 'ls'})
+        compare(
+            set(cast(TyperGroup, _leaf(tree, 'agent')).commands), expected={'start', 'resume', 'ls'}
+        )
+
+    def test_agent_tree_is_exactly_help(self) -> None:
+        compare(set(_role_tree(ROLE_AGENT).commands), expected={'help'})
+
+    def test_synonyms_survive_iff_their_canonical_does(self) -> None:
+        manager = _role_tree(ROLE_MANAGER)
+        goal = cast(TyperGroup, _leaf(manager, 'goal'))
+        # goal start survives for a manager, so its synonym still dispatches…
+        assert goal.get_command(Context(goal, info_name='goal'), 'new') is not None
+        agent_tree = _role_tree(ROLE_AGENT)
+        # …while the agent's stripped `ls` takes root-level `list` down with it
+        assert agent_tree.get_command(Context(agent_tree, info_name='ch'), 'list') is None
+
+    def test_every_role_command_names_a_live_leaf(self) -> None:
+        # a stale allowlist entry (a renamed/retired command) would silently allow nothing
+        leaves = set(_leaf_paths(get_command(app)))
+        for role, allowed in ROLE_COMMANDS.items():
+            compare(allowed - leaves, expected=set(), prefix=role)
+
+    def test_role_strip_composes_with_the_option_strip(self) -> None:
+        command = get_command(app)
+        _strip_restricted_options(command)
+        _strip_to_role(command, ROLE_COMMANDS[ROLE_MANAGER])
+        finish = _leaf(command, 'goal', 'finish')  # present for a manager…
+        assert '--force' not in _option_names(finish)  # …with the restricted option gone
+
+
+class TestMainRole:
+    def test_manager_cannot_reach_project_add(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        _argv(replace, 'project', 'add', 'https://example.com/r.git')
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        compare(excinfo.value.code, expected=2)
+        assert 'No such command' in capsys.readouterr().err
+
+    def test_agent_help_lists_only_allowed_leaves(
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'agent')
+        _argv(replace, 'help', '--json')
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        compare(excinfo.value.code, expected=0)
+        entries = json.loads(capsys.readouterr().out)
+        compare({entry['path'] for entry in entries}, expected=ROLE_COMMANDS[ROLE_AGENT])
+
+    def test_unknown_role_fails_hard_before_any_command_parses(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'bogus')
+        _argv(replace, 'help')
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        compare(excinfo.value.code, expected=1)
+        compare(
+            capsys.readouterr().err,
+            expected="Error: unknown CHIMERA_ROLE 'bogus' (known: captain, manager, agent)\n",
+        )
+
+    def test_captain_keeps_the_full_tree_with_options_stripped(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CLAUDECODE', '1')
+        replace.in_environ('CHIMERA_ROLE', 'captain')
+        _argv(replace, 'worktree', 'rm', 'somegoal', '--force')
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        compare(excinfo.value.code, expected=2)
+        # the command itself survived (only a role in ROLE_COMMANDS is pruned) — the
+        # error is about the agent-restricted option, which still gets stripped
+        assert 'No such option' in capsys.readouterr().err
+
+    def test_manager_command_present_with_restricted_option_stripped(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CLAUDECODE', '1')
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        _argv(replace, 'goal', 'finish', 'somegoal', '--force')
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        compare(excinfo.value.code, expected=2)
+        assert 'No such option' in capsys.readouterr().err

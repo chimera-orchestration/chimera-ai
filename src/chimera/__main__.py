@@ -11,7 +11,13 @@ from typer.core import TyperCommand, TyperGroup
 from typer.main import get_command
 
 from chimera import logging
-from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
+from chimera.agent_env import (
+    RESTRICTED_OPTIONS,
+    ROLE_CAPTAIN,
+    ROLE_COMMANDS,
+    running_under_ai_agent,
+    session_role,
+)
 from chimera.agents import Session
 from chimera.agents.context import materialize, render, role_context
 from chimera.agents.registry import AgentSpec, resolve_spec
@@ -1138,13 +1144,42 @@ def _strip_restricted_options(command: Command) -> None:
         _strip_restricted_options(sub)
 
 
+def _strip_to_role(command: Command, allowed: frozenset[str], path: str = '') -> None:
+    """Prune the Click tree to the ``allowed`` canonical leaf paths — the option strip one
+    level up. A fenced command isn't hidden but absent: parsing, ``--help``, ``ch help`` and
+    completion all forget it, a group emptied by the prune is deleted with it, and a synonym
+    dies with its canonical target (``alias_group.get_command`` resolves through the pruned
+    ``commands`` dict, so nothing is left to dispatch to)."""
+    commands: dict[str, Command] = getattr(command, 'commands', {})
+    for name, sub in list(commands.items()):
+        if getattr(sub, 'commands', None) is not None:  # a group — prune inside, then itself
+            _strip_to_role(sub, allowed, f'{path}{name} ')
+            if not getattr(sub, 'commands'):
+                del commands[name]
+        elif f'{path}{name}' not in allowed:
+            del commands[name]
+
+
 def main() -> None:
-    if running_under_ai_agent():
+    role = session_role()
+    if role is not None and role != ROLE_CAPTAIN and role not in ROLE_COMMANDS:
+        # fail hard and early: never a silent full tree, never a silently narrowed one
+        typer.echo(
+            f'Error: unknown CHIMERA_ROLE {role!r} '
+            f'(known: {", ".join((ROLE_CAPTAIN, *ROLE_COMMANDS))})',
+            err=True,
+        )
+        raise SystemExit(1)
+    restricted = running_under_ai_agent()
+    if restricted or role in ROLE_COMMANDS:
         command = get_command(app)
-        _strip_restricted_options(command)
+        if restricted:
+            _strip_restricted_options(command)
+        if role in ROLE_COMMANDS:
+            _strip_to_role(command, ROLE_COMMANDS[role])
         command()
     else:
-        app()
+        app()  # a human (or the captain, whose tree is full) — typer's own path
 
 
 if __name__ == '__main__':  # pragma: no cover
