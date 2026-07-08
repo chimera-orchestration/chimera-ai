@@ -17,6 +17,11 @@ class ChatAlreadyLiveError(UserError):
         super().__init__(f"chat '{name}' is already live — attach to it, or stop it first")
 
 
+class NoGoalWorktreeError(UserError):
+    def __init__(self, goal: str) -> None:
+        super().__init__(f"goal '{goal}' has no agent worktree — ch goal start {goal} creates it")
+
+
 def chat_target(scope: Scope, captain: str) -> tuple[Path, str]:
     """Where a chat at ``scope`` runs and what its session is named.
 
@@ -24,15 +29,19 @@ def chat_target(scope: Scope, captain: str) -> tuple[Path, str]:
     ``<project>@<goal>@chat``, a project in its project dir as ``<project>@chat``, and
     the bare workspace as the captain — its persona name *is* the session name, and it
     works on the workspace as a whole (no goal, branch or worktree).
+
+    A goal pinned by ``-g`` isn't validated by scope resolution (listers legitimately
+    take any name as a filter), so the ghost is caught here: a goal whose agent
+    worktree doesn't exist refuses rather than launching a harness in a dead cwd.
     """
     if scope.project is None:
         return scope.workspace, captain
     if scope.goal is None:
         return scope.project.dir, f'{scope.project.name}{SEP}{CHAT}'
-    return (
-        worktree_path(scope.project.worktrees, scope.goal, AGENT),
-        session_name(scope.project.name, scope.goal, CHAT),
-    )
+    cwd = worktree_path(scope.project.worktrees, scope.goal, AGENT)
+    if not cwd.is_dir():
+        raise NoGoalWorktreeError(scope.goal)
+    return cwd, session_name(scope.project.name, scope.goal, CHAT)
 
 
 def chat(

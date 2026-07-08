@@ -83,7 +83,8 @@ A chat deliberately sits *alongside* whatever agent is working in the same cwd, 
 one-session-per-worktree guard is off; instead the scope's chat itself being live refuses with
 an attach hint. `--resume`/`-r` revives the scope's previous (dead) chat session. `-p`/`-g`
 override the scope as usual; prompt/`--`-passthrough/`--dangerous`/`--harness`/`-m` behave as on
-the other launchers.
+the other launchers. A `-g` naming a goal with no agent worktree refuses (`ch goal start` it
+first) rather than launching the harness in a nonexistent cwd.
 
 ## Launch context: principles inline, knowledge indexes
 

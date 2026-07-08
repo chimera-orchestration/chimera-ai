@@ -8,7 +8,7 @@ from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.agents import Session
 from chimera.agents.claude import Claude
-from chimera.commands.chat import ChatAlreadyLiveError, chat, chat_target
+from chimera.commands.chat import ChatAlreadyLiveError, NoGoalWorktreeError, chat, chat_target
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
 from tests.cli import Command, action_logs
@@ -47,12 +47,18 @@ class TestChatTarget:
         )
 
     def test_goal_scope_chats_in_the_agent_worktree(self, tmpdir: TempDir) -> None:
+        worktree = tmpdir.makedir('lycia/proj/worktrees/g@agent')
+        project = _project_obj(tmpdir / 'lycia' / 'proj')
+        compare(
+            chat_target(Scope(tmpdir / 'lycia', project, 'g'), 'pegasus'),
+            expected=(worktree, 'proj@g@chat'),
+        )
+
+    def test_ghost_goal_refuses(self, tmpdir: TempDir) -> None:
         ws = tmpdir.makedir('lycia')
         project = _project_obj(ws / 'proj')
-        compare(
-            chat_target(Scope(ws, project, 'g'), 'pegasus'),
-            expected=(ws / 'proj' / 'worktrees' / 'g@agent', 'proj@g@chat'),
-        )
+        with ShouldRaise(NoGoalWorktreeError('ghost')):
+            chat_target(Scope(ws, project, 'ghost'), 'pegasus')
 
 
 class TestChat:
@@ -232,6 +238,36 @@ def test_chat_cli_goal_scope_from_worktree(
         ),
     )
     compare(calls, expected=[(['claude', '--name', 'proj@g@chat'], worktree, True)])
+
+
+def test_chat_cli_ghost_goal_errors(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
+    ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
+    project = ws / 'proj'
+    project.mkdir()
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    os.chdir(project)
+    calls = _stub(replace)
+    message = "goal 'ghost' has no agent worktree — ch goal start ghost creates it"
+    command.run('chat', '-g', 'ghost').check(
+        output=f'Error: {message}',
+        return_code=1,
+        logging=action_logs(
+            'chat',
+            'chimera.commands.chat.chat',
+            {
+                'prompt': None,
+                'resume': False,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+                'project': None,
+                'goal': 'ghost',
+            },
+            error=f'NoGoalWorktreeError: {message}',
+        ),
+    )
+    compare(calls, expected=[])  # never launched
 
 
 def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
