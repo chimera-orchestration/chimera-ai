@@ -31,14 +31,14 @@ def remove(
     Every actor in the goal's namespace is swept, not just the default human/agent pair
     (see :func:`goal_actors`) — any stray ``<goal>/<actor>`` branch or ``<goal>@<actor>``
     worktree goes too. Only touches worktrees/branches that actually exist, so re-running —
-    or removing a goal that was never fully created — is a safe no-op. Refuses if a claude
-    agent is live in any of the goal's worktrees, unless force. ``fetch`` (the default)
-    refreshes ``origin`` first so a branch merged upstream is recognised as merged. The
-    deleted branches and the commits they pointed at are logged first (see
-    ``agent-docs/logging.md``), so a force-discarded branch can still be recovered from the
-    log. Under ``dry`` the same discovery and safety checks run but nothing is deleted (so
-    no refs change and no ref line is logged); the return is still what *would* be removed.
-    Returns removed worktrees.
+    or removing a goal that was never fully created — is a safe no-op. Refuses if an agent
+    from any registered harness is live in any of the goal's worktrees, unless force.
+    ``fetch`` (the default) refreshes ``origin`` first so a branch merged upstream is
+    recognised as merged. The deleted branches and the commits they pointed at are logged
+    first (see ``agent-docs/logging.md``), so a force-discarded branch can still be
+    recovered from the log. Under ``dry`` the same discovery and safety checks run but
+    nothing is deleted (so no refs change and no ref line is logged); the return is still
+    what *would* be removed. Returns removed worktrees.
     """
     git = Git(repo)
     registered = registered_worktrees(git)
