@@ -1,6 +1,6 @@
 import os
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from string import Template
 from subprocess import CompletedProcess
@@ -71,9 +71,10 @@ def _stub_agent(replace: Replacer) -> list[object]:
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
+        env: Mapping[str, str] = {},
         dry: Dry = Dry(),
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous, spec, context))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context, env))
 
     replace.in_module(agent, record, module=review_mod)
     return calls
@@ -124,6 +125,7 @@ def test_review_builds_the_goal_tracking_the_pr_and_launches(
                 False,
                 AgentSpec(),
                 None,
+                {},
             )
         ],
     )
@@ -161,6 +163,7 @@ def test_review_keys_the_context_by_the_resolved_session_name(
                 False,
                 AgentSpec(),
                 tmpdir / 'ctx.md',
+                {},
             )
         ],
     )
@@ -500,10 +503,12 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         launch: bool = True,
         spec: AgentSpec = AgentSpec(),
         context: Callable[[str], Path | None] | None = None,
+        env: Callable[[str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
         rendered = context('project@pr-1@agent') if context is not None else None
-        calls.append((project, pr, list(extra), dangerous, into, launch, spec, rendered))
+        stamp = env('project@pr-1@agent') if env is not None else None
+        calls.append((project, pr, list(extra), dangerous, into, launch, spec, rendered, stamp))
         return worktrees / 'pr-1@agent'
 
     replace(target=review, container=main, name='_review', replacement=record)
@@ -527,7 +532,17 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
     compare(
         calls,
         expected=[
-            ('project', '1', ['--model', 'opus'], False, Path.cwd(), True, AgentSpec(), None)
+            (
+                'project',
+                '1',
+                ['--model', 'opus'],
+                False,
+                Path.cwd(),
+                True,
+                AgentSpec(),
+                None,
+                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@pr-1'},
+            )
         ],
     )
     calls.clear()
@@ -549,7 +564,22 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
             },
         ),
     )
-    compare(calls, expected=[('project', '1', [], False, Path.cwd(), False, AgentSpec(), None)])
+    compare(
+        calls,
+        expected=[
+            (
+                'project',
+                '1',
+                [],
+                False,
+                Path.cwd(),
+                False,
+                AgentSpec(),
+                None,
+                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@pr-1'},
+            )
+        ],
+    )
 
 
 def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command):
@@ -568,6 +598,7 @@ def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         launch: bool = True,
         spec: AgentSpec = AgentSpec(),
         context: Callable[[str], Path | None] | None = None,
+        env: Callable[[str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
         calls.append(dry)
@@ -606,6 +637,7 @@ def test_review_cli_dry_with_packaged_template(
             [
                 f'Would review 1 in {expected}',
                 'harness: claude',
+                'role: agent (scope: project@pr-1)',
                 'prompt: review template (packaged default) + guardrail',
                 'context: (none)',
             ]
@@ -640,6 +672,7 @@ def test_review_cli_dry_names_the_project_template(
             [
                 f'Would review 1 in {expected}',
                 'harness: claude',
+                'role: agent (scope: project@pr-1)',
                 f'prompt: review template ({Path.cwd() / "prompts" / "review.md"}) + guardrail',
                 'context: (none)',
             ]

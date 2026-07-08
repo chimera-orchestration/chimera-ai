@@ -60,7 +60,9 @@ def test_goal_and_actor_before_the_command(
     (workspace_with_env / 'myproject' / 'worktrees' / 'g@reviewer').mkdir()
     calls: list[object] = []
     replace.on_class(Claude.live, lambda self, cwd=None: [])
-    replace.in_module(subprocess.run, lambda cmd, cwd=None, check=False: calls.append((cmd, cwd)))
+    replace.in_module(
+        subprocess.run, lambda cmd, cwd=None, check=False, env=None: calls.append((cmd, cwd))
+    )
     worktree = workspace_with_env / 'myproject' / 'worktrees' / 'g@reviewer'
     command.run('agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start').check(
         output=f'Launched agent in {worktree}',

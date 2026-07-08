@@ -1,5 +1,5 @@
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from giterator import Git
@@ -33,9 +33,10 @@ def _stub_agent(replace: Replacer) -> list[object]:
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
+        env: Mapping[str, str] = {},
         dry: Dry = Dry(),
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous, spec, context))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context, env))
 
     replace.in_module(agent, record, module=goal_adopt)
     return calls
@@ -79,7 +80,16 @@ def test_adopt_restructures_the_branch_then_launches_the_agent(
     compare(
         calls,
         expected=[
-            (worktrees / 'feature@agent', 'proj@feature@agent', None, (), False, AgentSpec(), None)
+            (
+                worktrees / 'feature@agent',
+                'proj@feature@agent',
+                None,
+                (),
+                False,
+                AgentSpec(),
+                None,
+                {},
+            )
         ],
     )
 
@@ -138,6 +148,7 @@ def test_adopt_passes_the_prompt_to_the_agent(
                 False,
                 AgentSpec(),
                 None,
+                {},
             )
         ],
     )
@@ -261,7 +272,19 @@ def test_goal_adopt_cli(
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
     compare(
-        calls, expected=[(expected, 'project@feature-x@agent', None, [], False, AgentSpec(), None)]
+        calls,
+        expected=[
+            (
+                expected,
+                'project@feature-x@agent',
+                None,
+                [],
+                False,
+                AgentSpec(),
+                None,
+                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+            )
+        ],
     )
 
 
@@ -288,6 +311,7 @@ def test_goal_adopt_cli_passes_extra_flags_through(
                 False,
                 AgentSpec(),
                 None,
+                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
             )
         ],
     )
@@ -306,7 +330,19 @@ def test_goal_adopt_cli_dangerous(
         logging=_adopt_logs(base, expected, dangerous=True),
     )
     compare(
-        calls, expected=[(expected, 'project@feature-x@agent', None, [], True, AgentSpec(), None)]
+        calls,
+        expected=[
+            (
+                expected,
+                'project@feature-x@agent',
+                None,
+                [],
+                True,
+                AgentSpec(),
+                None,
+                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+            )
+        ],
     )
 
 
@@ -321,6 +357,7 @@ def test_goal_adopt_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
             [
                 f'Would adopt feature in {worktree}',
                 'harness: claude',
+                'role: agent (scope: project@feature)',
                 'prompt: (interactive)',
                 'context: (none)',
             ]

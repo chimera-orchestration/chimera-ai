@@ -1,6 +1,6 @@
 from testfixtures import Replacer, compare, not_there
 
-from chimera.agent_env import role_scope, running_under_ai_agent, session_role
+from chimera.agent_env import role_env, role_scope, running_under_ai_agent, session_role
 
 
 class TestRunningUnderAiAgent:
@@ -37,3 +37,14 @@ class TestRoleScope:
     def test_empty_counts_as_unset(self, replace: Replacer) -> None:
         replace.in_environ('CHIMERA_ROLE_SCOPE', '')
         assert role_scope() is None
+
+
+class TestRoleEnv:
+    def test_unscoped(self) -> None:
+        compare(role_env('captain'), expected={'CHIMERA_ROLE': 'captain'})
+
+    def test_scoped(self) -> None:
+        compare(
+            role_env('agent', 'proj@g'),
+            expected={'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'proj@g'},
+        )

@@ -68,6 +68,17 @@ agent:
   model: opus       # optional; harness-native name
 ```
 
+Every launcher also stamps role identity into the session's environment
+(`chimera.agent_env.role_env`, threaded to the harness as an `env` overlay on the parent
+environment): `CHIMERA_ROLE` — `captain` for the bare-workspace chat, `manager` for a project
+chat, `agent` for the goal-scoped launchers — plus `CHIMERA_ROLE_SCOPE` naming what it's fenced
+to (`<project>` for a manager, `<project>@<goal>` for an agent; the captain gets none —
+unfenced). The overlay wins over the launching session's own values, so a captain running
+`ch goal start` hands the child `agent`, never its own `captain`. The stamp drives the per-role
+command strip (see `agent-docs/commands.md`, *Role-scoped commands*); `--dry` previews it as a
+`role:` line. Honesty: env identity is a fence, not a wall — unset-able, like `CLAUDECODE`; the
+wall is the harness permission layer — the fence's value is not advertising footguns.
+
 ## Chat: the captain and scoped conversations
 
 `ch chat` launches a conversation at the current scope, resolved like the listers: in a project

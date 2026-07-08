@@ -1,9 +1,10 @@
 """The claude-code harness: launching, resuming and listing ``claude`` sessions."""
 
 import json
+import os
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +47,7 @@ class Claude(Agent):
         *,
         model: str | None = None,
         context: Path | None = None,
+        env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> subprocess.CompletedProcess[bytes]:
         """Run a claude session named ``name``, with cwd set to ``cwd``.
@@ -54,10 +56,11 @@ class Claude(Agent):
         it daemonizes (``claude --bg``) to work on the prompt autonomously. ``model``
         rides as ``--model``. ``extra`` is passed straight through to ``claude`` (e.g.
         ``--dangerously-skip-permissions``). ``dangerous`` makes bypass-permissions mode
-        reachable (see ``_session_args``).
+        reachable (see ``_session_args``). ``env`` is overlaid on the parent environment
+        (see ``Agent``).
         """
         args = _session_args(['--name', name], prompt, extra, dangerous, model, context)
-        return self._launch(cwd, args, exclusive)
+        return self._launch(cwd, args, exclusive, env)
 
     def resume(
         self,
@@ -69,6 +72,7 @@ class Claude(Agent):
         *,
         model: str | None = None,
         context: Path | None = None,
+        env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> subprocess.CompletedProcess[bytes]:
         """Resume the claude session named ``name``, with cwd set to ``cwd``.
@@ -80,7 +84,7 @@ class Claude(Agent):
         ``prompt`` it resumes in the background (``--bg``) to keep working.
         """
         args = _session_args(['--resume', name], prompt, extra, dangerous, model, context)
-        return self._launch(cwd, args, exclusive)
+        return self._launch(cwd, args, exclusive, env)
 
     def sessions(self) -> list[Session]:
         """Every checked claude session, enriched with a one-line summary.
@@ -122,15 +126,22 @@ class Claude(Agent):
         return replace(session, summary=summary)
 
     def _launch(
-        self, cwd: Path, args: Sequence[str], exclusive: bool
+        self, cwd: Path, args: Sequence[str], exclusive: bool, env: Mapping[str, str] = {}
     ) -> subprocess.CompletedProcess[bytes]:
-        """Run ``claude <args>`` in ``cwd``; under ``exclusive``, refuse if one is already live."""
+        """Run ``claude <args>`` in ``cwd``; under ``exclusive``, refuse if one is already live.
+
+        ``env`` is overlaid on the parent environment, the overlay winning — a captain
+        session launching ``ch goal start`` carries ``CHIMERA_ROLE=captain`` itself, and
+        the child must get ``agent``.
+        """
         if not cwd.is_dir():
             raise FileNotFoundError(cwd)
         if exclusive and (running := self.live(cwd)):
             ids = ', '.join(f'{s.id} ({s.status})' for s in running)
             raise RuntimeError(f'an agent is already live in {cwd}: {ids} — attach or stop it')
-        return subprocess.run(['claude', *args], cwd=cwd, check=True)
+        return subprocess.run(
+            ['claude', *args], cwd=cwd, check=True, env={**os.environ, **env} if env else None
+        )
 
 
 def _parse(raw: dict[str, object]) -> Session:

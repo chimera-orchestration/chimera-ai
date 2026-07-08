@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from chimera.agent_env import ROLE_MANAGER
@@ -55,6 +55,7 @@ def chat(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
+    env: Mapping[str, str] = {},
     resume: bool = False,
     dry: Dry = Dry(),
 ) -> None:
@@ -65,6 +66,8 @@ def chat(
     live tier (a stale remnant of an old chat never blocks) — the scope's chat already
     being live means attach, not launch, whichever was asked.
     The guards fire under ``dry`` too, so a preview still reports the refusal.
+    ``env`` is the role stamp overlaid on the session's environment (see
+    ``chimera.agent_env.role_env``).
     """
     refuse_restricted(spec, extra)
     if any(session.name == name for session in spec.agent.live()):
@@ -79,5 +82,6 @@ def chat(
         dangerous,
         model=spec.model,
         context=context,
+        env=env,
         exclusive=False,
     )

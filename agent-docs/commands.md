@@ -112,8 +112,10 @@ caller asked for would just be confusing).
 
 The same machinery one level up: where `RESTRICTED_OPTIONS` strips options, per-role command
 allowlists (`chimera.agent_env.ROLE_COMMANDS`, canonical leaf paths keyed by role) strip whole
-commands. When `CHIMERA_ROLE` names a listed role (`session_role()`; empty counts as unset),
-`main()` prunes the tree it built (`_strip_to_role`) before invoking: a leaf not in the role's
+commands. The launchers themselves set the variable — every launch stamps
+`role_env(role, scope)` into the session's environment (see `agent-docs/workspace-layout.md`,
+*Choosing the harness and model*). When `CHIMERA_ROLE` names a listed role (`session_role()`;
+empty counts as unset), `main()` prunes the tree it built (`_strip_to_role`) before invoking: a leaf not in the role's
 set is deleted from its group's `commands` dict, a group emptied by that is deleted too —
 absent from parsing, `--help`, `ch help` and completion alike, and a synonym dies with its
 canonical target (`alias_group` resolves through the pruned dict). *Strip, don't admonish*:

@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -13,8 +13,13 @@ from typer.main import get_command
 from chimera import logging
 from chimera.agent_env import (
     RESTRICTED_OPTIONS,
+    ROLE_AGENT,
     ROLE_CAPTAIN,
     ROLE_COMMANDS,
+    ROLE_ENV_VAR,
+    ROLE_MANAGER,
+    ROLE_SCOPE_ENV_VAR,
+    role_env,
     running_under_ai_agent,
     session_role,
 )
@@ -364,10 +369,16 @@ def _context_file(project: Project | None, name: str) -> Path | None:
 
 
 def _dry_preview(
-    spec: AgentSpec, prompt: str | None, extra: list[str], context: Path | None
+    spec: AgentSpec,
+    prompt: str | None,
+    extra: list[str],
+    context: Path | None,
+    env: Mapping[str, str],
 ) -> None:
-    """What a --dry launch would inject: agent, prompt, passthrough and rendered context."""
+    """What a --dry launch would inject: agent, role stamp, prompt, passthrough and context."""
     typer.echo(f'harness: {spec.harness}' + (f'  model: {spec.model}' if spec.model else ''))
+    role, scope = env[ROLE_ENV_VAR], env.get(ROLE_SCOPE_ENV_VAR)
+    typer.echo(f'role: {role} (scope: {scope})' if scope else f'role: {role}')
     typer.echo(f'prompt: {prompt}' if prompt is not None else 'prompt: (interactive)')
     if extra:
         typer.echo(f'passthrough: {" ".join(extra)}')
@@ -589,6 +600,10 @@ def review(
         context = _context_file(p, name)
         return context
 
+    def _role_stamp(name: str) -> Mapping[str, str]:
+        # keyed the same way: the scope is the resolved name minus its actor (<project>@pr-<N>)
+        return role_env(ROLE_AGENT, name.rsplit(SEP, 1)[0])
+
     worktree = _review(
         p.repo,
         p.worktrees,
@@ -601,6 +616,7 @@ def review(
         launch=not no_agent,
         spec=spec,
         context=_render_context,
+        env=_role_stamp,
         dry=dry_run,
     )
     if no_agent:
@@ -615,8 +631,13 @@ def review(
         if dry:
             override = p.prompts / 'review.md'
             template = str(override) if override.exists() else 'packaged default'
+            goal = worktree.name.split(SEP, 1)[0]  # the same stamp _role_stamp handed the launch
             _dry_preview(
-                spec, f'review template ({template}) + guardrail', _passthrough(ctx), context
+                spec,
+                f'review template ({template}) + guardrail',
+                _passthrough(ctx),
+                context,
+                role_env(ROLE_AGENT, f'{p.name}{SEP}{goal}'),
             )
 
 
@@ -649,9 +670,11 @@ def chat(
         spec = resolve_spec(harness, model, config.captain, config.agent)
         role = role_context(scope.workspace, 'captain', name)
         text = '\n\n'.join(part for part in (role, render(scope.workspace, None)) if part)
+        env = role_env(ROLE_CAPTAIN)  # no scope: the captain is unfenced
     else:
         spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
         text = render(scope.workspace, scope.project)
+        env = role_env(ROLE_MANAGER, scope.project.name)
     dry_run = Dry(dry)
     context = materialize(scope.workspace, name, text)
     _chat(
@@ -662,6 +685,7 @@ def chat(
         dangerous,
         spec,
         context,
+        env,
         resume,
         dry_run,
     )
@@ -670,7 +694,7 @@ def chat(
     )
     typer.echo(f'{verb} chat {name} in {cwd}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 project_app = typer.Typer(
@@ -867,6 +891,7 @@ def goal_start(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context = _context_file(p, session_name(p.name, goal, AGENT))
+    env = role_env(ROLE_AGENT, f'{p.name}{SEP}{goal}')
     worktree = _goal_start(
         p.repo,
         p.worktrees,
@@ -879,11 +904,12 @@ def goal_start(
         dangerous=dangerous,
         spec=spec,
         context=context,
+        env=env,
         dry=dry_run,
     )
     typer.echo(f'{dry_run.verb("Started", "Would start")} {goal} in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 @goal_app.command(
@@ -906,6 +932,7 @@ def goal_adopt(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context = _context_file(p, session_name(p.name, goal, AGENT))
+    env = role_env(ROLE_AGENT, f'{p.name}{SEP}{goal}')
     worktree = _goal_adopt(
         p.repo,
         p.worktrees,
@@ -916,11 +943,12 @@ def goal_adopt(
         dangerous,
         spec,
         context,
+        env,
         dry_run,
     )
     typer.echo(f'{dry_run.verb("Adopted", "Would adopt")} {goal} in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 @goal_app.command(
@@ -1064,10 +1092,11 @@ def agent_start(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context = _context_file(p, name)
-    _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, dry_run)
+    env = role_env(ROLE_AGENT, f'{p.name}{SEP}{g}')
+    _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
     typer.echo(f'{dry_run.verb("Launched", "Would launch")} agent in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 @agent_app.command('resume', cls=PassthroughCommand, help="Reattach to an agent's session.")
@@ -1092,10 +1121,11 @@ def agent_resume(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context = _context_file(p, name)
-    _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, dry_run)
+    env = role_env(ROLE_AGENT, f'{p.name}{SEP}{g}')
+    _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')

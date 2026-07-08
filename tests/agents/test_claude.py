@@ -146,6 +146,39 @@ def test_live_keeps_an_entry_whose_pid_belongs_to_another_user(
     )
 
 
+def _launched(replace: Replacer) -> dict[str, object]:
+    """Stub the launch subprocess, capturing the argv and env it would run with."""
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        cmd: list[str],
+        cwd: Path | None = None,
+        check: bool = False,
+        env: dict[str, str] | None = None,
+    ) -> SimpleNamespace:
+        captured['cmd'], captured['env'] = cmd, env
+        return SimpleNamespace(returncode=0)
+
+    replace.in_module(subprocess.run, fake_run)
+    return captured
+
+
+def test_launch_overlays_env_with_the_overlay_winning(tmpdir: TempDir, replace: Replacer) -> None:
+    # the launching session's own role must never leak into the child it launches
+    replace.in_environ('CHIMERA_ROLE', 'captain')
+    captured = _launched(replace)
+    Claude().start(tmpdir.makedir('wt'), 'n', env={'CHIMERA_ROLE': 'agent'}, exclusive=False)
+    compare(captured['env'], expected={**os.environ, 'CHIMERA_ROLE': 'agent'})
+
+
+def test_launch_without_overlay_inherits_the_environment(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    captured = _launched(replace)
+    Claude().resume(tmpdir.makedir('wt'), 'n', exclusive=False)
+    assert captured['env'] is None  # subprocess inherits the parent environment wholesale
+
+
 def test_session_args_passthrough_model_beats_spec_model() -> None:
     compare(
         _session_args(['--name', 'n'], None, ['--model', 'sonnet'], False, model='opus'),

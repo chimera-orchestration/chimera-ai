@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from chimera.agent_env import running_under_ai_agent
@@ -64,9 +64,14 @@ def agent(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
+    env: Mapping[str, str] = {},
     dry: Dry = Dry(),
 ) -> None:
-    """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``)."""
+    """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``).
+
+    ``env`` is extra variables overlaid on the session's environment — how a launcher
+    stamps role identity into it (see ``chimera.agent_env.role_env``).
+    """
     refuse_restricted(spec, extra)
     dry(
         spec.agent.start,
@@ -77,6 +82,7 @@ def agent(
         dangerous,
         model=spec.model,
         context=context,
+        env=env,
     )
 
 
@@ -88,9 +94,11 @@ def resume(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
+    env: Mapping[str, str] = {},
     dry: Dry = Dry(),
 ) -> None:
-    """Reattach to ``spec``'s agent session named ``name`` (see ``Agent.resume``)."""
+    """Reattach to ``spec``'s agent session named ``name`` (see ``Agent.resume``);
+    ``env`` as on :func:`agent`."""
     refuse_restricted(spec, extra)
     dry(
         spec.agent.resume,
@@ -101,6 +109,7 @@ def resume(
         dangerous,
         model=spec.model,
         context=context,
+        env=env,
     )
 
 

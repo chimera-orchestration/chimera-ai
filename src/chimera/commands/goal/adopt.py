@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from chimera.agents.registry import AgentSpec
@@ -18,13 +18,15 @@ def adopt(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
+    env: Mapping[str, str] = {},
     dry: Dry = Dry(),
 ) -> Path:
     """Adopt an existing branch ``<goal>`` as a goal, then launch its agent.
 
     Restructures the branch into ``<goal>/human`` and ``<goal>/agent`` — preserving its
     commits as the base — creates the agent worktree, and launches the agent, otherwise
-    behaving like ``goal start``. ``dangerous`` makes bypass-permissions mode reachable.
+    behaving like ``goal start`` (``env`` is the role stamp, as there).
+    ``dangerous`` makes bypass-permissions mode reachable.
     Idempotent: the restructure is skipped once both actor branches exist, and the worktree
     is reused when it is already checked out. Returns the agent worktree.
 
@@ -43,7 +45,7 @@ def adopt(
         dry(restructure, git, goal)
         dry(ensure_worktree, git, worktrees_root, goal)
         refs.bind(worktree=str(agent_worktree))
-    agent(agent_worktree, name, prompt, extra, dangerous, spec, context, dry)
+    agent(agent_worktree, name, prompt, extra, dangerous, spec, context, env, dry)
     return agent_worktree
 
 

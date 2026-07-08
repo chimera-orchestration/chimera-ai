@@ -1,6 +1,6 @@
 import json
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib.resources import files
 from pathlib import Path
 from string import Template
@@ -50,6 +50,7 @@ def review(
     launch: bool = True,
     spec: AgentSpec = AgentSpec(),
     context: Callable[[str], Path | None] | None = None,
+    env: Callable[[str], Mapping[str, str]] | None = None,
     dry: Dry = Dry(),
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
@@ -64,7 +65,9 @@ def review(
     ``<project>@pr-<N>@agent`` — the number is only known here, once ``gh`` has resolved
     ``pr``, so a URL argument still lands its context artifact (and the ``context:
     rendered`` log line) under the real session name. Never called without ``launch``:
-    no session, nothing to render for.
+    no session, nothing to render for. ``env`` — the role stamp overlaid on the
+    session's environment — is a factory keyed the same way, for the same reason: its
+    scope carries the goal only the resolved name knows.
 
     ``launch=False`` (CLI ``--no-agent``) stops after the checkout: branches, worktree and
     upstream all stand, but no agent runs — kick one off later with ``ch agent start``. The
@@ -113,6 +116,7 @@ def review(
             dangerous,
             spec,
             context(name) if context is not None else None,
+            env(name) if env is not None else {},
             dry,
         )
     return agent_worktree

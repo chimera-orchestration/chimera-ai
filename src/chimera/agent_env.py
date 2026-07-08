@@ -54,3 +54,13 @@ def session_role() -> str | None:
 def role_scope() -> str | None:
     """The scope the session's role is fenced to, or None when unset/empty."""
     return os.environ.get(ROLE_SCOPE_ENV_VAR) or None
+
+
+def role_env(role: str, scope: str | None = None) -> dict[str, str]:
+    """The env overlay a launcher stamps into a session: its role, plus the scope it is
+    fenced to. The captain gets no scope (unfenced); a manager's is ``<project>``, an
+    agent's ``<project>@<goal>`` (session-name grammar — it splits on the same ``@``)."""
+    env = {ROLE_ENV_VAR: role}
+    if scope is not None:
+        env[ROLE_SCOPE_ENV_VAR] = scope
+    return env
