@@ -79,6 +79,14 @@ class CrossScopeError(UserError):
         super().__init__(f'scoped to {fenced}; ask the captain')
 
 
+def role_scope_for(project: str, goal: str | None = None) -> str:
+    """The scope token a launcher stamps beside a role: ``<project>`` for a manager,
+    ``<project>@<goal>`` for a goal's agent. Deliberately the session-name grammar
+    (``chimera.worktrees.SEP``) — :func:`fenced_project` is the parse side of the pair,
+    splitting on the same ``@``."""
+    return project if goal is None else f'{project}{SEP}{goal}'
+
+
 def fenced_project() -> str | None:
     """The project this session's actions are fenced to, or ``None`` when unfenced.
 

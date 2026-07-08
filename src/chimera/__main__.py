@@ -22,6 +22,7 @@ from chimera.agent_env import (
     ai_session,
     refuse_cross_scope,
     role_env,
+    role_scope_for,
     session_role,
 )
 from chimera.agents import Session
@@ -635,6 +636,7 @@ def review(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context: Path | None = None
+    env: Mapping[str, str] = {}
 
     def _render_context(name: str) -> Path | None:
         # keyed by the session name _review resolves (pr-<N>, even from a URL argument);
@@ -645,8 +647,11 @@ def review(
         return context
 
     def _role_stamp(name: str) -> Mapping[str, str]:
-        # keyed the same way: the scope is the resolved name minus its actor (<project>@pr-<N>)
-        return role_env(ROLE_AGENT, name.rsplit(SEP, 1)[0])
+        # keyed the same way; the handle is kept so --dry previews the stamp the launch
+        # actually got, never a re-derivation
+        nonlocal env
+        env = role_env(ROLE_AGENT, role_scope_for(p.name, name.split(SEP)[1]))
+        return env
 
     worktree = _review(
         p.repo,
@@ -675,13 +680,12 @@ def review(
         if dry:
             override = p.prompts / 'review.md'
             template = str(override) if override.exists() else 'packaged default'
-            goal = worktree.name.split(SEP, 1)[0]  # the same stamp _role_stamp handed the launch
             _dry_preview(
                 spec,
                 f'review template ({template}) + guardrail',
                 _passthrough(ctx),
                 context,
-                role_env(ROLE_AGENT, f'{p.name}{SEP}{goal}'),
+                env,
             )
 
 
@@ -719,7 +723,7 @@ def chat(
         spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
         role = ROLE_MANAGER
         intro = f'You are the manager of the {scope.project.name} project.'
-        env = role_env(ROLE_MANAGER, scope.project.name)
+        env = role_env(ROLE_MANAGER, role_scope_for(scope.project.name))
     # role directives + identity lead, then principles and the scope's knowledge index
     text = '\n\n'.join(
         part
@@ -947,7 +951,7 @@ def goal_start(
     context = _context_file(
         p, session_name(p.name, goal, AGENT), ROLE_AGENT, _agent_intro(p.name, goal)
     )
-    env = role_env(ROLE_AGENT, f'{p.name}{SEP}{goal}')
+    env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
     worktree = _goal_start(
         p.repo,
         p.worktrees,
@@ -990,7 +994,7 @@ def goal_adopt(
     context = _context_file(
         p, session_name(p.name, goal, AGENT), ROLE_AGENT, _agent_intro(p.name, goal)
     )
-    env = role_env(ROLE_AGENT, f'{p.name}{SEP}{goal}')
+    env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
     worktree = _goal_adopt(
         p.repo,
         p.worktrees,
@@ -1150,7 +1154,7 @@ def agent_start(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, g))
-    env = role_env(ROLE_AGENT, f'{p.name}{SEP}{g}')
+    env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
     _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
     typer.echo(f'{dry_run.verb("Launched", "Would launch")} agent in {worktree}')
     if dry:
@@ -1179,7 +1183,7 @@ def agent_resume(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, g))
-    env = role_env(ROLE_AGENT, f'{p.name}{SEP}{g}')
+    env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
     _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:

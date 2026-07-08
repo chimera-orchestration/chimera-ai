@@ -7,6 +7,7 @@ from chimera.agent_env import (
     refuse_cross_scope,
     role_env,
     role_scope,
+    role_scope_for,
     running_under_ai_agent,
     session_role,
 )
@@ -60,6 +61,20 @@ class TestRoleScope:
     def test_empty_counts_as_unset(self, replace: Replacer) -> None:
         replace.in_environ('CHIMERA_ROLE_SCOPE', '')
         assert role_scope() is None
+
+
+class TestRoleScopeFor:
+    def test_project_only(self) -> None:
+        compare(role_scope_for('proj'), expected='proj')
+
+    def test_project_and_goal(self) -> None:
+        compare(role_scope_for('proj', 'g'), expected='proj@g')
+
+    def test_round_trips_through_fenced_project(self, replace: Replacer) -> None:
+        # the pair shares one grammar: what the builder stamps, the parser recovers
+        replace.in_environ('CHIMERA_ROLE', 'agent')
+        replace.in_environ('CHIMERA_ROLE_SCOPE', role_scope_for('proj', 'g'))
+        compare(fenced_project(), expected='proj')
 
 
 class TestFencedProject:

@@ -601,6 +601,8 @@ def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         env: Callable[[str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
+        if env is not None:  # the real review stamps the role through the factory on launch
+            env('project@pr-1@agent')
         calls.append(dry)
         return worktrees / 'pr-1@agent'
 
