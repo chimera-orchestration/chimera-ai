@@ -216,7 +216,7 @@ def test_chat_cli_goal_scope_refuses(tmpdir: TempDir, replace: Replacer, command
     calls = _stub(replace)
     message = (
         'a goal has its agent — ch agent resume -g g talks to it; '
-        'ch chat -p proj for a side conversation'
+        'ch chat from the proj dir for a side conversation'
     )
     command.run('chat').check(
         output=f'Error: {message}',
@@ -247,7 +247,7 @@ def test_chat_cli_explicit_goal_never_launches_the_captain(
     calls = _stub(replace)
     message = (
         'a goal has its agent — ch agent resume -g ghost talks to it; '
-        'ch chat -p <project> for a side conversation'
+        'ch chat from the <project> dir for a side conversation'
     )
     command.run('chat', '-g', 'ghost').check(
         output=f'Error: {message}',

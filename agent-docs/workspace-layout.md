@@ -85,8 +85,8 @@ an attach hint. `--resume`/`-r` revives the scope's previous (dead) chat session
 the scope as usual; prompt/`--`-passthrough/`--dangerous`/`--harness`/`-m` behave as on the other
 launchers. There is no goal scope: a goal already has its agent, so a pinned or explicitly
 requested goal (even a `-g` no project could be resolved for) refuses, pointing at
-`ch agent resume -g <goal>` to talk to the agent and `ch chat -p <project>` for a side
-conversation.
+`ch agent resume -g <goal>` to talk to the agent and `ch chat` *from the project dir* for a
+side conversation — inside the goal worktree, cwd re-pins the goal, so `-p` can't escape it.
 
 ## Launch context: principles inline, knowledge indexes
 

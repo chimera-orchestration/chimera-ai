@@ -21,7 +21,7 @@ class GoalHasAgentError(UserError):
     def __init__(self, goal: str, project: str | None = None) -> None:
         super().__init__(
             f'a goal has its agent — ch agent resume -g {goal} talks to it; '
-            f'ch chat -p {project or "<project>"} for a side conversation'
+            f'ch chat from the {project or "<project>"} dir for a side conversation'
         )
 
 
