@@ -9,6 +9,11 @@ _AGENT_ENV_VARS = ('CLAUDECODE',)  # Claude Code sets this for every subprocess 
 
 RESTRICTED_OPTIONS = frozenset({'--force', '--dangerous'})
 
+# The session-layer roles: the workspace captain, a project's manager (its chat), and a
+# goal's agent. ROLE_-prefixed to avoid colliding with chimera.worktrees.AGENT — the same
+# string on a different axis (actor naming vs session role), deliberately kept apart.
+ROLE_CAPTAIN, ROLE_MANAGER, ROLE_AGENT = 'captain', 'manager', 'agent'
+
 
 def running_under_ai_agent() -> bool:
     """True when the current process was launched by (or under) an AI coding agent."""

@@ -102,12 +102,12 @@ def test_remove_aborts_when_a_project_chat_is_live(
     workspace, project = _project(tmpdir, git_repo)  # no goals: the dir is still swept
     replace.in_module(
         live,
-        lambda worktree: [Session('x', 'myproj@chat', 'idle', worktree, None)],
+        lambda worktree: [Session('x', 'myproj@manager', 'idle', worktree, None)],
         module=worktree_rm,
     )
     message = (
         f'an agent is live in {project}:\n'
-        '  pid ?  idle  myproj@chat\n'
+        '  pid ?  idle  myproj@manager\n'
         'find its terminal or kill the pid, then re-run'
     )
     with ShouldRaise(RuntimeError(message)):

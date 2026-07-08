@@ -6,11 +6,13 @@ from pathlib import Path
 
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
+from chimera.agent_env import ROLE_MANAGER
 from chimera.agents import Session
 from chimera.agents.claude import Claude
 from chimera.commands.chat import ChatAlreadyLiveError, GoalHasAgentError, chat, chat_target
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
+from chimera.worktrees import SEP
 from tests.cli import Command, action_logs
 
 
@@ -43,8 +45,14 @@ class TestChatTarget:
         project = _project_obj(ws / 'proj')
         compare(
             chat_target(Scope(ws, project, None), 'pegasus'),
-            expected=(ws / 'proj', 'proj@chat'),
+            expected=(ws / 'proj', 'proj@manager'),
         )
+
+    def test_project_chat_name_carries_the_manager_role(self, tmpdir: TempDir) -> None:
+        # the session name carries the role at every layer; a project chat is its manager
+        ws = tmpdir.makedir('lycia')
+        _, name = chat_target(Scope(ws, _project_obj(ws / 'proj'), None), 'pegasus')
+        compare(name, expected=f'proj{SEP}{ROLE_MANAGER}')
 
     def test_goal_scope_refuses(self, tmpdir: TempDir) -> None:
         ws = tmpdir.makedir('lycia')
@@ -187,7 +195,7 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
     project = Path.cwd()  # resolves symlinks like the wrapper
     calls = _stub(replace)
     command.run('chat').check(
-        output=f'Launched chat proj@chat in {project}',
+        output=f'Launched chat proj@manager in {project}',
         logging=action_logs(
             'chat',
             'chimera.commands.chat.chat',
@@ -203,7 +211,7 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
             },
         ),
     )
-    compare(calls, expected=[(['claude', '--name', 'proj@chat'], project, True)])
+    compare(calls, expected=[(['claude', '--name', 'proj@manager'], project, True)])
 
 
 def test_chat_cli_goal_scope_refuses(tmpdir: TempDir, replace: Replacer, command: Command) -> None:

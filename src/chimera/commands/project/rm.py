@@ -48,7 +48,7 @@ def remove(workspace: Path, name: str, force: bool = False, dry: Dry = Dry()) ->
             f'{name} holds the only copy of its work (no remote to recover from); '
             f'publish it first (ch project push) or use --force to discard it'
         )
-    # check the project dir (where <project>@chat runs) and every goal's worktrees
+    # check the project dir (where <project>@manager runs) and every goal's worktrees
     # before touching any of them
     refuse_if_agents_running(
         [project]

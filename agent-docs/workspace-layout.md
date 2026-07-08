@@ -71,8 +71,9 @@ agent:
 ## Chat: the captain and scoped conversations
 
 `ch chat` launches a conversation at the current scope, resolved like the listers: in a project
-as `<project>@chat` in the project dir, and at the bare workspace as the **captain** — the
-workspace-level agent that directs all work. The captain has no goal, branch or worktree: it
+as `<project>@manager` in the project dir, and at the bare workspace as the **captain** — the
+workspace-level agent that directs all work. Session names carry the role at every layer: the
+captain's bare persona, a project's `<project>@manager`, a goal's `<project>@<goal>@agent`. The captain has no goal, branch or worktree: it
 works on the workspace as a whole. Its persona name comes from `config.yaml` (`captain: pegasus`,
 or the full form `captain: {name: …, harness: …, model: …}` to also override the agent cascade;
 `ch init --captain pegasus` sets it at creation) and *is* the session name. Role directives in
