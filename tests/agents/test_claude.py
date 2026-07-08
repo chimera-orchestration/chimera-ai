@@ -83,10 +83,26 @@ def test_reported_tolerates_missing_fields(replace: Replacer) -> None:
     )
 
 
-def test_reported_drops_the_degraded_pidless_remnant(replace: Replacer) -> None:
-    # the degraded shape claude's registry reports briefly after a killed pid is pruned
+def test_reported_marks_the_degraded_pidless_remnant_stale(replace: Replacer) -> None:
+    # the degraded shape claude's registry reports briefly after a killed pid is pruned:
+    # marked at the source (claude-registry knowledge), never silently dropped
     _registry(replace, '[{"kind": "background", "startedAt": 1781247747055, "name": "x"}]')
-    compare(Claude().reported(), expected=[])
+    compare(
+        Claude().reported(),
+        expected=[
+            Session(
+                id='?',
+                name='x',
+                status='?',
+                cwd=Path('.'),
+                summary=None,
+                kind='background',
+                started=datetime.fromtimestamp(1781247747055 / 1000),
+                stale='no pid in the registry entry (degraded remnant)',
+            )
+        ],
+    )
+    compare(Claude().live(), expected=[])  # …and live() is what filters it
 
 
 def _dead(pid: int, sig: int) -> None:
@@ -102,6 +118,20 @@ def test_live_filters_out_an_entry_whose_pid_has_died(tmpdir: TempDir, replace: 
     _registry(replace, '[{"sessionId": "x", "status": "idle", "pid": 999999}]')
     replace.in_module(os.kill, _dead, module=os)
     compare(Claude().live(worktree), expected=[])
+    compare(  # checked() keeps the corpse, marked, for surfacing
+        Claude().checked(worktree),
+        expected=[
+            Session(
+                id='x',
+                name='x',
+                status='idle',
+                cwd=Path('.'),
+                summary=None,
+                pid=999999,
+                stale='claimed pid 999999 is not running',
+            )
+        ],
+    )
 
 
 def test_live_keeps_an_entry_whose_pid_belongs_to_another_user(

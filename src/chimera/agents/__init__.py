@@ -11,7 +11,7 @@ registry claims (:meth:`Agent.live`).
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -29,6 +29,9 @@ class Session:
     archive, and a short handle isn't safe to recover from. Display uses :attr:`short`.
     ``pid``/``kind``/``started`` ride along when the harness reports them (a
     server-backed harness may have no pid to claim); ``summary`` is listing enrichment.
+    ``stale`` is ``None`` while there is no reason to doubt the session is live;
+    otherwise it names why the entry is a corpse (a registry remnant, a dead pid) —
+    marked rather than hidden, so staleness can be surfaced, not just logged.
     """
 
     id: str
@@ -39,6 +42,7 @@ class Session:
     pid: int | None = None
     kind: str | None = None
     started: datetime | None = None
+    stale: str | None = None
 
     @property
     def short(self) -> str:
@@ -117,36 +121,43 @@ class Agent(ABC):
         """Every session the harness's *registry* claims is live in ``cwd`` (``None`` = anywhere).
 
         Claims, not facts — registries lie (see :meth:`live`). An adapter parses its
-        native records into :class:`Session`, applying only knowledge specific to its
-        own registry (e.g. claude drops the degraded pid-less remnants its registry
-        keeps briefly after a kill).
+        native records into :class:`Session`, marking (never dropping) the corpses only
+        it can recognise (e.g. claude's degraded pid-less remnants — see
+        ``Claude.reported``) with a ``stale`` reason.
         """
         ...
 
-    def live(self, cwd: Path | None = None) -> list[Session]:
-        """:meth:`reported`, distrusted: an entry claiming a dead pid is dropped.
+    def checked(self, cwd: Path | None = None) -> list[Session]:
+        """:meth:`reported` with the generic distrust applied: every claim, corpses marked.
 
         The verification is generic — a *claimed* pid must name a running process —
         so no adapter can forget it. An entry claiming no pid at all stands on the
         adapter's word: a server-backed harness may legitimately have none to claim.
+        Stale entries stay in the list, ``stale`` naming why, so they can be surfaced;
+        :meth:`live` is this minus the marked.
         """
-        return [session for session in self.reported(cwd) if _claimed_pid_alive(session)]
+        return [_distrusted(session) for session in self.reported(cwd)]
+
+    def live(self, cwd: Path | None = None) -> list[Session]:
+        """The sessions actually live in ``cwd``: :meth:`checked`, minus the stale."""
+        return [session for session in self.checked(cwd) if session.stale is None]
 
 
-def _claimed_pid_alive(session: Session) -> bool:
-    """Whether the session's claimed pid names a process that's actually running.
+def _distrusted(session: Session) -> Session:
+    """The session, marked stale if its claimed pid names no running process.
 
-    ``os.kill(pid, 0)`` sends no signal, only probes. A dead pid means the registry
-    entry is stale (logged, with the session, for anyone debugging a liveness check
-    that looked wrong); a pid owned by another user still proves the process exists.
+    ``os.kill(pid, 0)`` sends no signal, only probes. A dead pid marks the entry stale
+    (logged, with the session, for anyone debugging a liveness check that looked
+    wrong); a pid owned by another user still proves the process exists. An entry the
+    adapter already marked stale is passed through unprobed.
     """
-    if session.pid is None:
-        return True  # nothing claimed, nothing to disprove
+    if session.stale is not None or session.pid is None:
+        return session
     try:
         os.kill(session.pid, 0)
     except ProcessLookupError:
         logger.bind(session=str(session)).warning('agent: session pid is dead, treating as stale')
-        return False
+        return replace(session, stale=f'claimed pid {session.pid} is not running')
     except PermissionError:
         logger.bind(session=str(session)).info('agent: session pid owned by another user')
-    return True
+    return session

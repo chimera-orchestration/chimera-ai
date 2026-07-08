@@ -94,9 +94,9 @@ class Claude(Agent):
         """What claude's own registry (``claude agents --json``) claims is live.
 
         One piece of claude-registry knowledge applies here rather than in the shared
-        ``live()``: after a session dies, the registry can briefly keep a *degraded*
+        ``checked()``: after a session dies, the registry can briefly keep a *degraded*
         entry with pid and status stripped. Such an entry isn't "a session with no pid
-        to claim" — it's a remnant, so it's dropped (and logged) at the source.
+        to claim" — it's a remnant, so it's marked stale (and logged) at the source.
         """
         scope = ('--cwd', str(cwd)) if cwd is not None else ()
         result = subprocess.run(
@@ -107,10 +107,11 @@ class Claude(Agent):
         )
         claims: list[Session] = []
         for raw in json.loads(result.stdout):
-            if not isinstance(raw.get('pid'), int):
+            session = _parse(raw)
+            if session.pid is None:
                 logger.bind(session=raw).warning('agent: session has no pid, treating as stale')
-                continue
-            claims.append(_parse(raw))
+                session = replace(session, stale='no pid in the registry entry (degraded remnant)')
+            claims.append(session)
         return claims
 
     def _enriched(self, session: Session) -> Session:
