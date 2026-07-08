@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from chimera.agent_env import running_under_ai_agent
+from chimera.agent_env import ai_session
 from chimera.agents import Session
 from chimera.agents.registry import AGENTS, AgentSpec
 from chimera.config import UserError
@@ -43,16 +43,18 @@ def live(worktree: Path) -> list[Session]:
 
 
 def refuse_restricted(spec: AgentSpec, extra: Sequence[str]) -> None:
-    """Under an AI agent, refuse the harness's permission-bypass spellings in ``extra``.
+    """In an AI session, refuse the harness's permission-bypass spellings in ``extra``.
 
     The Click-level strip (``__main__.main``) removes ``--dangerous`` itself, but the
     ``--`` passthrough tail is split off before Click parses, so it needs its own
     chokepoint — here, where every launcher (agent start/resume, goal start/adopt,
     review, chat) already passes and the spec is resolved. Refusing beats silently
     dropping: a session launched *without* the bypass its caller asked for would just
-    be confusing. Adapters declare the spellings (``Agent.restricted``).
+    be confusing. Adapters declare the spellings (``Agent.restricted``); the trigger is
+    ``ai_session()`` — the same signal pair as the strip, so a role-stamped session
+    under a markerless harness can't smuggle a bypass through the tail either.
     """
-    if running_under_ai_agent() and (hit := sorted(spec.agent.restricted.intersection(extra))):
+    if ai_session() and (hit := sorted(spec.agent.restricted.intersection(extra))):
         raise UserError(f'{", ".join(hit)}: not available when chimera is driven by an AI agent')
 
 

@@ -55,6 +55,14 @@ def session_role() -> str | None:
     return os.environ.get(ROLE_ENV_VAR) or None
 
 
+def ai_session() -> bool:
+    """True when this invocation is inside an AI session, by either signal: the harness's
+    own marker (:func:`running_under_ai_agent`) or a chimera role stamp — a launcher only
+    ever stamps :data:`ROLE_ENV_VAR` into sessions it launches, so a non-empty role means
+    an AI session even under a future harness that sets no marker of its own."""
+    return running_under_ai_agent() or session_role() is not None
+
+
 def role_scope() -> str | None:
     """The scope the session's role is fenced to, or None when unset/empty."""
     return os.environ.get(ROLE_SCOPE_ENV_VAR) or None

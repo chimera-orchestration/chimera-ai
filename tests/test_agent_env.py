@@ -2,6 +2,7 @@ from testfixtures import Replacer, ShouldRaise, compare, not_there
 
 from chimera.agent_env import (
     CrossScopeError,
+    ai_session,
     fenced_project,
     refuse_cross_scope,
     role_env,
@@ -19,6 +20,20 @@ class TestRunningUnderAiAgent:
     def test_false_when_unset(self, replace: Replacer) -> None:
         replace.in_environ('CLAUDECODE', not_there)
         assert not running_under_ai_agent()
+
+
+class TestAiSession:
+    def test_true_under_a_harness_marker(self, replace: Replacer) -> None:
+        replace.in_environ('CLAUDECODE', '1')
+        assert ai_session()
+
+    def test_true_under_a_role_stamp_alone(self, replace: Replacer) -> None:
+        # only a chimera launcher stamps roles, and only into AI sessions
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        assert ai_session()
+
+    def test_false_for_a_human(self) -> None:
+        assert not ai_session()  # conftest clears both signals
 
 
 class TestSessionRole:

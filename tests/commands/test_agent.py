@@ -460,6 +460,22 @@ def test_extra_bypass_flags_refused_under_an_ai_agent(tmpdir: TempDir, replace: 
     compare(calls, expected=[])  # never launched
 
 
+def test_extra_bypass_flags_refused_under_a_role_stamp_alone(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # no CLAUDECODE (conftest clears it): the role stamp alone marks the AI session
+    worktree = tmpdir.makedir('wt')
+    replace.in_environ('CHIMERA_ROLE', 'manager')
+    calls = _stub(replace)
+    with ShouldRaise(
+        UserError(
+            '--dangerously-skip-permissions: not available when chimera is driven by an AI agent'
+        )
+    ):
+        agent(worktree, 'n', extra=['--dangerously-skip-permissions'])
+    compare(calls, expected=[])  # never launched
+
+
 def test_extra_bypass_flags_pass_for_a_human(tmpdir: TempDir, replace: Replacer) -> None:
     # conftest clears CLAUDECODE: the same passthrough launches untouched for a human
     worktree = tmpdir.makedir('wt')

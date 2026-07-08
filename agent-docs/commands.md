@@ -100,8 +100,11 @@ trails `ch help -v also lists…`; `ch doctor` reveals the count of passing chec
 ## Agent-restricted options
 
 An option too risky to trust to an AI agent's own judgement (`--force`, `--dangerous`) is named
-in `chimera.agent_env.RESTRICTED_OPTIONS`. When `chimera.agent_env.running_under_ai_agent()` is
-true (currently: `CLAUDECODE` is set), `__main__.main()` builds the Click command tree via
+in `chimera.agent_env.RESTRICTED_OPTIONS`. When `chimera.agent_env.ai_session()` is true —
+either signal: a harness marker (`running_under_ai_agent()`, currently `CLAUDECODE`) *or* a
+chimera role stamp (`CHIMERA_ROLE`; launchers only ever stamp roles into AI sessions, so a
+future non-claude harness with no marker of its own still can't hand the options back) —
+`__main__.main()` builds the Click command tree via
 `typer.main.get_command(app)` and strips any parameter matching `RESTRICTED_OPTIONS` from every
 command's `.params` before invoking it (`_strip_restricted_options`) — not hidden, physically
 absent, so Click's own parser, `--help`, and `ch help`/`ch help -v`/`--json` (which all read
@@ -116,7 +119,7 @@ splits it off before Click parses. Its fence is per-harness: each `Agent` subcla
 its own bypass spellings (`Agent.restricted`, e.g. claude's `--dangerously-skip-permissions`),
 and `chimera.commands.agent.refuse_restricted` — called by every launcher once the spec is
 resolved — refuses them (never silently drops: a session launched *without* the bypass its
-caller asked for would just be confusing).
+caller asked for would just be confusing). It triggers on the same `ai_session()` pair.
 
 ## Role-scoped commands
 
@@ -131,7 +134,8 @@ absent from parsing, `--help`, `ch help` and completion alike, and a synonym die
 canonical target (`alias_group` resolves through the pruned dict). *Strip, don't admonish*:
 anything needing a "must not" in prose is instead absent from the session's world — written
 prohibitions advertise targets. The captain has no `ROLE_COMMANDS` entry — full tree (the
-option strip still applies under `CLAUDECODE`); an **unknown role fails hard and early** — `ch`
+option strip still applies: any role stamp marks an AI session); an **unknown role fails hard
+and early** — `ch`
 refuses to run at all, before any command parses — never a silent full tree, never a silently
 narrowed one. Honesty: env-based identity is a fence, not a wall (unset-able, like
 `CLAUDECODE`) — the wall is the harness permission layer; the fence's real value is not

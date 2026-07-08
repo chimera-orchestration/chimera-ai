@@ -19,9 +19,9 @@ from chimera.agent_env import (
     ROLE_ENV_VAR,
     ROLE_MANAGER,
     ROLE_SCOPE_ENV_VAR,
+    ai_session,
     refuse_cross_scope,
     role_env,
-    running_under_ai_agent,
     session_role,
 )
 from chimera.agents import Session
@@ -1258,16 +1258,14 @@ def main() -> None:
             err=True,
         )
         raise SystemExit(1)
-    restricted = running_under_ai_agent()
-    if restricted or role in ROLE_COMMANDS:
+    if ai_session():  # a role stamp alone marks an AI session — CLAUDECODE isn't required
         command = get_command(app)
-        if restricted:
-            _strip_restricted_options(command)
-        if role in ROLE_COMMANDS:
+        if role in ROLE_COMMANDS:  # prune first: the option strip then walks the smaller tree
             _strip_to_role(command, ROLE_COMMANDS[role])
+        _strip_restricted_options(command)
         command()
     else:
-        app()  # a human (or the captain, whose tree is full) — typer's own path
+        app()  # a human at a terminal — typer's own path
 
 
 if __name__ == '__main__':  # pragma: no cover

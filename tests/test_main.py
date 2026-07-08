@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from testfixtures import Replacer, TempDir, compare, not_there
+from testfixtures import Replacer, ShouldRaise, TempDir, compare, not_there
 from typer._click.core import Command, Context
 from typer.core import TyperGroup
 from typer.main import get_command
@@ -265,4 +265,15 @@ class TestMainRole:
         with pytest.raises(SystemExit) as excinfo:
             main()
         compare(excinfo.value.code, expected=2)
+        assert 'No such option' in capsys.readouterr().err
+
+    def test_role_stamp_alone_strips_restricted_options(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # a future non-claude harness sets no CLAUDECODE (conftest clears it) — the role
+        # stamp alone must still fence the options, never hand --force back to the session
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        _argv(replace, 'goal', 'finish', 'somegoal', '--force')
+        with ShouldRaise(SystemExit(2)):
+            main()
         assert 'No such option' in capsys.readouterr().err
