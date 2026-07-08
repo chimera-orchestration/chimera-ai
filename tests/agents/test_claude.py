@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from testfixtures import Replacer, TempDir, compare
 
 from chimera.agents import Session
-from chimera.agents.claude import Claude, session_summary
+from chimera.agents.claude import Claude, _session_args, session_summary
 
 
 def _registry(replace: Replacer, payload: str) -> dict[str, object]:
@@ -143,6 +143,20 @@ def test_live_keeps_an_entry_whose_pid_belongs_to_another_user(
     compare(
         Claude().live(worktree),
         expected=[Session(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=1)],
+    )
+
+
+def test_session_args_passthrough_model_beats_spec_model() -> None:
+    compare(
+        _session_args(['--name', 'n'], None, ['--model', 'sonnet'], False, model='opus'),
+        expected=['--name', 'n', '--model', 'sonnet'],
+    )
+
+
+def test_session_args_passthrough_model_equals_form_beats_spec_model() -> None:
+    compare(
+        _session_args(['--name', 'n'], None, ['--model=sonnet'], False, model='opus'),
+        expected=['--name', 'n', '--model=sonnet'],
     )
 
 

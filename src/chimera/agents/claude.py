@@ -198,8 +198,9 @@ def _session_args(
 ) -> list[str]:
     """The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, then prompt.
 
-    ``model`` rides as ``--model`` on the lead — unless ``extra`` already carries one, so
-    an explicit ``-- --model X`` passthrough always beats the resolved spec. ``context``
+    ``model`` rides as ``--model`` on the lead — unless ``extra`` already carries one, in
+    either spelling, so an explicit ``-- --model X`` or ``-- --model=X`` passthrough
+    always beats the resolved spec. ``context``
     rides as ``--append-system-prompt-file``, injecting the rendered launch context
     before turn 1 with the repo left untouched.
 
@@ -211,7 +212,9 @@ def _session_args(
     availability is decided at *its* launch, so the flag has to ride the background launch too.
     The flag only enables the mode; the autonomous run keeps its resolved mode.
     """
-    if model is not None and '--model' not in extra:
+    if model is not None and not any(
+        arg == '--model' or arg.startswith('--model=') for arg in extra
+    ):
         lead = [*lead, '--model', model]
     if context is not None:
         lead = [*lead, '--append-system-prompt-file', str(context)]
