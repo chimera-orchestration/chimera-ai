@@ -481,7 +481,8 @@ def test_chat_cli_stamps_the_captain_role(
     _stub(replace)
     envs = _capture_env(replace)
     command.run('chat')
-    compare(envs, expected=[{'CHIMERA_ROLE': 'captain'}])  # no scope: the captain is unfenced
+    # no scope: the captain is unfenced — stamped '' so nothing inherited can fence it
+    compare(envs, expected=[{'CHIMERA_ROLE': 'captain', 'CHIMERA_ROLE_SCOPE': ''}])
 
 
 def test_chat_cli_stamps_the_manager_role_fenced_to_the_project(

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from testfixtures import Replacer, TempDir, compare
 
+from chimera.agent_env import ROLE_CAPTAIN, role_env
 from chimera.agents import Session
 from chimera.agents.claude import Claude, _session_args, session_summary
 
@@ -169,6 +170,21 @@ def test_launch_overlays_env_with_the_overlay_winning(tmpdir: TempDir, replace: 
     captured = _launched(replace)
     Claude().start(tmpdir.makedir('wt'), 'n', env={'CHIMERA_ROLE': 'agent'}, exclusive=False)
     compare(captured['env'], expected={**os.environ, 'CHIMERA_ROLE': 'agent'})
+
+
+def test_launch_clears_a_stale_scope_for_an_unscoped_stamp(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # e.g. a shell inside an agent session launches the captain: the inherited scope must
+    # be cleared by the overlay, not survive it — an unfenced session reporting itself
+    # fenced would be wrong ('' reads as unset, see agent_env.role_scope)
+    replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj@g')
+    captured = _launched(replace)
+    Claude().start(tmpdir.makedir('wt'), 'n', env=role_env(ROLE_CAPTAIN), exclusive=False)
+    compare(
+        captured['env'],
+        expected={**os.environ, 'CHIMERA_ROLE': 'captain', 'CHIMERA_ROLE_SCOPE': ''},
+    )
 
 
 def test_launch_without_overlay_inherits_the_environment(

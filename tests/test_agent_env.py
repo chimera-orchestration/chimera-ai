@@ -92,8 +92,12 @@ class TestRefuseCrossScope:
 
 
 class TestRoleEnv:
-    def test_unscoped(self) -> None:
-        compare(role_env('captain'), expected={'CHIMERA_ROLE': 'captain'})
+    def test_unscoped_clears_the_scope(self) -> None:
+        # '' rather than omission: the overlay must displace a stale inherited scope
+        compare(
+            role_env('captain'),
+            expected={'CHIMERA_ROLE': 'captain', 'CHIMERA_ROLE_SCOPE': ''},
+        )
 
     def test_scoped(self) -> None:
         compare(

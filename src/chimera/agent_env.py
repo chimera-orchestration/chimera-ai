@@ -100,8 +100,9 @@ def refuse_cross_scope(resolved: str) -> None:
 def role_env(role: str, scope: str | None = None) -> dict[str, str]:
     """The env overlay a launcher stamps into a session: its role, plus the scope it is
     fenced to. The captain gets no scope (unfenced); a manager's is ``<project>``, an
-    agent's ``<project>@<goal>`` (session-name grammar — it splits on the same ``@``)."""
-    env = {ROLE_ENV_VAR: role}
-    if scope is not None:
-        env[ROLE_SCOPE_ENV_VAR] = scope
-    return env
+    agent's ``<project>@<goal>`` (session-name grammar — it splits on the same ``@``).
+    An unscoped stamp writes ``''`` (which :func:`role_scope` reads as unset) rather than
+    omitting the variable — the overlay must *clear* a stale scope inherited from the
+    parent environment (e.g. a shell inside an agent session launching the captain), or
+    the deliberately-unfenced session would report itself fenced."""
+    return {ROLE_ENV_VAR: role, ROLE_SCOPE_ENV_VAR: scope if scope is not None else ''}
