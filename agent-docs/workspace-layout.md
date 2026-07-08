@@ -203,7 +203,11 @@ Both paths:
 still has goals — run `ch goal finish` on each first, or pass `--force` to finish
 every goal (discarding unmerged/uncommitted work) and remove the project in one
 shot. A live agent in any worktree always aborts, even with `--force`. A tracked
-repo living outside the workspace is left untouched. `--dry` previews the whole
+repo living outside the workspace is left untouched. A workspace-only repo (under
+the project dir, no remote) holding real work — history beyond `project new`'s
+empty seed commit — is the sole copy of that work, so it too refuses without
+`--force`: unrecoverable loss is the one failure the log can't undo. Publish it
+first with `ch project push`. `--dry` previews the whole
 teardown (running the same checks) without deleting anything. `ch project ls` lists
 tracked projects.
 
