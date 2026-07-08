@@ -1,8 +1,8 @@
 from collections.abc import Iterable
-from datetime import datetime
 from pathlib import Path
 
-from chimera.agents.claude import live_sessions
+from chimera.agents import Session
+from chimera.commands.agent import live
 from chimera.dry import Dry
 from chimera.git import Git
 from chimera.worktrees import (
@@ -90,20 +90,23 @@ def _clear_markers(git: Git, goal: str, dry: Dry) -> None:
 def refuse_if_agents_running(worktrees: Iterable[Path]) -> None:
     blocks: list[str] = []
     for worktree in worktrees:
-        if sessions := live_sessions(worktree):
+        if sessions := live(worktree):
             described = '\n  '.join(_describe(session) for session in sessions)
             blocks.append(f'an agent is live in {worktree}:\n  {described}')
     if blocks:
         raise RuntimeError('\n'.join(blocks) + '\nfind its terminal or kill the pid, then re-run')
 
 
-def _describe(session: dict[str, object]) -> str:
-    fields = [f'pid {session.get("pid", "?")}']
-    fields += [str(value) for key in ('kind', 'status') if (value := session.get(key))]
-    if isinstance(ms := session.get('startedAt'), int | float):
-        fields.append(f'since {datetime.fromtimestamp(ms / 1000):%a %H:%M}')
-    if name := session.get('name'):
-        fields.append(str(name))
+def _describe(session: Session) -> str:
+    fields = [f'pid {session.pid if session.pid is not None else "?"}']
+    if session.kind:
+        fields.append(session.kind)
+    if session.status != '?':  # '?' is Session's absent-status fallback, not information
+        fields.append(session.status)
+    if session.started is not None:
+        fields.append(f'since {session.started:%a %H:%M}')
+    if session.name != session.id:  # the name falls back to the id; echoing it adds nothing
+        fields.append(session.name)
     return '  '.join(fields)
 
 

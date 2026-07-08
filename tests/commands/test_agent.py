@@ -8,18 +8,19 @@ from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera import __main__ as chimera_main
 from chimera.agents import Session
-from chimera.agents.claude import all_sessions, live_sessions
+from chimera.agents.claude import Claude
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import (
     agent,
     agents,
     in_goal,
+    live,
     resume,
     scope_line,
     scoped,
     under,
 )
-from chimera.config import ProjectConfig
+from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
 from tests.cli import Command, action_logs
 
@@ -32,9 +33,9 @@ def _agent_at(cwd: Path, name: str = 'a') -> Session:
     return Session(name, name, 'idle', cwd, None)
 
 
-def _stub(replace: Replacer, sessions: Iterable[object] = ()) -> list[object]:
+def _stub(replace: Replacer, sessions: Iterable[Session] = ()) -> list[object]:
     calls: list[object] = []
-    replace.in_module(live_sessions, lambda worktree: list(sessions))
+    replace.on_class(Claude.live, lambda self, cwd=None: list(sessions))
     replace.in_module(
         subprocess.run, lambda cmd, cwd=None, check=False: calls.append((cmd, cwd, check))
     )
@@ -84,7 +85,7 @@ def test_agent_background_carries_bypass_when_dangerous(tmpdir: TempDir, replace
 
 def test_agent_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
-    calls = _stub(replace, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
+    calls = _stub(replace, sessions=[_agent_at(worktree, 'abc123')])
     with ShouldRaise(
         RuntimeError(f'an agent is already live in {worktree}: abc123 (idle) — attach or stop it')
     ):
@@ -158,7 +159,7 @@ def test_resume_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -
 
 def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
-    calls = _stub(replace, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
+    calls = _stub(replace, sessions=[_agent_at(worktree, 'abc123')])
     with ShouldRaise(
         RuntimeError(f'an agent is already live in {worktree}: abc123 (idle) — attach or stop it')
     ):
@@ -390,14 +391,41 @@ def test_agent_resume_cli_with_passthrough(
 
 
 def test_agents_aggregates_registered_harnesses(replace: Replacer) -> None:
-    # the sole registered harness today is claude; its sessions come back enriched
-    replace.in_module(all_sessions, lambda: [{'sessionId': 'lonely', 'state': 'working'}])
-    compare(
-        agents(),
-        expected=[
-            Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
-        ],
+    # the sole registered harness today is claude
+    lonely = Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
+    replace.on_class(Claude.sessions, lambda self: [lonely])
+    compare(agents(), expected=[lonely])
+
+
+def test_live_aggregates_registered_harnesses(tmpdir: TempDir, replace: Replacer) -> None:
+    # cleanup's question is "is *any* harness's agent live here" — claude's answer flows through
+    worktree = tmpdir.makedir('wt')
+    session = _agent_at(worktree, 'busy-one')
+    replace.on_class(Claude.live, lambda self, cwd=None: [session] if cwd == worktree else [])
+    compare(live(worktree), expected=[session])
+
+
+def test_extra_bypass_flags_refused_under_an_ai_agent(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    replace.in_environ('CLAUDECODE', '1')
+    calls = _stub(replace)
+    refused = UserError(
+        '--dangerously-skip-permissions: not available when chimera is driven by an AI agent'
     )
+    with ShouldRaise(refused):
+        agent(worktree, 'n', extra=['--dangerously-skip-permissions'])
+    with ShouldRaise(refused):
+        resume(worktree, 'n', extra=['--dangerously-skip-permissions'])
+    compare(calls, expected=[])  # never launched
+
+
+def test_extra_bypass_flags_pass_for_a_human(tmpdir: TempDir, replace: Replacer) -> None:
+    # conftest clears CLAUDECODE: the same passthrough launches untouched for a human
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(worktree, 'n', extra=['--allow-dangerously-skip-permissions'])
+    expected = ['claude', '--name', 'n', '--allow-dangerously-skip-permissions']
+    compare(calls, expected=[(expected, worktree, True)])
 
 
 def test_scoped_unpinned_keeps_every_agent_when_otherwise_is_none(tmpdir: TempDir) -> None:

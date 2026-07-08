@@ -3,7 +3,7 @@ from pathlib import Path
 
 from testfixtures import Replacer, TempDir, compare
 
-from chimera.agents.claude import live_sessions
+from chimera.agents.claude import Claude
 from tests.cli import Command, action_logs
 
 
@@ -59,7 +59,7 @@ def test_goal_and_actor_before_the_command(
     _myproject(tmpdir, workspace_with_env)
     (workspace_with_env / 'myproject' / 'worktrees' / 'g@reviewer').mkdir()
     calls: list[object] = []
-    replace.in_module(live_sessions, lambda worktree: [])
+    replace.on_class(Claude.live, lambda self, cwd=None: [])
     replace.in_module(subprocess.run, lambda cmd, cwd=None, check=False: calls.append((cmd, cwd)))
     worktree = workspace_with_env / 'myproject' / 'worktrees' / 'g@reviewer'
     command.run('agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start').check(

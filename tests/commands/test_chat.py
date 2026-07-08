@@ -6,9 +6,10 @@ from pathlib import Path
 
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
-from chimera.agents.claude import all_sessions, live_sessions
+from chimera.agents import Session
+from chimera.agents.claude import Claude
 from chimera.commands.chat import ChatAlreadyLiveError, chat, chat_target
-from chimera.config import ProjectConfig
+from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
 from tests.cli import Command, action_logs
 
@@ -17,7 +18,7 @@ def _project_obj(directory: Path) -> Project:
     return Project(directory, ProjectConfig(kind='project', repo=Path('/r')))
 
 
-def _stub(replace: Replacer, live: Iterable[dict[str, object]] = ()) -> list[object]:
+def _stub(replace: Replacer, live: Iterable[Session] = ()) -> list[object]:
     calls: list[object] = []
     real_run = subprocess.run
 
@@ -27,8 +28,7 @@ def _stub(replace: Replacer, live: Iterable[dict[str, object]] = ()) -> list[obj
             return calls.append((cmd, cwd, check))
         return real_run(cmd, *args, cwd=cwd, check=check, **kw)
 
-    replace.in_module(all_sessions, lambda: list(live))
-    replace.in_module(live_sessions, lambda worktree: [])
+    replace.on_class(Claude.sessions, lambda self: list(live))
     replace.in_module(subprocess.run, fake_run)
     return calls
 
@@ -59,7 +59,7 @@ class TestChat:
     def test_launches_alongside_live_sessions(self, tmpdir: TempDir, replace: Replacer) -> None:
         ws = tmpdir.makedir('lycia')
         # another session is live in the same cwd — chat launches anyway (not exclusive)
-        calls = _stub(replace, live=[{'sessionId': 'x', 'name': 'other', 'cwd': str(ws)}])
+        calls = _stub(replace, live=[Session('x', 'other', 'idle', ws, None)])
         chat(ws, 'pegasus')
         compare(calls, expected=[(['claude', '--name', 'pegasus'], ws, True)])
 
@@ -71,11 +71,26 @@ class TestChat:
 
     def test_refuses_when_the_chat_itself_is_live(self, tmpdir: TempDir, replace: Replacer) -> None:
         ws = tmpdir.makedir('lycia')
-        calls = _stub(replace, live=[{'sessionId': 'x', 'name': 'pegasus', 'cwd': str(ws)}])
+        calls = _stub(replace, live=[Session('x', 'pegasus', 'idle', ws, None)])
         with ShouldRaise(ChatAlreadyLiveError('pegasus')):
             chat(ws, 'pegasus')
         with ShouldRaise(ChatAlreadyLiveError('pegasus')):  # resume can't attach either
             chat(ws, 'pegasus', resume=True)
+        compare(calls, expected=[])  # never launched
+
+    def test_extra_bypass_flags_refused_under_an_ai_agent(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        ws = tmpdir.makedir('lycia')
+        replace.in_environ('CLAUDECODE', '1')
+        calls = _stub(replace)
+        with ShouldRaise(
+            UserError(
+                '--dangerously-skip-permissions: not available when chimera is driven '
+                'by an AI agent'
+            )
+        ):
+            chat(ws, 'pegasus', extra=['--dangerously-skip-permissions'])
         compare(calls, expected=[])  # never launched
 
     def test_background_prompt_and_context(self, tmpdir: TempDir, replace: Replacer) -> None:

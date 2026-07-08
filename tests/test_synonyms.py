@@ -8,8 +8,7 @@ from typer import Typer
 
 from chimera import __main__ as chimera_main
 from chimera.__main__ import app
-from chimera.agents.claude import live_sessions
-from chimera.commands.agent import agent, agents
+from chimera.commands.agent import agent, agents, live
 from chimera.commands.goal import start as goal_start
 from chimera.commands.worktree import rm as worktree_rm
 from tests.cli import Command, action_logs
@@ -60,7 +59,7 @@ def test_cleanup_dispatches_to_finish(
 ) -> None:
     project = _project(tmpdir, git_repo)
     replace.in_module(agent, lambda *a, **k: None, module=goal_start)
-    replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
+    replace.in_module(live, lambda worktree: [], module=worktree_rm)
     command.run('goal', 'start', 'feature-x')
     base = Git(git_repo.path)('rev-parse', 'feature-x/agent').strip()
     worktree = (project / 'worktrees' / 'feature-x@agent').resolve()
@@ -94,7 +93,7 @@ def test_mv_dispatches_to_rename(
 ) -> None:
     project = _project(tmpdir, git_repo)
     replace.in_module(agent, lambda *a, **k: None, module=goal_start)
-    replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
+    replace.in_module(live, lambda worktree: [], module=worktree_rm)
     command.run('goal', 'start', 'feature-x')
     base = Git(git_repo.path)('rev-parse', 'feature-x/agent').strip()
     old_wt = (project / 'worktrees' / 'feature-x@agent').resolve()

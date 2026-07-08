@@ -1,8 +1,10 @@
 from collections.abc import Sequence
 from pathlib import Path
 
+from chimera.agent_env import running_under_ai_agent
 from chimera.agents import Session
 from chimera.agents.registry import AGENTS, AgentSpec
+from chimera.config import UserError
 from chimera.context import Scope
 from chimera.dry import Dry
 from chimera.worktrees import SEP
@@ -11,6 +13,30 @@ from chimera.worktrees import SEP
 def agents() -> list[Session]:
     """Every live agent session across all harnesses, enriched for listing."""
     return [session for harness in AGENTS.values() for session in harness.sessions()]
+
+
+def live(worktree: Path) -> list[Session]:
+    """Verified-live sessions in the worktree across every harness.
+
+    The cleanup/refusal question is "is *any* agent live here", never "is a claude
+    live here" — consumers (worktree rm, goal finish/rename) must go through this,
+    not a single harness's listing.
+    """
+    return [session for harness in AGENTS.values() for session in harness.live(worktree)]
+
+
+def refuse_restricted(spec: AgentSpec, extra: Sequence[str]) -> None:
+    """Under an AI agent, refuse the harness's permission-bypass spellings in ``extra``.
+
+    The Click-level strip (``__main__.main``) removes ``--dangerous`` itself, but the
+    ``--`` passthrough tail is split off before Click parses, so it needs its own
+    chokepoint — here, where every launcher (agent start/resume, goal start/adopt,
+    review, chat) already passes and the spec is resolved. Refusing beats silently
+    dropping: a session launched *without* the bypass its caller asked for would just
+    be confusing. Adapters declare the spellings (``Agent.restricted``).
+    """
+    if running_under_ai_agent() and (hit := sorted(spec.agent.restricted.intersection(extra))):
+        raise UserError(f'{", ".join(hit)}: not available when chimera is driven by an AI agent')
 
 
 def agent(
@@ -24,6 +50,7 @@ def agent(
     dry: Dry = Dry(),
 ) -> None:
     """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``)."""
+    refuse_restricted(spec, extra)
     dry(
         spec.agent.start,
         worktree,
@@ -47,6 +74,7 @@ def resume(
     dry: Dry = Dry(),
 ) -> None:
     """Reattach to ``spec``'s agent session named ``name`` (see ``Agent.resume``)."""
+    refuse_restricted(spec, extra)
     dry(
         spec.agent.resume,
         worktree,

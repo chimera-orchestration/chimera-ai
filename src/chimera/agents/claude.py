@@ -1,25 +1,27 @@
 """The claude-code harness: launching, resuming and listing ``claude`` sessions."""
 
 import json
-import os
 import re
 import subprocess
 from collections.abc import Sequence
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
 
-from chimera.agents import Session
+from chimera.agents import Agent, Session
 
 # claude only makes bypass-permissions mode reachable via shift-tab when launched with this;
 # availability is fixed at launch, so it must ride on the very command that starts the session.
 ALLOW_BYPASS = '--allow-dangerously-skip-permissions'
 
-# the forms that already arrange for bypass mode — don't double up if the caller passed one
+# the forms that already arrange for bypass mode — don't double up if the caller passed one,
+# and refuse both outright when chimera itself is driven by an AI agent (Agent.restricted)
 _BYPASS_FLAGS = frozenset({ALLOW_BYPASS, '--dangerously-skip-permissions'})
 
 
-class Claude:
+class Claude(Agent):
     """The claude-code harness (the ``claude`` CLI).
 
     ``projects`` is where claude keeps its per-cwd transcript folders (default
@@ -28,6 +30,8 @@ class Claude:
     """
 
     platform = 'claude'
+
+    restricted = _BYPASS_FLAGS
 
     def __init__(self, projects: Path | None = None) -> None:
         self.projects = projects
@@ -50,10 +54,10 @@ class Claude:
         it daemonizes (``claude --bg``) to work on the prompt autonomously. ``model``
         rides as ``--model``. ``extra`` is passed straight through to ``claude`` (e.g.
         ``--dangerously-skip-permissions``). ``dangerous`` makes bypass-permissions mode
-        reachable (see ``_session_args``). Refuses if a session is already live in ``cwd``.
+        reachable (see ``_session_args``).
         """
         args = _session_args(['--name', name], prompt, extra, dangerous, model, context)
-        return _launch(cwd, args, exclusive)
+        return self._launch(cwd, args, exclusive)
 
     def resume(
         self,
@@ -73,34 +77,78 @@ class Claude:
         reattaches to the same label with ``--resume <name>``. The cwd is the key —
         claude has no ``--cwd``, so setting it here is what lets a dead session be
         revived in its worktree from anywhere. Interactive foreground by default; with
-        ``prompt`` it resumes in the background (``--bg``) to keep working. ``extra``
-        passes straight through; ``dangerous`` makes bypass-permissions mode reachable
-        (see ``_session_args``). Refuses if a session is already live in ``cwd``.
+        ``prompt`` it resumes in the background (``--bg``) to keep working.
         """
         args = _session_args(['--resume', name], prompt, extra, dangerous, model, context)
-        return _launch(cwd, args, exclusive)
+        return self._launch(cwd, args, exclusive)
 
     def sessions(self) -> list[Session]:
-        """Every live claude session, each enriched with a one-line summary.
+        """Every verified-live claude session, enriched with a one-line summary.
 
         The summary is the session's title or last prompt (see :func:`session_summary`),
         read from its transcript under ``projects``.
         """
-        return [_describe(session, self.projects) for session in all_sessions()]
+        return [self._enriched(session) for session in self.live()]
+
+    def reported(self, cwd: Path | None = None) -> list[Session]:
+        """What claude's own registry (``claude agents --json``) claims is live.
+
+        One piece of claude-registry knowledge applies here rather than in the shared
+        ``live()``: after a session dies, the registry can briefly keep a *degraded*
+        entry with pid and status stripped. Such an entry isn't "a session with no pid
+        to claim" — it's a remnant, so it's dropped (and logged) at the source.
+        """
+        scope = ('--cwd', str(cwd)) if cwd is not None else ()
+        result = subprocess.run(
+            ['claude', 'agents', '--json', *scope],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        claims: list[Session] = []
+        for raw in json.loads(result.stdout):
+            if not isinstance(raw.get('pid'), int):
+                logger.bind(session=raw).warning('agent: session has no pid, treating as stale')
+                continue
+            claims.append(_parse(raw))
+        return claims
+
+    def _enriched(self, session: Session) -> Session:
+        if session.cwd == Path('.'):  # registry entry had no cwd — no transcript folder to read
+            return session
+        summary = session_summary(str(session.cwd), session.name, self.projects)
+        return replace(session, summary=summary)
+
+    def _launch(
+        self, cwd: Path, args: Sequence[str], exclusive: bool
+    ) -> subprocess.CompletedProcess[bytes]:
+        """Run ``claude <args>`` in ``cwd``; under ``exclusive``, refuse if one is already live."""
+        if not cwd.is_dir():
+            raise FileNotFoundError(cwd)
+        if exclusive and (running := self.live(cwd)):
+            ids = ', '.join(f'{s.id} ({s.status})' for s in running)
+            raise RuntimeError(f'an agent is already live in {cwd}: {ids} — attach or stop it')
+        return subprocess.run(['claude', *args], cwd=cwd, check=True)
 
 
-def _describe(session: dict[str, object], projects: Path | None) -> Session:
+def _parse(raw: dict[str, object]) -> Session:
+    """A registry record as a :class:`Session` (summary left for listing enrichment)."""
     # Prefer the full sessionId (the transcript-filename UUID) over `id`, claude's
     # short handle — the short form is that UUID's own leading block anyway.
-    id = str(session.get('sessionId') or session.get('id') or '?')
-    name = str(session.get('name') or id)
-    cwd = str(session.get('cwd') or '')
+    id = str(raw.get('sessionId') or raw.get('id') or '?')
+    name = str(raw.get('name') or id)
+    started = raw.get('startedAt')
     return Session(
         id=id,
         name=name,
-        status=str(session.get('status') or session.get('state') or '?'),
-        cwd=Path(cwd),
-        summary=session_summary(cwd, name, projects) if cwd else None,
+        status=str(raw.get('status') or raw.get('state') or '?'),
+        cwd=Path(str(raw.get('cwd') or '')),
+        summary=None,
+        pid=pid if isinstance(pid := raw.get('pid'), int) else None,
+        kind=str(kind) if (kind := raw.get('kind')) else None,
+        started=datetime.fromtimestamp(started / 1000)
+        if isinstance(started, int | float)
+        else None,
     )
 
 
@@ -169,65 +217,3 @@ def _session_args(
     if prompt is not None:
         return ['--bg', *lead, *extra, *allow, prompt]
     return [*lead, *extra, *allow]
-
-
-def _launch(
-    worktree: Path, args: Sequence[str], exclusive: bool = True
-) -> subprocess.CompletedProcess[bytes]:
-    """Run ``claude <args>`` with cwd set to the worktree.
-
-    ``exclusive`` (the default) refuses while any session is live there — the guard for
-    one-agent-per-worktree launches; a chat alongside a working agent passes ``False``.
-    """
-    if not worktree.is_dir():
-        raise FileNotFoundError(worktree)
-    if exclusive and (running := live_sessions(worktree)):
-        ids = ', '.join(f'{s["sessionId"]} ({s["status"]})' for s in running)
-        raise RuntimeError(f'an agent is already live in {worktree}: {ids} — attach or stop it')
-    return subprocess.run(['claude', *args], cwd=worktree, check=True)
-
-
-def live_sessions(worktree: Path) -> list[dict[str, object]]:
-    """Claude sessions verified still live (pid actually running) under the worktree."""
-    return _sessions('--cwd', str(worktree))
-
-
-def all_sessions() -> list[dict[str, object]]:
-    """Claude sessions verified still live (pid actually running) anywhere."""
-    return _sessions()
-
-
-def _sessions(*scope: str) -> list[dict[str, object]]:
-    result = subprocess.run(
-        ['claude', 'agents', '--json', *scope],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    return [session for session in json.loads(result.stdout) if _verify_live(session)]
-
-
-def _verify_live(session: dict[str, object]) -> bool:
-    """Whether session's reported pid names a process that's actually still running.
-
-    Claude's own background-agent registry (``claude agents --json``) can report a
-    stale, degraded entry for some time after its process has already died — pid
-    and status may be missing entirely (observed after killing a backgrounded agent
-    directly by pid) — before it's eventually pruned. Rather than trust an entry's
-    mere presence, re-verify: ``os.kill(pid, 0)`` sends no signal, only probes.
-    A missing/non-int pid can't be probed, so it's treated as stale like a dead one;
-    either case is logged (with the full session) for anyone debugging a liveness
-    check that looked wrong.
-    """
-    pid = session.get('pid')
-    if not isinstance(pid, int):
-        logger.bind(session=session).warning('agent: session has no pid, treating as stale')
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        logger.bind(session=session).warning('agent: session pid is dead, treating as stale')
-        return False
-    except PermissionError:
-        logger.bind(session=session).info('agent: session pid owned by another user')
-    return True

@@ -5,7 +5,8 @@ from giterator import Git
 from giterator.testing import Repo
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
-from chimera.agents.claude import live_sessions
+from chimera.agents import Session
+from chimera.commands.agent import live
 from chimera.commands.project.new import new
 from chimera.commands.project.rm import remove
 from chimera.commands.worktree import rm as worktree_rm
@@ -16,7 +17,7 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
+    replace.in_module(live, lambda worktree: [], module=worktree_rm)
 
 
 def _project(tmpdir: TempDir, repo: Repo, *, with_goal: bool = False) -> tuple[Path, Path]:
@@ -78,8 +79,8 @@ def test_remove_force_aborts_when_an_agent_is_running(
 ) -> None:
     workspace, project = _project(tmpdir, git_repo, with_goal=True)
     replace.in_module(
-        live_sessions,
-        lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
+        live,
+        lambda worktree: [Session('x', 'x', 'idle', worktree, None)],
         module=worktree_rm,
     )
     with ShouldRaise(

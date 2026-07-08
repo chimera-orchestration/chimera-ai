@@ -100,6 +100,13 @@ frozenset rather than inventing a new mechanism. This only works because console
 points point at `main()`, not `app` directly — `Typer.__call__` rebuilds an unstripped tree from
 scratch on every call, so stripping has to happen on a tree we build and invoke ourselves.
 
+The `--` passthrough tail is the one place this strip can't reach — `PassthroughCommand`
+splits it off before Click parses. Its fence is per-harness: each `Agent` subclass declares
+its own bypass spellings (`Agent.restricted`, e.g. claude's `--dangerously-skip-permissions`),
+and `chimera.commands.agent.refuse_restricted` — called by every launcher once the spec is
+resolved — refuses them (never silently drops: a session launched *without* the bypass its
+caller asked for would just be confusing).
+
 ## Destructive commands preview with --dry
 
 A command that deletes or discards (worktree/branch removal, project removal, …) must offer

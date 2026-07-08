@@ -7,7 +7,8 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.agents.claude import live_sessions
+from chimera.agents import Session
+from chimera.commands.agent import live
 from chimera.commands.goal.rename import RenameResult, rename
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
@@ -17,7 +18,7 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
+    replace.in_module(live, lambda worktree: [], module=worktree_rm)
 
 
 def _goal(tmpdir: TempDir, repo: Repo, actors: tuple[str, ...] | None = None) -> Path:
@@ -257,8 +258,8 @@ class TestRefusals:
     ) -> None:
         worktrees = _goal(tmpdir, git_repo)
         replace.in_module(
-            live_sessions,
-            lambda worktree: [{'pid': 4242, 'status': 'idle', 'sessionId': 'x'}],
+            live,
+            lambda worktree: [Session('x', 'x', 'idle', worktree, None, pid=4242)],
             module=worktree_rm,
         )
         with ShouldRaise(

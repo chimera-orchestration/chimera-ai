@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from chimera.agents.registry import AgentSpec
+from chimera.commands.agent import refuse_restricted
 from chimera.config import UserError
 from chimera.context import Scope
 from chimera.dry import Dry
@@ -50,8 +51,9 @@ def chat(
     A chat deliberately sits alongside whatever agent is working there, so the
     harness's one-session-per-cwd guard is off; the guard here is by *name* — the
     scope's chat already being live means attach, not launch, whichever was asked.
-    The guard fires under ``dry`` too, so a preview still reports the refusal.
+    The guards fire under ``dry`` too, so a preview still reports the refusal.
     """
+    refuse_restricted(spec, extra)
     if any(session.name == name for session in spec.agent.sessions()):
         raise ChatAlreadyLiveError(name)
     launch = spec.agent.resume if resume else spec.agent.start

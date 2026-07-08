@@ -1,43 +1,92 @@
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 from testfixtures import Replacer, TempDir, compare
 
 from chimera.agents import Session
-from chimera.agents.claude import Claude, all_sessions, live_sessions, session_summary
+from chimera.agents.claude import Claude, session_summary
 
 
-def test_live_sessions_queries_claude_by_cwd(tmpdir: TempDir, replace: Replacer) -> None:
-    worktree = tmpdir.makedir('wt')
+def _registry(replace: Replacer, payload: str) -> dict[str, object]:
+    """Stub the ``claude agents --json`` subprocess; captured argv lands in the return."""
     captured: dict[str, object] = {}
-    pid = os.getpid()
 
     def fake_run(
         cmd: object, capture_output: bool = False, text: bool = False, check: bool = False
     ):
         captured['cmd'] = cmd
-        return SimpleNamespace(stdout=f'[{{"sessionId": "x", "status": "idle", "pid": {pid}}}]')
+        return SimpleNamespace(stdout=payload)
 
     replace.in_module(subprocess.run, fake_run)
-    compare(live_sessions(worktree), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': pid}])
+    return captured
+
+
+def test_reported_queries_claude_by_cwd(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    captured = _registry(replace, '[{"sessionId": "x", "status": "idle", "pid": 4242}]')
+    compare(
+        Claude().reported(worktree),
+        expected=[Session(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=4242)],
+    )
     compare(captured['cmd'], expected=['claude', 'agents', '--json', '--cwd', str(worktree)])
 
 
-def test_all_sessions_queries_claude_unscoped(replace: Replacer) -> None:
-    captured: dict[str, object] = {}
-    pid = os.getpid()
-
-    def fake_run(
-        cmd: object, capture_output: bool = False, text: bool = False, check: bool = False
-    ):
-        captured['cmd'] = cmd
-        return SimpleNamespace(stdout=f'[{{"sessionId": "x", "status": "idle", "pid": {pid}}}]')
-
-    replace.in_module(subprocess.run, fake_run)
-    compare(all_sessions(), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': pid}])
+def test_reported_unscoped_queries_everywhere(replace: Replacer) -> None:
+    captured = _registry(replace, '[{"sessionId": "x", "status": "idle", "pid": 4242}]')
+    compare(
+        Claude().reported(),
+        expected=[Session(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=4242)],
+    )
     compare(captured['cmd'], expected=['claude', 'agents', '--json'])  # no --cwd → every project
+
+
+def test_reported_parses_the_full_registry_record(replace: Replacer) -> None:
+    full = 'abc12345-9f80-4c8e-b3d7-1234567890ab'
+    _registry(
+        replace,
+        '[{"id": "abc12345", "sessionId": "%s", "status": "busy", "pid": 4242,'
+        ' "kind": "interactive", "startedAt": 1781247747055,'
+        ' "name": "proj@g@agent", "cwd": "/work/proj"}]' % full,
+    )
+    compare(
+        Claude().reported(),
+        expected=[
+            Session(
+                # the full sessionId (the transcript UUID) beats claude's short handle
+                id=full,
+                name='proj@g@agent',
+                status='busy',
+                cwd=Path('/work/proj'),
+                summary=None,
+                pid=4242,
+                kind='interactive',
+                started=datetime.fromtimestamp(1781247747055 / 1000),
+            )
+        ],
+    )
+
+
+def test_reported_tolerates_missing_fields(replace: Replacer) -> None:
+    # a session without status/cwd (e.g. a foreground session) must not crash the listing;
+    # status falls back to state, then '?'
+    _registry(replace, '[{"sessionId": "lonely", "state": "working", "pid": 4242}]')
+    compare(
+        Claude().reported(),
+        expected=[
+            Session(
+                id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None, pid=4242
+            )
+        ],
+    )
+
+
+def test_reported_drops_the_degraded_pidless_remnant(replace: Replacer) -> None:
+    # the degraded shape claude's registry reports briefly after a killed pid is pruned
+    _registry(replace, '[{"kind": "background", "startedAt": 1781247747055, "name": "x"}]')
+    compare(Claude().reported(), expected=[])
 
 
 def _dead(pid: int, sig: int) -> None:
@@ -48,45 +97,23 @@ def _foreign(pid: int, sig: int) -> None:
     raise PermissionError
 
 
-def test_sessions_filters_out_an_entry_whose_pid_has_died(
-    tmpdir: TempDir, replace: Replacer
-) -> None:
+def test_live_filters_out_an_entry_whose_pid_has_died(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
-    replace.in_module(
-        subprocess.run,
-        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
-            stdout='[{"sessionId": "x", "status": "idle", "pid": 999999}]'
-        ),
-    )
+    _registry(replace, '[{"sessionId": "x", "status": "idle", "pid": 999999}]')
     replace.in_module(os.kill, _dead, module=os)
-    compare(live_sessions(worktree), expected=[])
+    compare(Claude().live(worktree), expected=[])
 
 
-def test_sessions_filters_out_an_entry_with_no_pid_at_all(
+def test_live_keeps_an_entry_whose_pid_belongs_to_another_user(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
     worktree = tmpdir.makedir('wt')
-    replace.in_module(
-        subprocess.run,
-        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
-            stdout='[{"kind": "background", "startedAt": 1781247747055, "name": "x"}]'
-        ),
-    )  # the degraded shape claude's registry reports briefly after a killed pid is pruned
-    compare(live_sessions(worktree), expected=[])
-
-
-def test_sessions_keeps_an_entry_whose_pid_belongs_to_another_user(
-    tmpdir: TempDir, replace: Replacer
-) -> None:
-    worktree = tmpdir.makedir('wt')
-    replace.in_module(
-        subprocess.run,
-        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
-            stdout='[{"sessionId": "x", "status": "idle", "pid": 1}]'
-        ),
-    )
+    _registry(replace, '[{"sessionId": "x", "status": "idle", "pid": 1}]')
     replace.in_module(os.kill, _foreign, module=os)
-    compare(live_sessions(worktree), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': 1}])
+    compare(
+        Claude().live(worktree),
+        expected=[Session(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=1)],
+    )
 
 
 def _transcript(folder: Path, name: str, body: str, mtime: float) -> Path:
@@ -185,51 +212,35 @@ def test_session_summary_when_transcript_has_no_title_or_prompt(tmpdir: TempDir)
     assert session_summary('/work/proj', 'agent', projects) is None
 
 
-def test_sessions_enriches_with_name_cwd_and_summary(tmpdir: TempDir, replace: Replacer) -> None:
+def test_sessions_enriches_live_sessions_with_a_summary(tmpdir: TempDir, replace: Replacer) -> None:
     projects = tmpdir.makedir('projects')
     _transcript(
         projects / '-work-proj', 'a.jsonl', '{"type": "last-prompt", "lastPrompt": "do it"}\n', 1000
     )
-    full = 'abc12345-9f80-4c8e-b3d7-1234567890ab'
-    replace.in_module(
-        all_sessions,
-        lambda: [
-            # the full sessionId (the transcript UUID) beats claude's short handle
-            {
-                'id': full[:8],
-                'sessionId': full,
-                'status': 'busy',
-                'name': 'proj@goal@agent',
-                'cwd': '/work/proj',
-            },
-            {'sessionId': 'bare', 'status': 'idle', 'cwd': '/elsewhere'},  # no name, no transcript
-        ],
-    )
+    live = [
+        Session(
+            id='a', name='proj@goal@agent', status='busy', cwd=Path('/work/proj'), summary=None
+        ),
+        Session(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
+    ]
+    replace.on_class(Claude.live, lambda self, cwd=None: list(live))
     compare(
         Claude(projects).sessions(),
         expected=[
             Session(
-                id=full,
+                id='a',
                 name='proj@goal@agent',
                 status='busy',
                 cwd=Path('/work/proj'),
-                summary='do it',
+                summary='do it',  # from the transcript; 'bare' has none to find
             ),
             Session(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
         ],
     )
 
 
-def test_sessions_tolerates_sessions_missing_fields(replace: Replacer) -> None:
-    replace.in_module(
-        all_sessions,
-        # a session without status/cwd (e.g. a foreground session) must not crash the listing;
-        # status falls back to state, then '?', and a missing cwd yields no summary
-        lambda: [{'sessionId': 'lonely', 'state': 'working'}],
-    )
-    compare(
-        Claude().sessions(),
-        expected=[
-            Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
-        ],
-    )
+def test_sessions_skips_enrichment_when_the_registry_had_no_cwd(replace: Replacer) -> None:
+    # a cwd-less record parses to Path('.') — there is no transcript folder to read
+    lonely = Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
+    replace.on_class(Claude.live, lambda self, cwd=None: [lonely])
+    compare(Claude().sessions(), expected=[lonely])
