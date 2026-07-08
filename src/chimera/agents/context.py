@@ -63,7 +63,7 @@ def materialize(workspace: Path, name: str, text: str) -> Path | None:
     if not text:
         return None
     digest = sha256(text.encode()).hexdigest()
-    slug = re.sub(r'[^\w@.-]', '-', name)  # a name may carry a URL (ch review <url>)
+    slug = re.sub(r'[^\w@.-]', '-', name)  # defensive: keep the filename filesystem-safe
     path = workspace / 'logs' / 'context' / f'{slug}-{digest[:8]}.md'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)

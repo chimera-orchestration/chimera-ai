@@ -574,7 +574,15 @@ def review(
     p = _project(ctx, project)
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(p, session_name(p.name, f'pr-{pr}', AGENT))
+    context: Path | None = None
+
+    def _render_context(name: str) -> Path | None:
+        # keyed by the session name _review resolves (pr-<N>, even from a URL argument);
+        # the handle is kept so the --dry preview shows the artifact rendered exactly once
+        nonlocal context
+        context = _context_file(p, name)
+        return context
+
     worktree = _review(
         p.repo,
         p.worktrees,
@@ -586,7 +594,7 @@ def review(
         Path.cwd(),
         launch=not no_agent,
         spec=spec,
-        context=context,
+        context=_render_context,
         dry=dry_run,
     )
     if no_agent:

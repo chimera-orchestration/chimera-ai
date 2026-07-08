@@ -1,6 +1,6 @@
 import json
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from importlib.resources import files
 from pathlib import Path
 from string import Template
@@ -49,7 +49,7 @@ def review(
     into: Path | None = None,
     launch: bool = True,
     spec: AgentSpec = AgentSpec(),
-    context: Path | None = None,
+    context: Callable[[str], Path | None] | None = None,
     dry: Dry = Dry(),
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
@@ -59,6 +59,12 @@ def review(
     head with that ref as upstream, and launches the agent on a review prompt — the project's
     ``prompts/review.md`` if present, else the packaged default, both behind a no-publish
     guardrail. ``into`` optionally lands the human branch in place (see ``checkout_here``).
+
+    ``context`` is a factory keyed by session name, called with the *resolved*
+    ``<project>@pr-<N>@agent`` — the number is only known here, once ``gh`` has resolved
+    ``pr``, so a URL argument still lands its context artifact (and the ``context:
+    rendered`` log line) under the real session name. Never called without ``launch``:
+    no session, nothing to render for.
 
     ``launch=False`` (CLI ``--no-agent``) stops after the checkout: branches, worktree and
     upstream all stand, but no agent runs — kick one off later with ``ch agent start``. The
@@ -97,15 +103,16 @@ def review(
     if into is not None:
         dry(checkout_here, git, branch(goal, HUMAN), into, 'review')
     if launch:
+        name = session_name(project, goal, AGENT)
         prompt = _prompt(prompts_dir, meta, goal, project)
         agent(
             agent_worktree,
-            session_name(project, goal, AGENT),
+            name,
             prompt,
             extra,
             dangerous,
             spec,
-            context,
+            context(name) if context is not None else None,
             dry,
         )
     return agent_worktree

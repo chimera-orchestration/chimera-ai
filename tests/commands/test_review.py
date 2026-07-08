@@ -1,6 +1,6 @@
 import os
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from string import Template
 from subprocess import CompletedProcess
@@ -124,6 +124,43 @@ def test_review_builds_the_goal_tracking_the_pr_and_launches(
                 False,
                 AgentSpec(),
                 None,
+            )
+        ],
+    )
+
+
+def test_review_keys_the_context_by_the_resolved_session_name(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    repo, head = _cloned(tmpdir)
+    worktrees = tmpdir / 'wt'
+    meta = _meta(head)
+    _stub_meta(replace, meta)
+    calls = _stub_agent(replace)
+    names: list[str] = []
+
+    def factory(name: str) -> Path:
+        names.append(name)
+        return tmpdir / 'ctx.md'
+
+    # a URL argument still keys the context by the goal gh resolves, never the raw argument
+    url = 'https://github.com/o/r/pull/1'
+    review(repo, worktrees, 'proj', tmpdir / 'prompts', url, context=factory)
+    compare(names, expected=['proj@pr-1@agent'])
+    expected_prompt = GUARDRAIL + Template(_default_template()).safe_substitute(
+        PR=1, PR_URL=meta['url'], PR_TITLE=meta['title'], BASE='main', GOAL='pr-1', PROJECT='proj'
+    )
+    compare(
+        calls,
+        expected=[
+            (
+                worktrees / 'pr-1@agent',
+                'proj@pr-1@agent',
+                expected_prompt,
+                (),
+                False,
+                AgentSpec(),
+                tmpdir / 'ctx.md',
             )
         ],
     )
@@ -462,10 +499,11 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         into: Path | None = None,
         launch: bool = True,
         spec: AgentSpec = AgentSpec(),
-        context: Path | None = None,
+        context: Callable[[str], Path | None] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
-        calls.append((project, pr, list(extra), dangerous, into, launch, spec, context))
+        rendered = context('project@pr-1@agent') if context is not None else None
+        calls.append((project, pr, list(extra), dangerous, into, launch, spec, rendered))
         return worktrees / 'pr-1@agent'
 
     replace(target=review, container=main, name='_review', replacement=record)
@@ -529,7 +567,7 @@ def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         into: Path | None = None,
         launch: bool = True,
         spec: AgentSpec = AgentSpec(),
-        context: Path | None = None,
+        context: Callable[[str], Path | None] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
         calls.append(dry)
@@ -537,6 +575,25 @@ def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
 
     replace(target=review, container=main, name='_review', replacement=record)
     return project, calls
+
+
+def test_review_cli_url_and_number_share_the_context_artifact(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    tmpdir.write('lycia/proj/principles/style.md', 'Be terse.\n')
+    os.chdir(ws / 'proj')
+    _stub_meta(replace, _meta('0' * 40))
+    _stub_agent(replace)
+    compare(command.run('review', '1', '--dry').return_code, expected=0)
+    [artifact] = (ws / 'logs' / 'context').iterdir()
+    assert artifact.name.startswith('proj@pr-1@agent-')
+    url_run = command.run('review', 'https://github.com/o/r/pull/1', '--dry')
+    compare(url_run.return_code, expected=0)
+    # the URL form lands on the very same artifact the number form rendered
+    compare(sorted((ws / 'logs' / 'context').iterdir()), expected=[artifact])
 
 
 def test_review_cli_dry_with_packaged_template(
