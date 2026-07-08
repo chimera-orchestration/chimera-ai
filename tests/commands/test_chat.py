@@ -8,7 +8,7 @@ from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.agents import Session
 from chimera.agents.claude import Claude
-from chimera.commands.chat import ChatAlreadyLiveError, NoGoalWorktreeError, chat, chat_target
+from chimera.commands.chat import ChatAlreadyLiveError, GoalHasAgentError, chat, chat_target
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
 from tests.cli import Command, action_logs
@@ -46,19 +46,16 @@ class TestChatTarget:
             expected=(ws / 'proj', 'proj@chat'),
         )
 
-    def test_goal_scope_chats_in_the_agent_worktree(self, tmpdir: TempDir) -> None:
-        worktree = tmpdir.makedir('lycia/proj/worktrees/g@agent')
-        project = _project_obj(tmpdir / 'lycia' / 'proj')
-        compare(
-            chat_target(Scope(tmpdir / 'lycia', project, 'g'), 'pegasus'),
-            expected=(worktree, 'proj@g@chat'),
-        )
-
-    def test_ghost_goal_refuses(self, tmpdir: TempDir) -> None:
+    def test_goal_scope_refuses(self, tmpdir: TempDir) -> None:
         ws = tmpdir.makedir('lycia')
         project = _project_obj(ws / 'proj')
-        with ShouldRaise(NoGoalWorktreeError('ghost')):
-            chat_target(Scope(ws, project, 'ghost'), 'pegasus')
+        with ShouldRaise(GoalHasAgentError('g', 'proj')):
+            chat_target(Scope(ws, project, 'g'), 'pegasus')
+
+    def test_explicit_goal_refuses_even_without_a_project(self, tmpdir: TempDir) -> None:
+        ws = tmpdir.makedir('lycia')
+        with ShouldRaise(GoalHasAgentError('g')):
+            chat_target(Scope(ws, None, None), 'pegasus', goal='g')
 
 
 class TestChat:
@@ -209,19 +206,21 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
     compare(calls, expected=[(['claude', '--name', 'proj@chat'], project, True)])
 
 
-def test_chat_cli_goal_scope_from_worktree(
-    tmpdir: TempDir, replace: Replacer, command: Command
-) -> None:
+def test_chat_cli_goal_scope_refuses(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _workspace(tmpdir, replace, {'kind': 'workspace'})
     project = ws / 'proj'
     worktree = project / 'worktrees' / 'g@agent'
     worktree.mkdir(parents=True)
     tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
     os.chdir(worktree)
-    worktree = Path.cwd()  # resolves symlinks like the wrapper
     calls = _stub(replace)
+    message = (
+        'a goal has its agent — ch agent resume -g g talks to it; '
+        'ch chat -p proj for a side conversation'
+    )
     command.run('chat').check(
-        output=f'Launched chat proj@g@chat in {worktree}',
+        output=f'Error: {message}',
+        return_code=1,
         logging=action_logs(
             'chat',
             'chimera.commands.chat.chat',
@@ -235,19 +234,21 @@ def test_chat_cli_goal_scope_from_worktree(
                 'project': None,
                 'goal': None,
             },
+            error=f'GoalHasAgentError: {message}',
         ),
     )
-    compare(calls, expected=[(['claude', '--name', 'proj@g@chat'], worktree, True)])
+    compare(calls, expected=[])  # never launched
 
 
-def test_chat_cli_ghost_goal_errors(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
-    ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
-    project = ws / 'proj'
-    project.mkdir()
-    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
-    os.chdir(project)
+def test_chat_cli_explicit_goal_never_launches_the_captain(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
     calls = _stub(replace)
-    message = "goal 'ghost' has no agent worktree — ch goal start ghost creates it"
+    message = (
+        'a goal has its agent — ch agent resume -g ghost talks to it; '
+        'ch chat -p <project> for a side conversation'
+    )
     command.run('chat', '-g', 'ghost').check(
         output=f'Error: {message}',
         return_code=1,
@@ -264,7 +265,7 @@ def test_chat_cli_ghost_goal_errors(tmpdir: TempDir, replace: Replacer, command:
                 'project': None,
                 'goal': 'ghost',
             },
-            error=f'NoGoalWorktreeError: {message}',
+            error=f'GoalHasAgentError: {message}',
         ),
     )
     compare(calls, expected=[])  # never launched

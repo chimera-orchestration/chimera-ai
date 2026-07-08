@@ -70,9 +70,8 @@ agent:
 
 ## Chat: the captain and scoped conversations
 
-`ch chat` launches a conversation at the current scope, resolved like the listers: standing in a
-goal worktree chats as `<project>@<goal>@chat` in that worktree, in a project as
-`<project>@chat` in the project dir, and at the bare workspace as the **captain** — the
+`ch chat` launches a conversation at the current scope, resolved like the listers: in a project
+as `<project>@chat` in the project dir, and at the bare workspace as the **captain** — the
 workspace-level agent that directs all work. The captain has no goal, branch or worktree: it
 works on the workspace as a whole. Its persona name comes from `config.yaml` (`captain: pegasus`,
 or the full form `captain: {name: …, harness: …, model: …}` to also override the agent cascade;
@@ -82,10 +81,12 @@ persona name; the workspace-wide knowledge index (every project, qualified) foll
 
 A chat deliberately sits *alongside* whatever agent is working in the same cwd, so the
 one-session-per-worktree guard is off; instead the scope's chat itself being live refuses with
-an attach hint. `--resume`/`-r` revives the scope's previous (dead) chat session. `-p`/`-g`
-override the scope as usual; prompt/`--`-passthrough/`--dangerous`/`--harness`/`-m` behave as on
-the other launchers. A `-g` naming a goal with no agent worktree refuses (`ch goal start` it
-first) rather than launching the harness in a nonexistent cwd.
+an attach hint. `--resume`/`-r` revives the scope's previous (dead) chat session. `-p` overrides
+the scope as usual; prompt/`--`-passthrough/`--dangerous`/`--harness`/`-m` behave as on the other
+launchers. There is no goal scope: a goal already has its agent, so a pinned or explicitly
+requested goal (even a `-g` no project could be resolved for) refuses, pointing at
+`ch agent resume -g <goal>` to talk to the agent and `ch chat -p <project>` for a side
+conversation.
 
 ## Launch context: principles inline, knowledge indexes
 

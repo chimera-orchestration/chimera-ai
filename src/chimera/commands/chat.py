@@ -6,10 +6,10 @@ from chimera.commands.agent import refuse_restricted
 from chimera.config import UserError
 from chimera.context import Scope
 from chimera.dry import Dry
-from chimera.worktrees import AGENT, SEP, session_name, worktree_path
+from chimera.worktrees import SEP
 
 CHAT = 'chat'
-"""The pseudo-actor naming project- and goal-scoped chat sessions."""
+"""The pseudo-actor naming project-scoped chat sessions."""
 
 
 class ChatAlreadyLiveError(UserError):
@@ -17,31 +17,34 @@ class ChatAlreadyLiveError(UserError):
         super().__init__(f"chat '{name}' is already live — attach to it, or stop it first")
 
 
-class NoGoalWorktreeError(UserError):
-    def __init__(self, goal: str) -> None:
-        super().__init__(f"goal '{goal}' has no agent worktree — ch goal start {goal} creates it")
+class GoalHasAgentError(UserError):
+    def __init__(self, goal: str, project: str | None = None) -> None:
+        super().__init__(
+            f'a goal has its agent — ch agent resume -g {goal} talks to it; '
+            f'ch chat -p {project or "<project>"} for a side conversation'
+        )
 
 
-def chat_target(scope: Scope, captain: str) -> tuple[Path, str]:
+def chat_target(scope: Scope, captain: str, goal: str | None = None) -> tuple[Path, str]:
     """Where a chat at ``scope`` runs and what its session is named.
 
-    The narrowest pinned axis decides: a goal chats in that goal's agent worktree as
-    ``<project>@<goal>@chat``, a project in its project dir as ``<project>@chat``, and
-    the bare workspace as the captain — its persona name *is* the session name, and it
-    works on the workspace as a whole (no goal, branch or worktree).
+    Two scopes chat: a project in its project dir as ``<project>@chat``, and the bare
+    workspace as the captain — its persona name *is* the session name, and it works on
+    the workspace as a whole (no goal, branch or worktree).
 
-    A goal pinned by ``-g`` isn't validated by scope resolution (listers legitimately
-    take any name as a filter), so the ghost is caught here: a goal whose agent
-    worktree doesn't exist refuses rather than launching a harness in a dead cwd.
+    A goal never chats: it already has its agent, and a second session on the same
+    branch/worktree invites launch-order traps and lifecycle interference — so a pinned
+    goal refuses, pointing at both real options. ``goal`` carries an explicitly
+    requested goal that scope resolution couldn't pin (a ``-g`` with no project): asked
+    for is asked for, so it refuses the same way rather than being swallowed. The
+    refusal precedes any Dry routing, so ``--dry`` still reports it.
     """
+    requested = scope.goal if scope.goal is not None else goal
+    if requested is not None:
+        raise GoalHasAgentError(requested, scope.project.name if scope.project else None)
     if scope.project is None:
         return scope.workspace, captain
-    if scope.goal is None:
-        return scope.project.dir, f'{scope.project.name}{SEP}{CHAT}'
-    cwd = worktree_path(scope.project.worktrees, scope.goal, AGENT)
-    if not cwd.is_dir():
-        raise NoGoalWorktreeError(scope.goal)
-    return cwd, session_name(scope.project.name, scope.goal, CHAT)
+    return scope.project.dir, f'{scope.project.name}{SEP}{CHAT}'
 
 
 def chat(

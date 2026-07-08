@@ -609,7 +609,7 @@ def review(
 @app.command(
     'chat',
     cls=PassthroughCommand,
-    help='Chat at the current scope: the workspace captain, a project, or a goal.',
+    help='Chat at the current scope: the workspace captain or a project.',
 )
 @logs(_chat)
 def chat(
@@ -627,7 +627,10 @@ def chat(
 ) -> None:
     scope = _scope(ctx, project, goal)
     config = workspace_config(scope.workspace)
-    cwd, name = chat_target(scope, config.captain.name)
+    # an explicit -g the scope couldn't pin (no project) must still reach the refusal
+    cwd, name = chat_target(
+        scope, config.captain.name, goal if goal is not None else _overrides(ctx).goal
+    )
     if scope.project is None:  # the captain: role directives lead, all projects index
         spec = resolve_spec(harness, model, config.captain, config.agent)
         role = role_context(scope.workspace, 'captain', name)
