@@ -1,9 +1,12 @@
 import os
 import subprocess
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NoReturn
 
+import pytest
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 
 from chimera.agent_env import ROLE_CAPTAIN, role_env
@@ -13,6 +16,7 @@ from chimera.agents.claude import (
     Claude,
     _print_args,
     _session_args,
+    _warn_missing_binary,
     session_summary,
 )
 
@@ -110,6 +114,55 @@ def test_reported_marks_the_degraded_pidless_remnant_stale(replace: Replacer) ->
         ],
     )
     compare(Claude().live(), expected=[])  # …and live() is what filters it
+
+
+@pytest.fixture()
+def missing_binary(replace: Replacer) -> Iterator[None]:
+    """A machine with no claude at all: the registry subprocess can't even spawn."""
+
+    def vanished(*args: object, **kw: object) -> NoReturn:
+        raise FileNotFoundError(2, 'No such file or directory', 'claude')
+
+    replace.in_module(subprocess.run, vanished)
+    _warn_missing_binary.cache_clear()  # the once-per-process guard, reset either side
+    yield
+    _warn_missing_binary.cache_clear()
+
+
+def test_reported_without_the_binary_is_no_sessions(
+    missing_binary: None, full_logs: LogCapture
+) -> None:
+    compare(Claude().reported(), expected=[])
+    full_logs.check(
+        {'level': 'WARNING', 'message': 'agent: claude binary not found, reporting no sessions'}
+    )
+
+
+def test_missing_binary_warns_once_per_process(
+    tmpdir: TempDir, missing_binary: None, full_logs: LogCapture
+) -> None:
+    harness = Claude()
+    compare(harness.reported(), expected=[])
+    compare(harness.reported(tmpdir.makedir('wt')), expected=[])  # a sweep asks per worktree…
+    [entry] = full_logs.actual()  # …but the log gets one line, not one per call
+    compare(entry['message'], expected='agent: claude binary not found, reporting no sessions')
+
+
+def test_liveness_tiers_compose_over_the_missing_binary(missing_binary: None) -> None:
+    compare(Claude().checked(), expected=[])
+    compare(Claude().live(), expected=[])
+
+
+def test_reported_with_a_failing_binary_still_raises(replace: Replacer) -> None:
+    # present-but-broken is not "not installed": that needs attention, never an empty answer
+    error = subprocess.CalledProcessError(1, ['claude', 'agents', '--json'])
+
+    def failing(*args: object, **kw: object) -> NoReturn:
+        raise error
+
+    replace.in_module(subprocess.run, failing)
+    with ShouldRaise(error):
+        Claude().reported()
 
 
 def _dead(pid: int, sig: int) -> None:

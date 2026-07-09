@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 from collections.abc import Mapping, Sequence
+from functools import cache
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -179,14 +180,23 @@ class Claude(Agent):
         ``checked()``: after a session dies, the registry can briefly keep a *degraded*
         entry with pid and status stripped. Such an entry isn't "a session with no pid
         to claim" — it's a remnant, so it's marked stale (and logged) at the source.
+
+        A machine with no ``claude`` binary at all answers with no sessions — nothing
+        the harness runs can be live there — so every liveness consumer (worktree rm,
+        the launch guards, the listers) keeps working; a present-but-failing ``claude``
+        still raises. Logged (once — see :func:`_warn_missing_binary`), never silent.
         """
         scope = ('--cwd', str(cwd)) if cwd is not None else ()
-        result = subprocess.run(
-            ['claude', 'agents', '--json', *scope],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        try:
+            result = subprocess.run(
+                ['claude', 'agents', '--json', *scope],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except FileNotFoundError:
+            _warn_missing_binary()
+            return []
         claims: list[Session] = []
         for raw in json.loads(result.stdout):
             session = _parse(raw)
@@ -219,6 +229,20 @@ class Claude(Agent):
         return subprocess.run(
             ['claude', *args], cwd=cwd, check=True, env={**os.environ, **env} if env else None
         )
+
+
+@cache
+def _warn_missing_binary() -> None:
+    """
+    Land the claude-binary-missing WARNING, once per process.
+
+    A claude-less machine legitimately answers every liveness question with "no
+    sessions" — but the same symptom is what a broken PATH looks like on a machine
+    that *does* have claude, so it's a WARNING (degraded but continuing), not
+    silence. Cached because liveness checks fan out (a sweep asks per worktree):
+    one line per run carries the triage signal; one per call would be spew.
+    """
+    logger.warning('agent: claude binary not found, reporting no sessions')
 
 
 def _tail(stderr: str | None, limit: int = 4000) -> str:
