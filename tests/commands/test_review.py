@@ -611,14 +611,15 @@ def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
 
 
 def test_review_cli_url_and_number_share_the_context_artifact(
-    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+    tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
+    clone, head = _cloned(tmpdir)  # review needs an origin, even under --dry
     ws = tmpdir.makedir('lycia')
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
-    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(clone)})
     tmpdir.write('lycia/proj/principles/style.md', 'Be terse.\n')
     os.chdir(ws / 'proj')
-    _stub_meta(replace, _meta('0' * 40))
+    _stub_meta(replace, _meta(head))
     _stub_agent(replace)
     compare(command.run('review', '1', '--dry').return_code, expected=0)
     [artifact] = (ws / 'logs' / 'context').iterdir()
