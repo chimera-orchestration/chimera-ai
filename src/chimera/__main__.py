@@ -28,6 +28,8 @@ from chimera.commands.init import init as _init
 from chimera.commands.ls import Board, board
 from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.ls import projects as _projects
+from chimera.commands.project.new import new as _project_new
+from chimera.commands.project.push import push as _project_push
 from chimera.commands.project.rm import remove as _project_remove
 from chimera.commands.review import review as _review
 from chimera.commands.worktree.add import add as _worktree_add
@@ -497,7 +499,9 @@ def review(
         typer.echo(f'Reviewing {pr} in {worktree}')
 
 
-project_app = typer.Typer(cls=alias_group({'list': 'ls'}), help='Manage projects.')
+project_app = typer.Typer(
+    callback=_context, cls=alias_group({'list': 'ls'}), help='Manage projects.'
+)
 app.add_typer(project_app, name='project')
 
 
@@ -518,6 +522,45 @@ def project_add(
     typer.echo(f'Added {_project_add(resolve_workspace(Path.cwd()), source, checkout)}')
     if checkout is not None:
         typer.echo(f'Checked out at {checkout}')
+
+
+@project_app.command(
+    'new',
+    cls=LoggingCommand,
+    help='Create a workspace-only project: a fresh repo, no remote (graduate with project push).',
+)
+@logs(_project_new)
+def project_new(
+    name: Annotated[str, typer.Argument(help='Project name')],
+    checkout: Annotated[
+        Path | None,
+        typer.Option('--checkout', help='Also check out the default branch here'),
+    ] = None,
+) -> None:
+    checkout = checkout.expanduser() if checkout else None
+    typer.echo(f'Created {_project_new(resolve_workspace(Path.cwd()), name, checkout)}')
+    if checkout is not None:
+        typer.echo(f'Checked out at {checkout}')
+
+
+@project_app.command(
+    'push',
+    cls=LoggingCommand,
+    help='Push the default branch to <url> and track it as origin — graduates a workspace-only '
+    'project.',
+)
+@logs(_project_push)
+def project_push(
+    ctx: typer.Context,
+    url: Annotated[str, typer.Argument(help='Git URL to push to and track as origin')],
+    dry: Annotated[
+        bool, typer.Option('--dry', help='Preview the push and remote wiring; change nothing')
+    ] = False,
+    project: ProjectOpt = None,
+) -> None:
+    dry_run = Dry(dry)
+    branch = _project_push(_project(ctx, project).repo, url, dry_run)
+    typer.echo(f'{dry_run.verb("Pushed", "Would push")} {branch} to {url} (origin)')
 
 
 @project_app.command(

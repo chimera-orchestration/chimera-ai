@@ -1,3 +1,4 @@
+import os
 import shutil
 from pathlib import Path
 
@@ -19,7 +20,9 @@ def remove(workspace: Path, name: str, force: bool = False, dry: Dry = Dry()) ->
     A live agent in any worktree always aborts, even with ``force`` (unlike goal
     finish, whose --force bypasses the liveness check for a single goal). Only the
     workspace's project directory is removed; a tracked repo living outside it is
-    left untouched. Under ``dry`` the same checks run but nothing is deleted — the
+    left untouched. A workspace-only repo (under the project dir, no remote) holding
+    real work is the *sole* copy of that work — removal would be unrecoverable loss,
+    the one failure the log can't undo — so it too refuses without ``force``. Under ``dry`` the same checks run but nothing is deleted — the
     goal teardown and the directory removal are both previewed — and the return is
     still the dir that *would* be removed.
     """
@@ -38,6 +41,11 @@ def remove(workspace: Path, name: str, force: bool = False, dry: Dry = Dry()) ->
         )
     repo = Path(yaml.safe_load(config.read_text())['repo'])
     git = Git(repo)
+    if not force and repo.resolve().is_relative_to(project.resolve()) and _sole_copy(git):
+        raise RuntimeError(
+            f'{name} holds the only copy of its work (no remote to recover from); '
+            f'publish it first (ch project push) or use --force to discard it'
+        )
     for goal in sorted(existing):  # check every goal's worktrees before touching any of them
         refuse_if_agents_running(
             wt
@@ -48,3 +56,18 @@ def remove(workspace: Path, name: str, force: bool = False, dry: Dry = Dry()) ->
         remove_worktrees(repo, worktrees_root, goal, force=True, dry=dry)
     dry(shutil.rmtree, project)
     return project
+
+
+def _sole_copy(git: Git) -> bool:
+    """Whether this repo holds the only copy of real work: no remote to recover from, and
+    history beyond ``ch project new``'s single empty seed commit."""
+    if git('remote').strip():
+        return False
+    match git('rev-list', '--all').split():
+        case []:
+            return False
+        case [seed]:
+            empty_tree = git('hash-object', '-t', 'tree', os.devnull).strip()
+            return git('rev-parse', f'{seed}^{{tree}}').strip() != empty_tree
+        case _:
+            return True

@@ -115,3 +115,8 @@ Report with `dry.verb('Removed', 'Would remove')`. Read-only commands never take
 - Put logic depth in pure-function tests — assert on return values / raised exceptions.
 - Still cover the CLI: a smoke test per command plus the wrapper's job (arg parsing,
   exit codes, output), so the CLI is proven to work.
+- Manual smoke runs: `$CHIMERA_WORKSPACE` in your environment points at the user's *live*
+  workspace, so a bare `uv run python -m chimera …` mutates real state (and merely unsetting
+  it isn't enough — cwd walk-up can still land there). Pin a scratch workspace on the
+  command itself: `CHIMERA_WORKSPACE=<scratch> uv run python -m chimera …`, scratch made
+  with `ch init`. pytest is already safe (TempDir + the autouse fixture clearing the var).

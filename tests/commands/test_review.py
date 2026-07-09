@@ -9,6 +9,7 @@ from giterator import GitError
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
+from testfixtures.mock import Mock
 
 import chimera.__main__ as main
 from chimera.commands import review as review_mod
@@ -180,6 +181,22 @@ def test_review_without_launch_refuses_agent_flags(tmpdir: TempDir) -> None:
         review(tmpdir / 'r', tmpdir / 'wt', 'proj', tmpdir / 'p', '1', launch=False, dangerous=True)
     with ShouldRaise(refused):
         review(tmpdir / 'r', tmpdir / 'wt', 'proj', tmpdir / 'p', '1', launch=False, extra=['-c'])
+
+
+def test_review_refuses_without_an_origin(tmpdir: TempDir, replace: Replacer) -> None:
+    repo = Repo.make(tmpdir / 'r')  # no remotes at all
+    repo.commit_content('seed')
+    worktrees = tmpdir / 'wt'
+    unreached = Mock(side_effect=AssertionError('should not be reached'))
+    replace.in_module(_pr_metadata, unreached, module=review_mod)  # refusal precedes any gh call
+    with ShouldRaise(
+        UserError(
+            "project 'proj' has no origin to fetch a PR from — "
+            'publish it first: ch project push <url>'
+        )
+    ):
+        review(repo.path, worktrees, 'proj', tmpdir / 'prompts', '1')
+    assert not worktrees.exists()
 
 
 def test_prompt_prefers_a_project_override(tmpdir: TempDir) -> None:

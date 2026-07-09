@@ -164,6 +164,24 @@ Reports findings and exits non-zero while any remain unresolved.
 
 ## Adding and removing projects
 
+`ch project new <name>` creates a **workspace-only** project: a fresh bare repo at
+`{project}/repo/` — no URL, no remote. `git init -b main` (forced — `default_branch` only
+knows main/master), seeded with an empty-tree commit via plumbing (the user's own git
+identity, no README) so the first `goal start` has a commit to branch from; then the same
+`register()` as `project add`. Everything downstream is byte-identical to a URL-added
+project; the repo's remote list is the single source of truth for whether it has
+graduated — no config marker. `--checkout <path>` stands up a plain worktree of `main`
+there, as `project add --checkout` does. Refuses if the project already exists.
+
+`ch project push <url>` graduates a workspace-only project into an ordinary remote-backed
+one: pushes the default branch (only — `{goal}/{actor}` branches stay local scratch)
+straight to the URL *before* writing any config, so a failed push leaves zero config
+behind; then `remote add origin`, `fetch --prune`, `remote set-head` to the pushed branch
+(explicit, not `-a` — an empty remote's unborn `HEAD` may name a branch that doesn't exist
+yet, which `-a` can't resolve), and upstream wired for the default branch only. Takes
+`--dry`. Refuses when an origin already exists.
+After it, nothing distinguishes the project from a URL-added one.
+
 `ch project add <url|path>` (run anywhere in the workspace) dispatches on its argument:
 - a git URL — bare-clones into `{project}/repo/` (no working tree there; all work happens in
   goal worktrees). The fetch refspec, an initial fetch and `origin/HEAD` are set up by hand
@@ -185,7 +203,11 @@ Both paths:
 still has goals — run `ch goal finish` on each first, or pass `--force` to finish
 every goal (discarding unmerged/uncommitted work) and remove the project in one
 shot. A live agent in any worktree always aborts, even with `--force`. A tracked
-repo living outside the workspace is left untouched. `--dry` previews the whole
+repo living outside the workspace is left untouched. A workspace-only repo (under
+the project dir, no remote) holding real work — history beyond `project new`'s
+empty seed commit — is the sole copy of that work, so it too refuses without
+`--force`: unrecoverable loss is the one failure the log can't undo. Publish it
+first with `ch project push`. `--dry` previews the whole
 teardown (running the same checks) without deleting anything. `ch project ls` lists
 tracked projects.
 
@@ -229,7 +251,7 @@ checkout of `main` next to (not managed by) chimera's goal worktrees.
 
 **Append (the squash case).** A **watermark** ref `refs/chimera/synced/<goal>/<mover>` records the target sha last integrated; the new commits are `<watermark>..<target>`, cherry-picked onto the mover, so a squashed history gains the new work without re-applying what was folded in. A range carrying merge commits is refused — once the target has rebased onto or merged in other work, the range sweeps in history that isn't the target's own (and cherry-pick can't replay a merge); `--force` is the way through. The watermark is set on every integrating outcome. A legacy branch with no watermark is auto-seeded by matching the mover tip's *tree* to a target commit (a faithful squash preserves the tree); a squash that also carries the human's own edits matches nothing and is refused (do that first integration by hand — there's no seed flag). The append needs the mover **checked out** (bare → refused) and clean; a faithful squash applies conflict-free, but a conflict against the human's own edits is **left in the checkout** to resolve and `git cherry-pick --continue` (exit 1). A transient marker (`<git-common-dir>/chimera/appending/<goal>@<mover>`) lets a re-run tell a finished append (advance the watermark) from an aborted one (retry), and blocks a re-run while a cherry-pick is still in progress. Any cherry-pick already live in the mover's checkout — even one sync didn't start — blocks an append, and a replay that dies without leaving a conflict to resolve is rolled back, never left half-applied. The mover and watermark shas ride the `goal sync: refs` log line; `goal finish` sweeps a goal's watermark refs and markers.
 
-`ch review <PR|url>` stands a goal up from a pull request and launches a pre-human review agent. It resolves the PR through `gh` (authoritative `headRefOid`); the *project* is still resolved from cwd/`-p`, so a URL naming a repo other than the resolved project's github origin is refused up front (both must carry a github identity — a local-path origin skips the check). The URL needn't be github's: any review tool's URL that embeds `owner/repo` and the PR number in its path (reviewable.io, graphite, …) works generically — the origin's slug is located in the path and the first numeric segment after it is the number, no per-tool table; a URL not naming the origin's repo (or a local-path origin, with no slug to match) is refused with a pointer to pass the number. It then fetches `refs/pull/<N>/head` into the `origin/pr/<N>` remote-tracking ref (targeted, so a missing PR ref fails cleanly), persists the refspec only after that fetch succeeds (so `git status` compares against the PR without a failed run leaving a dead refspec that bricks future fetches), verifies the fetch matches `headRefOid`, then branches `pr-<N>/{human,agent}` off that verified head with the PR ref as upstream — reusing `worktree add`, so a re-run only relaunches. The agent's prompt is the project's `prompts/review.md` (rendered with `string.Template`; `$PR $PR_URL $PR_TITLE $BASE $GOAL $PROJECT`) if present, else a packaged default, always behind a hardcoded guardrail forbidding any post to the PR — publishing stays the human's call. Like `goal sync`, a clean project-repo cwd is landed on `pr-<N>/human`. `--no-agent` stops after that checkout — branches, worktree and upstream all stand, but no agent launches (the output hints both follow-ups: `ch agent start -g <goal>` for an agent, re-running `ch review <N>` for the standard review); the agent-only knobs (`--dangerous`, `-- …` passthrough) are refused with it.
+`ch review <PR|url>` stands a goal up from a pull request and launches a pre-human review agent. A project with no `origin` at all (workspace-only, not yet pushed) is refused up front, pointing at `ch project push`. It resolves the PR through `gh` (authoritative `headRefOid`); the *project* is still resolved from cwd/`-p`, so a URL naming a repo other than the resolved project's github origin is refused up front (both must carry a github identity — a local-path origin skips the check). The URL needn't be github's: any review tool's URL that embeds `owner/repo` and the PR number in its path (reviewable.io, graphite, …) works generically — the origin's slug is located in the path and the first numeric segment after it is the number, no per-tool table; a URL not naming the origin's repo (or a local-path origin, with no slug to match) is refused with a pointer to pass the number. It then fetches `refs/pull/<N>/head` into the `origin/pr/<N>` remote-tracking ref (targeted, so a missing PR ref fails cleanly), persists the refspec only after that fetch succeeds (so `git status` compares against the PR without a failed run leaving a dead refspec that bricks future fetches), verifies the fetch matches `headRefOid`, then branches `pr-<N>/{human,agent}` off that verified head with the PR ref as upstream — reusing `worktree add`, so a re-run only relaunches. The agent's prompt is the project's `prompts/review.md` (rendered with `string.Template`; `$PR $PR_URL $PR_TITLE $BASE $GOAL $PROJECT`) if present, else a packaged default, always behind a hardcoded guardrail forbidding any post to the PR — publishing stays the human's call. Like `goal sync`, a clean project-repo cwd is landed on `pr-<N>/human`. `--no-agent` stops after that checkout — branches, worktree and upstream all stand, but no agent launches (the output hints both follow-ups: `ch agent start -g <goal>` for an agent, re-running `ch review <N>` for the standard review); the agent-only knobs (`--dangerous`, `-- …` passthrough) are refused with it.
 
 `ch agent start` launches `claude` in an existing worktree (`--name <project>@<goal>@<actor>`); `ch agent resume` reattaches to that same session label (`claude --resume <name>`). Resume exists because `claude` has no `--cwd`: Chimera knows the worktree and sets it, so a dead session is revived in the right place from anywhere. Both run foreground, or background (`--bg`) when a `[prompt]` is given, and both refuse if a session is already live in the worktree.
 
