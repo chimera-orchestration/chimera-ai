@@ -1,6 +1,8 @@
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from loguru import logger
+
 from chimera.agent_env import ROLE_MANAGER
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import refuse_restricted
@@ -58,19 +60,23 @@ def chat(
     env: Mapping[str, str] = {},
     resume: bool = False,
     dry: Dry = Dry(),
-) -> None:
+) -> str | None:
     """Launch (or with ``resume`` revive) the chat session ``name`` in ``cwd``.
 
     A chat deliberately sits alongside whatever agent is working there, so the
     harness's one-session-per-cwd guard is off; the guard here is by *name* over the
     live tier (a stale remnant of an old chat never blocks) — the scope's chat already
-    being live means attach, not launch, whichever was asked.
-    The guards fire under ``dry`` too, so a preview still reports the refusal.
+    being live means attach, not launch, whichever was asked. Under ``dry`` that guard
+    reports instead of refusing — the returned note, echoed with the preview: a preview
+    mutates nothing, and the scope's chat being live is its normal state, so refusing
+    would make the preview unreachable exactly when it's wanted (the other launchers'
+    liveness checks live inside the launch the ``dry`` switch already skips).
     ``env`` is the role stamp overlaid on the session's environment (see
     ``chimera.agent_env.role_env``).
     """
     refuse_restricted(spec, extra)
-    if any(session.name == name for session in spec.agent.live()):
+    live = any(session.name == name for session in spec.agent.live())
+    if live and not dry.on:
         raise ChatAlreadyLiveError(name)
     launch = spec.agent.resume if resume else spec.agent.start
     dry(
@@ -85,3 +91,7 @@ def chat(
         env=env,
         exclusive=False,
     )
+    if live:
+        logger.bind(session=name).warning('chat: already live')
+        return f"note: chat '{name}' is already live — a real launch would refuse"
+    return None
