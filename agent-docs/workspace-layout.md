@@ -294,6 +294,11 @@ add/retire via the `CHECKS` tuple). Current checks:
   unset shells are skipped): either the `ch --install-completion` artifact (`~/.zfunc/_ch` /
   `~/.bash_completions/ch.sh`) or a `_CH_COMPLETE` eval line in a shell startup file; not
   auto-fixable (same no-profile-edits rule) — the finding prints both fixes
+- **stale-context** — rendered launch-context artifacts (`logs/context/`) untouched for 30 days
+  are audit history no launch will ever read: every launcher rewrites its render in place at
+  launch (so mtime = last use) and chimera never reads an old artifact back. `--fix` deletes
+  them; each file's `context: rendered` log line (path + sha256) survives as proof of what was
+  injected, only the readable body goes
 - **workspace-clean** — the workspace's own git repo has no uncommitted or untracked content
   (skipped when the workspace isn't a git repo; `*/repo/` and `*/worktrees/` are gitignored, so
   only tracked workspace files count). Runs last, so it sweeps up the config/gitignore edits the

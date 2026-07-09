@@ -77,21 +77,27 @@ def assemble(workspace: Path, project: Project | None, role: str, intro: str) ->
     return Rendered('\n\n'.join(sections), tuple(sources))
 
 
+def context_dir(workspace: Path) -> Path:
+    """Where rendered launch contexts land, under the workspace's gitignored logs."""
+    return workspace / 'logs' / 'context'
+
+
 def materialize(workspace: Path, name: str, rendered: Rendered) -> Path | None:
     """Write the rendered context for session ``name`` under the workspace's logs.
 
     The filename carries the content hash, so the artifact is immutable and a re-run
-    with identical context lands on the same file. The log line binds the path, the
-    full sha256 and the sources map (each glob searched → the files it matched) — the
-    recovery record of exactly what a session was launched with, and why a directive
-    did or didn't make it in. ``None`` (and no file, no log) when there is nothing
-    to inject.
+    with identical context lands on the same file — rewritten in place, so its mtime
+    is always the last launch that used it (doctor's stale-context retention keys off
+    this). The log line binds the path, the full sha256 and the sources map (each
+    glob searched → the files it matched) — the recovery record of exactly what a
+    session was launched with, and why a directive did or didn't make it in. ``None``
+    (and no file, no log) when there is nothing to inject.
     """
     if not rendered.text:
         return None
     digest = sha256(rendered.text.encode()).hexdigest()
     slug = re.sub(r'[^\w@.-]', '-', name)  # defensive: keep the filename filesystem-safe
-    path = workspace / 'logs' / 'context' / f'{slug}-{digest[:8]}.md'
+    path = context_dir(workspace) / f'{slug}-{digest[:8]}.md'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(rendered.text)
     logger.bind(

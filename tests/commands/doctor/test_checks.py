@@ -1,5 +1,8 @@
+import os
 import shutil
 import subprocess
+import time
+from datetime import timedelta
 
 import yaml
 from giterator.testing import Repo
@@ -9,6 +12,7 @@ from testfixtures.loguru import LoguruSource
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
+    CONTEXT_RETENTION,
     WorkspaceDirsCheck,
     CaptainCheck,
     ChimeraUpToDateCheck,
@@ -18,6 +22,7 @@ from chimera.commands.doctor.checks import (
     OrphanedWorktreeCheck,
     ProjectConfigCheck,
     ShellCompletionCheck,
+    StaleContextCheck,
     StaleHumanWorktreeCheck,
     WorkspaceCommitCheck,
     WorkspaceConfigCheck,
@@ -1470,6 +1475,59 @@ def _git_ws(tmpdir: TempDir) -> Repo:
     repo('add', '-A')
     repo('commit', '-m', 'seed')
     return repo
+
+
+def _context_render(ws, name: str, *, age: timedelta | None = None):
+    """A rendered-context artifact under ws's logs, optionally backdated by age."""
+    path = ws / 'logs' / 'context' / f'{name}.md'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('# Role: agent')
+    if age is not None:
+        stamp = time.time() - age.total_seconds()
+        os.utime(path, (stamp, stamp))
+    return path
+
+
+def _stale_context(path) -> str:
+    return f'stale context render {path} — unused for over {CONTEXT_RETENTION.days} days'
+
+
+class TestStaleContext:
+    def test_no_context_dir_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(StaleContextCheck(), _ws(tmpdir)), expected=[])
+
+    def test_fresh_render_is_silent(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        _context_render(ws, 'captain-ff8aa221')
+        compare(_run(StaleContextCheck(), ws), expected=[])
+
+    def test_stale_reported_without_fix(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        path = _context_render(ws, 'captain-ff8aa221', age=CONTEXT_RETENTION + timedelta(days=1))
+        compare(
+            _run(StaleContextCheck(), ws),
+            expected=[Finding('stale-context', _stale_context(path), resolved=False, fixable=True)],
+        )
+        assert path.exists()  # reported only, nothing deleted
+
+    def test_fix_prunes_stale_and_keeps_fresh(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        stale = _context_render(ws, 'captain-ff8aa221', age=CONTEXT_RETENTION + timedelta(days=1))
+        _context_render(ws, 'captain-cf93215f')
+        compare(
+            _run(StaleContextCheck(), ws, fix=True),
+            expected=[Finding('stale-context', _stale_context(stale), resolved=True, fixable=True)],
+        )
+        tmpdir.compare(['captain-cf93215f.md'], path='lycia/logs/context')
+
+    def test_excluded_never_pruned(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        path = _context_render(ws, 'captain-ff8aa221', age=CONTEXT_RETENTION + timedelta(days=1))
+        compare(
+            _run(StaleContextCheck(), ws, fix=True, exclude=Exclusions((path.name,))),
+            expected=[Finding('stale-context', _stale_context(path), resolved=False, fixable=True)],
+        )
+        assert path.exists()
 
 
 class TestWorkspaceClean:
