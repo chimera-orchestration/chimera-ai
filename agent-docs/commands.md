@@ -156,7 +156,11 @@ project-scoped **action** resolves through: after `resolve_project` returns,
 cross-scope `-p` and a cwd standing in another project refuse identically. Listers are
 **never** fenced: `ls`/`goal ls`/`agent ls` resolve through `_scope()`, untouched —
 cross-project listing is knowledge, not capability. There is deliberately no `-g` rule: a
-goal resolves inside the already-fenced project, and `chat -g` is stripped for managers
+goal resolves inside the already-fenced project — guaranteed because every seam a goal or
+actor name enters through (an explicit `-g`/`-a`, the new-goal positionals) validates it
+first (`require_valid_goal`/`require_valid_actor` in `chimera.worktrees`: one path segment,
+no `@`, git's ref rules), so a traversal like `-g ../../other/worktrees/x` refuses before
+any path or ref is built — and `chat -g` is stripped for managers
 anyway — a decision, not an accident. The refusal is `scoped to <project>; ask the captain`
 (a `UserError`, exit 1): *signpost depth, never privilege* — it states identity and
 escalates, never narrating the prevented operation or a flag that would permit it.

@@ -74,7 +74,14 @@ from chimera.git import completing
 from chimera.help import command_index, render_json, render_text
 from chimera.prime import prime as _prime
 from chimera.prime import resolve_role
-from chimera.worktrees import AGENT, SEP, session_name, worktree_path
+from chimera.worktrees import (
+    AGENT,
+    SEP,
+    require_valid_actor,
+    require_valid_goal,
+    session_name,
+    worktree_path,
+)
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -947,6 +954,7 @@ def goal_start(
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
+    require_valid_goal(goal)  # before the session name reaches the context-file path
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context = _context_file(
@@ -990,6 +998,7 @@ def goal_adopt(
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
+    require_valid_goal(goal)  # before the session name reaches the context-file path
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context = _context_file(
@@ -1149,7 +1158,7 @@ def agent_start(
     overrides = _overrides(ctx)
     p = _project(ctx, project)
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
-    actor = actor or overrides.actor or AGENT
+    actor = require_valid_actor(actor or overrides.actor or AGENT)
     worktree = worktree_path(p.worktrees, g, actor)
     name = session_name(p.name, g, actor)
     dry_run = Dry(dry)
@@ -1178,7 +1187,7 @@ def agent_resume(
     overrides = _overrides(ctx)
     p = _project(ctx, project)
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
-    actor = actor or overrides.actor or AGENT
+    actor = require_valid_actor(actor or overrides.actor or AGENT)
     worktree = worktree_path(p.worktrees, g, actor)
     name = session_name(p.name, g, actor)
     dry_run = Dry(dry)

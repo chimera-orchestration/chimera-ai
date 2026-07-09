@@ -8,6 +8,7 @@ from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.agents.registry import AgentSpec
+from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.commands.agent import agent
 from chimera.commands.goal import adopt as goal_adopt
@@ -190,6 +191,23 @@ def test_adopt_refuses_when_no_branch_to_adopt(
     _stub_agent(replace)
     with ShouldRaise(RuntimeError("no branch 'ghost' to adopt")):
         adopt(git_repo.path, tmpdir / 'worktrees', 'ghost', 'proj@ghost@agent')
+
+
+def test_adopt_refuses_a_nested_branch(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    # the adopted branch becomes the goal name verbatim, so a '/'-nested branch can't fit
+    # the <goal>/<actor> / <goal>@<actor> grammar — refused even under --dry, untouched
+    git_repo('branch', 'feature/x')
+    _stub_agent(replace)
+    with ShouldRaise(
+        UserError(
+            "'feature/x' is not a valid goal name: no path separators — "
+            "goal names are single path segments, like 'feature-x' or 'pr-123'"
+        )
+    ):
+        adopt(
+            git_repo.path, tmpdir / 'worktrees', 'feature/x', 'proj@feature/x@agent', dry=Dry(True)
+        )
+    compare(Git(git_repo.path).branches(), expected=['feature/x', 'main'])
 
 
 def test_adopt_logs_the_refs_before_and_after(

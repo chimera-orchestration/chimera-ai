@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from subprocess import PIPE, run
+from subprocess import DEVNULL, PIPE, run
 
 from giterator import GitError
 from loguru import logger
@@ -26,6 +26,41 @@ are kebab-case, so a dash would blur the boundary (``my-goal-agent``). ``@`` is 
 only safe seam across every filesystem, shell, tmux and git GUI — it can't appear in
 a goal or actor slug, so ``rsplit(SEP, 1)`` always recovers the pair.
 """
+
+
+def _require_valid_name(name: str, kind: str, example: str, ref: str) -> str:
+    """``name`` when the naming grammar can hold it as a ``kind``; ``UserError`` otherwise."""
+    if SEP in name:
+        raise UserError(f'{name!r} is not a valid {kind} name: {SEP!r} separates goal from actor')
+    if '/' in name or '\\' in name:
+        raise UserError(
+            f'{name!r} is not a valid {kind} name: '
+            f'no path separators — {kind} names are single path segments, like {example}'
+        )
+    if run(('git', 'check-ref-format', ref), stdout=DEVNULL, stderr=DEVNULL).returncode:
+        raise UserError(f'{name!r} is not a valid {kind} name')
+    return name
+
+
+def require_valid_goal(name: str) -> str:
+    """``name`` when it can be a goal, returned for chaining; ``UserError`` otherwise.
+
+    The grammar (branch ``<goal>/<actor>``, worktree dir ``<goal>@<actor>``) can only hold a
+    single path segment — a ``/`` would nest (or, as ``..``, escape) the worktrees dir, and
+    ``@`` is the dir separator — that git accepts as a ref component (``git check-ref-format``
+    is the authority, so ``..``, whitespace, control characters etc. are its rules, not ours).
+    Every seam where a goal name *enters* the system (an explicit ``-g``, a new-goal
+    positional) must call this before the name reaches :func:`branch`/:func:`worktree_path`.
+    """
+    return _require_valid_name(name, 'goal', "'feature-x' or 'pr-123'", f'refs/heads/{name}/actor')
+
+
+def require_valid_actor(name: str) -> str:
+    """``name`` when it can be an actor, returned for chaining; ``UserError`` otherwise.
+
+    Same grammar and seam rule as :func:`require_valid_goal`, for the actor side of the pair.
+    """
+    return _require_valid_name(name, 'actor', "'agent' or 'reviewer'", f'refs/heads/goal/{name}')
 
 
 def branch(goal: str, actor: str) -> str:

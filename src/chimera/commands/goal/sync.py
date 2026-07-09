@@ -16,6 +16,7 @@ from chimera.worktrees import (
     checkout_of,
     goal_branch_actors,
     is_dirty,
+    require_valid_actor,
 )
 
 
@@ -174,16 +175,21 @@ def _apply(
 
 
 def _resolve_actors(git: Git, goal: str, mover: str | None, target: str | None) -> tuple[str, str]:
-    """Fill in whichever of ``mover``/``target`` was omitted (see :func:`sync`)."""
+    """Fill in whichever of ``mover``/``target`` was omitted (see :func:`sync`).
+
+    An explicit name is validated — the mover in particular may be *created*, and both land
+    in refs and the append-marker path; an inferred one already exists as a single branch
+    segment, so it holds by construction.
+    """
     match mover, target:
         case None, None:
             return HUMAN, AGENT
         case str() as m, str() as t:
-            return m, t
+            return require_valid_actor(m), require_valid_actor(t)
         case str() as m, None:
-            return m, _infer_other(git, goal, m, '--to')
+            return require_valid_actor(m), _infer_other(git, goal, m, '--to')
         case None, str() as t:
-            return _infer_other(git, goal, t, '--move'), t
+            return _infer_other(git, goal, t, '--move'), require_valid_actor(t)
 
 
 def _infer_other(git: Git, goal: str, given: str, missing_flag: str) -> str:

@@ -5,7 +5,14 @@ from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.dry import Dry
 from chimera.git import Git
-from chimera.worktrees import AGENT, HUMAN, branch, registered_worktrees, worktree_path
+from chimera.worktrees import (
+    AGENT,
+    HUMAN,
+    branch,
+    registered_worktrees,
+    require_valid_goal,
+    worktree_path,
+)
 
 
 def adopt(
@@ -34,6 +41,9 @@ def adopt(
     are logged before/after the change (see ``agent-docs/logging.md``): the ``before`` snapshot
     is captured prior to touching anything, so the record can restore what the rename moved.
     """
+    # the adopted branch *becomes* the goal name verbatim, so it must fit the goal grammar —
+    # a '/'-nested branch can't be adopted (and, before the Dry guard, --dry refuses it too)
+    require_valid_goal(goal)
     git = Git(repo)
     # the snapshot covers the branch being adopted (``<goal>``) and both actor branches, so the
     # same refs describe the state before adoption (the bare branch) and after (the pair);

@@ -187,6 +187,37 @@ class TestScopeFence:
             ),
         )
 
+    def test_goal_traversal_cannot_escape_the_fence(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        # the fence checks the resolved *project*, so a -g that path-escaped the project's
+        # worktrees dir would slip past it — name validation refuses before any path is built
+        _fenced_manager(tmpdir, replace)
+        bad = '../../other/worktrees/g'
+        message = (
+            f'{bad!r} is not a valid goal name: no path separators — '
+            "goal names are single path segments, like 'feature-x' or 'pr-123'"
+        )
+        command.run('agent', 'start', '-g', bad, '--dry').check(
+            output=f'Error: {message}',
+            return_code=1,
+            logging=action_logs(
+                'agent start',
+                'chimera.commands.agent.agent',
+                {
+                    'prompt': None,
+                    'goal': bad,
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': True,
+                },
+                error=f'UserError: {message}',
+            ),
+        )
+
     def test_cwd_inferred_cross_scope_refuses(
         self, tmpdir: TempDir, replace: Replacer, command: CliCommand
     ) -> None:

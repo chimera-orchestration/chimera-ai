@@ -5,9 +5,10 @@ from pathlib import Path
 
 from giterator import Git
 from giterator.testing import Repo
-from testfixtures import Replacer, TempDir, compare
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.agents.registry import AgentSpec
+from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.commands.agent import agent
 from chimera.commands.goal import start as goal_start
@@ -52,6 +53,23 @@ def test_start_dry_creates_nothing(tmpdir: TempDir, git_repo: Repo, replace: Rep
     assert not worktrees.exists()  # no worktree dir
     compare(Git(git_repo.path).branches(), expected=['main'])  # no branches
     compare(len(calls), expected=1)  # the launch call still flows (itself dry-routed)
+
+
+def test_start_refuses_a_traversal_goal_even_dry(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = tmpdir / 'worktrees'
+    calls = _stub_agent(replace)
+    # validation sits ahead of the Dry guard, so --dry can't preview an escaping path as fine
+    with ShouldRaise(
+        UserError(
+            "'../../x' is not a valid goal name: no path separators — "
+            "goal names are single path segments, like 'feature-x' or 'pr-123'"
+        )
+    ):
+        start(git_repo.path, worktrees, '../../x', 'proj@../../x@agent', dry=Dry(True))
+    assert not worktrees.exists()
+    compare(calls, expected=[])
 
 
 def test_start_creates_worktrees_then_launches_the_agent(
@@ -387,6 +405,38 @@ def test_goal_start_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
                 'dry': True,
                 'project': None,
             },
+        ),
+    )
+    assert not (project / 'worktrees').exists()  # nothing created
+    compare(Git(git_repo.path).branches(), expected=['main'])
+
+
+def test_goal_start_cli_dry_refuses_a_traversal_goal(
+    tmpdir: TempDir, git_repo: Repo, command: Command
+) -> None:
+    project = _project(tmpdir, git_repo)
+    message = (
+        "'../../x' is not a valid goal name: no path separators — "
+        "goal names are single path segments, like 'feature-x' or 'pr-123'"
+    )
+    command.run('goal', 'start', '../../x', '--dry').check(
+        output=f'Error: {message}',
+        return_code=1,
+        logging=action_logs(
+            'goal start',
+            'chimera.commands.goal.start.start',
+            {
+                'goal': '../../x',
+                'prompt': None,
+                'frm': None,
+                'offline': False,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': True,
+                'project': None,
+            },
+            error=f'UserError: {message}',
         ),
     )
     assert not (project / 'worktrees').exists()  # nothing created

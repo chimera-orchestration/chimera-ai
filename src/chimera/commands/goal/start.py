@@ -5,7 +5,7 @@ from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.commands.worktree.add import add
 from chimera.dry import Dry
-from chimera.worktrees import AGENT, worktree_path
+from chimera.worktrees import AGENT, require_valid_goal, worktree_path
 
 
 def start(
@@ -33,6 +33,7 @@ def start(
     ``context`` is the rendered launch-context file to inject; ``env`` the role stamp
     overlaid on the session's environment. Returns the agent worktree.
     """
+    require_valid_goal(goal)  # before the Dry guard, so --dry refuses a bad name too
     dry(add, repo, worktrees_root, goal=goal, frm=frm, fetch=fetch)
     agent_worktree = worktree_path(worktrees_root, goal, AGENT)
     agent(agent_worktree, name, prompt, extra, dangerous, spec, context, env, dry)

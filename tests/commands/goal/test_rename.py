@@ -230,6 +230,16 @@ class TestRefusals:
         with ShouldRaise(UserError("'bad..name' is not a valid goal name")):
             rename(git_repo.path, worktrees, 'g', 'bad..name')
 
+    def test_path_separator_in_new_name(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        worktrees = _goal(tmpdir, git_repo)
+        with ShouldRaise(
+            UserError(
+                "'a/b' is not a valid goal name: no path separators — "
+                "goal names are single path segments, like 'feature-x' or 'pr-123'"
+            )
+        ):
+            rename(git_repo.path, worktrees, 'g', 'a/b')
+
     def test_bare_branch_blocks_the_new_namespace(self, tmpdir: TempDir, git_repo: Repo) -> None:
         worktrees = _goal(tmpdir, git_repo)
         git_repo('branch', 'h')
