@@ -104,7 +104,9 @@ side conversation — inside the goal worktree, cwd re-pins the goal, so `-p` ca
 ## Errands: one-shot research in a foreign project
 
 `ch errand <target-project> "<prompt>"` dispatches a one-shot, headless, **read-only** agent
-into another project and delivers its report. The target is a required positional (it
+into another project and delivers its report. It is deliberately not the **Task** concept:
+a Task is tracked and subordinate to a goal, and spending that noun here would leave the
+real feature homeless — an errand is untracked and self-sweeping. The target is a required positional (it
 tab-completes like `-p` but is deliberately not `-p`): it names the project dispatched *into*,
 never who the session acts as, so it resolves through a dedicated single-caller helper
 (`_foreign`, its one-caller status pinned by a test) the scope fence never guards — an
