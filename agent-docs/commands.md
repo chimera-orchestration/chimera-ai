@@ -173,7 +173,9 @@ names the project dispatched *into*, never who the session acts as, so it resolv
 dedicated helper (`__main__._foreign`) the fence never guards, whose single-caller status a
 test pins (`test_foreign_has_exactly_one_caller`). `-p` keeps its fenced meaning everywhere:
 an inherited `-p` reaching errand is refused, not reinterpreted. The verb's own narrow
-semantics — one-shot, read-only (`Agent.run(readonly=True)`) — are the containment.
+semantics — one-shot, the `Agent.run(readonly=True)` tool wall (a bounded git-flag leak
+accepted; see workspace-layout.md's Errands), the ephemeral worktree and sweep — are the
+containment.
 
 ## Destructive commands preview with --dry
 

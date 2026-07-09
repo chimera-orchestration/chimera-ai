@@ -114,9 +114,12 @@ up front. The lifecycle is `ch review`'s pattern compressed to one synchronous c
 worktrees; branch + worktree via the goal machinery, refs on the `errand: refs` log line),
 the target's rendered context and agent role stamp, then a headless blocking run
 (`Agent.run`) on a guardrailed prompt. The guardrail is affirmative — identity plus "your
-final message is the report, captured verbatim" — never a prohibition list: writes are
-structurally impossible behind the harness's read-only tool wall (`readonly=True`; claude
-maps it to `--allowedTools` — Read/Grep/Glob plus read-only git Bash). No daemon, no
+final message is the report, captured verbatim" — never a prohibition list: the harness's
+read-only tool wall (`readonly=True`; claude maps it to `--allowedTools` — Read/Grep/Glob
+plus curated git Bash) blocks Write/Edit and general Bash. Not watertight: claude's
+allowlist prefix-matches, so the git commands admit git's own writing flags (e.g.
+`--output`) — an accepted, bounded residual; the ephemeral worktree, the sweep and the
+caller's own audit of the report are the containment. No daemon, no
 polling: background the `ch errand` invocation itself for concurrency, or bound it with
 `--timeout <seconds>`.
 

@@ -25,8 +25,9 @@ from chimera.git import Git
 from chimera.worktrees import AGENT, branch, goals, session_name, worktree_path
 
 # Prepended to every errand prompt. Affirmative — identity and the report contract,
-# never a prohibition list: what an errand must not do is enforced by the read-only
-# harness wall (``Agent.run(readonly=True)``), not prose.
+# never a prohibition list: what an errand must not do is held by the harness's read-only
+# tool wall (``Agent.run(readonly=True)`` — a bounded git-flag leak accepted, see
+# ``READONLY_TOOLS``) backed by the ephemeral worktree and sweep, not prose.
 GUARDRAIL = (
     'ERRAND: you are a one-shot research agent, dispatched into this repository to '
     'answer the request below. Your final message must be the complete report in '

@@ -368,7 +368,8 @@ def _foreign(ctx: typer.Context, name: str) -> Project:
 
     The scope fence guards the "who I act as" axis; an errand's positional names a
     *target* whose whole point is being foreign, so it resolves unfenced — an axis,
-    not a hole: the verb's narrow semantics (one-shot, read-only) are the containment.
+    not a hole: the verb's narrow semantics (one-shot, the read-only tool wall and
+    the ephemeral-worktree sweep) are the containment.
     An inherited ``-p`` is refused rather than ignored — silently acting on the
     positional while a flag said otherwise would be worse than either behaviour.
     Exactly one caller — the errand command; a test pins that, so a second caller

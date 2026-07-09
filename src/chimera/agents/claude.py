@@ -22,8 +22,12 @@ ALLOW_BYPASS = '--allow-dangerously-skip-permissions'
 _BYPASS_FLAGS = frozenset({ALLOW_BYPASS, '--dangerously-skip-permissions'})
 
 # Agent.run's readonly capability hint in claude's own permission grammar: file inspection
-# plus read-only git archaeology, nothing else — writes stay structurally impossible.
-# Deliberately conservative: a tool not listed is simply unavailable to the run.
+# plus git archaeology, nothing else — the wall blocks Write/Edit and general Bash outright.
+# Not watertight, though: claude's Bash allowlist is prefix-matching, so these curated git
+# commands admit git's own flags, including ones that write (e.g. `git log --output=<path>`)
+# — an accepted, bounded residual; the ephemeral worktree, the sweep and the caller's own
+# audit of the report are the containment. Deliberately conservative otherwise: a tool not
+# listed is simply unavailable to the run.
 READONLY_TOOLS = (
     'Read',
     'Grep',
