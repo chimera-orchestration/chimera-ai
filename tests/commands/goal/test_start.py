@@ -325,12 +325,15 @@ def test_goal_start_cli_dry_role_leads_the_context(
     ws = tmpdir.makedir('lycia')
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
     tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    # the project's own roles/agent/ layer reaches the launched agent's context
+    tmpdir.write(ws / 'proj' / 'roles' / 'agent' / 'persona.md', 'Guard the reactor.\n')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     os.chdir(ws / 'proj')
     worktree = Path.cwd() / 'worktrees' / 'g@agent'  # cwd resolves symlinks like the wrapper
     text = (
         '# Role: agent\n\nYou are the agent for goal g on proj; '
-        'this worktree and branch are your entire workspace.'
+        'this worktree and branch are your entire workspace.\n\n'
+        'Guard the reactor.'
     )
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'

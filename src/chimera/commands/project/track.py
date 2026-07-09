@@ -4,7 +4,7 @@ import yaml
 
 from chimera.config import ProjectConfig
 
-_PROJECT_DIRS = ('knowledge', 'prompts', 'principles', 'processes')
+_PROJECT_DIRS = ('knowledge', 'prompts', 'principles', 'processes', 'roles')
 
 
 def track(workspace: Path, repo: Path) -> Path:

@@ -26,7 +26,7 @@ def test_new_creates_a_bare_repo_project(tmpdir: TempDir) -> None:
     compare(git.branches(), expected=['main'])
     compare(tmpdir.parse('lycia/proj/config.yaml'), expected={'kind': 'project', 'repo': str(repo)})
     tmpdir.compare(
-        ['config.yaml', 'knowledge', 'principles', 'processes', 'prompts', 'repo'],
+        ['config.yaml', 'knowledge', 'principles', 'processes', 'prompts', 'repo', 'roles'],
         path='lycia/proj',
         recursive=False,
     )

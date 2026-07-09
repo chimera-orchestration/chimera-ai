@@ -40,16 +40,23 @@ def render(workspace: Path | None, project: Project | None) -> str:
     return '\n\n'.join(sections)
 
 
-def role_context(workspace: Path, role: str, intro: str) -> str:
+def role_context(workspace: Path, project: Project | None, role: str, intro: str) -> str:
     """The role section of a launch context: who the session is, then the role's directives.
 
     The caller owns the identity sentence — ``intro`` states affirmatively what the
     session *is* (never what it must not do). This function owns the ``# Role:`` header
-    and the directives: the workspace's ``roles/<role>/*.md``, inlined whole like
-    principles (a role must know itself before anything else, so this section leads the
-    render). An absent directives dir still introduces.
+    and the directives, inlined whole like principles (a role must know itself before
+    anything else, so this section leads the render) and layered like them too: the
+    workspace's ``roles/<role>/*.md`` first (the generic layer, reaching every project's
+    instance of the role), then the pinned project's (its specific persona, so it can
+    build on what the generic layer said). A scope with no project — the captain —
+    has only the workspace layer; an absent dir on either level simply drops out, and
+    no directives at all still introduces.
     """
-    return '\n\n'.join([f'# Role: {role}', intro, *_contents(workspace / 'roles' / role)])
+    directives = _contents(workspace / 'roles' / role) + _contents(
+        _dir_of(project, f'roles/{role}')
+    )
+    return '\n\n'.join([f'# Role: {role}', intro, *directives])
 
 
 def materialize(workspace: Path, name: str, text: str) -> Path | None:

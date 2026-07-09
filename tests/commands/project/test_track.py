@@ -11,7 +11,8 @@ def test_track_creates_project_layout(tmpdir: TempDir) -> None:
     repo = tmpdir.makedir('myrepo')
     compare(track(workspace, repo), expected=workspace / 'myrepo')
     tmpdir.compare(
-        ['config.yaml', 'knowledge/', 'principles/', 'processes/', 'prompts/'], path='lycia/myrepo'
+        ['config.yaml', 'knowledge/', 'principles/', 'processes/', 'prompts/', 'roles/'],
+        path='lycia/myrepo',
     )
     compare(
         tmpdir.parse('lycia/myrepo/config.yaml'),

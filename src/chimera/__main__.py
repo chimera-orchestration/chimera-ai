@@ -416,7 +416,9 @@ def _context_file(project: Project | None, name: str, role: str, intro: str) -> 
     except NotInWorkspaceError:
         return None
     text = '\n\n'.join(
-        part for part in (role_context(workspace, role, intro), render(workspace, project)) if part
+        part
+        for part in (role_context(workspace, project, role, intro), render(workspace, project))
+        if part
     )
     return materialize(workspace, name, text)
 
@@ -860,7 +862,7 @@ def chat(
     text = '\n\n'.join(
         part
         for part in (
-            role_context(scope.workspace, role, intro),
+            role_context(scope.workspace, scope.project, role, intro),
             render(scope.workspace, scope.project),
         )
         if part
