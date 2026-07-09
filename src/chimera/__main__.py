@@ -70,6 +70,7 @@ from chimera.context import (
     resolve_workspace,
 )
 from chimera.dry import Dry
+from chimera.git import completing
 from chimera.help import command_index, render_json, render_text
 from chimera.prime import prime as _prime
 from chimera.prime import resolve_role
@@ -1255,6 +1256,10 @@ def _strip_to_role(command: Command, allowed: frozenset[str], path: str = '') ->
 def main() -> None:
     role = session_role()
     if role is not None and role != ROLE_CAPTAIN and role not in ROLE_COMMANDS:
+        if completing():
+            # a completer must never raise or print — a stale role stamp in a shell
+            # would otherwise break every TAB; fail closed and complete nothing
+            raise SystemExit(0)
         # fail hard and early: never a silent full tree, never a silently narrowed one
         typer.echo(
             f'Error: unknown CHIMERA_ROLE {role!r} '

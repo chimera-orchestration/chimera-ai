@@ -37,6 +37,14 @@ HTTP_TIMEOUTS = {'GIT_HTTP_LOW_SPEED_LIMIT': '1024', 'GIT_HTTP_LOW_SPEED_TIME': 
 _COMPLETION_VARS = ('_CH_COMPLETE', '_CHIMERA_COMPLETE')
 
 
+def completing() -> bool:
+    """True while Click's shell-completion dispatch is driving this process (its callback
+    env var is set). The one detection every completion-aware site shares: the DEBUG trace
+    below goes quiet under it, and ``__main__.main`` swaps its unknown-role failure for a
+    silent empty completion — a completer must never raise or print."""
+    return any(var in os.environ for var in _COMPLETION_VARS)
+
+
 def _env(base: Mapping[str, str], caller: dict[str, str] | None) -> dict[str, str]:
     """``base`` (the process environment) plus the timeout defaults it doesn't already set,
     with any ``caller`` overrides merged last."""
@@ -67,7 +75,7 @@ class Git(GiteratorGit):
     def __call__(
         self, *command: str, env: dict[str, str] | None = None, cwd: Path | None = None
     ) -> str:
-        if not any(var in os.environ for var in _COMPLETION_VARS):
+        if not completing():
             logger.bind(git_cwd=str(cwd or self.path)).debug(shlex.join(('git', *command)))
         return super().__call__(*command, env=_env(os.environ, env), cwd=cwd or self.path)
 

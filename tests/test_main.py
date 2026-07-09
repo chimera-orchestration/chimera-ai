@@ -37,6 +37,14 @@ def _argv(replace: Replacer, *argv: str) -> None:
     replace(target=sys.argv, container=sys, name='argv', replacement=['ch', *argv])
 
 
+def _completion_request(replace: Replacer, line: str = 'ch ') -> None:
+    """A bash TAB against ``line``: Click dispatches completion instead of running a command."""
+    replace.in_environ('_CH_COMPLETE', 'complete_bash')
+    replace.in_environ('COMP_WORDS', line)
+    replace.in_environ('COMP_CWORD', '1')
+    _argv(replace)
+
+
 class TestStripRestrictedOptions:
     def test_removes_force_from_worktree_rm(self) -> None:
         command = get_command(app)
@@ -228,6 +236,31 @@ class TestMainRole:
         compare(
             capsys.readouterr().err,
             expected="Error: unknown CHIMERA_ROLE 'bogus' (known: captain, manager, agent)\n",
+        )
+
+    def test_unknown_role_completes_nothing_silently(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # a stale role stamp must not break every TAB — fail closed, never loud
+        replace.in_environ('CHIMERA_ROLE', 'bogus')
+        _completion_request(replace)
+        with ShouldRaise(SystemExit(0)):
+            main()
+        captured = capsys.readouterr()
+        compare(captured.out, expected='')
+        compare(captured.err, expected='')
+
+    def test_listed_role_completes_within_its_stripped_tree(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CHIMERA_ROLE', ROLE_MANAGER)
+        _completion_request(replace)
+        with ShouldRaise(SystemExit(0)):
+            main()
+        compare(
+            set(capsys.readouterr().out.splitlines()),
+            # the manager's pruned root, plus ls's surviving synonym — nothing else
+            expected={'help', 'prime', 'ls', 'list', 'review', 'goal', 'agent'},
         )
 
     def test_captain_keeps_the_full_tree_with_options_stripped(

@@ -137,7 +137,11 @@ prohibitions advertise targets. The captain has no `ROLE_COMMANDS` entry — ful
 option strip still applies: any role stamp marks an AI session); an **unknown role fails hard
 and early** — `ch`
 refuses to run at all, before any command parses — never a silent full tree, never a silently
-narrowed one. Honesty: env-based identity is a fence, not a wall (unset-able, like
+narrowed one. One carve-out: Click's completion dispatch (`chimera.git.completing`, the same
+detection that mutes the git DEBUG trace) instead completes *nothing*, silently, exit 0 — a
+completer must never raise or print, and a stale role stamp in a shell would otherwise break
+every TAB; fail-closed keeps both rules standing (loud for invocations, silent for completers).
+Honesty: env-based identity is a fence, not a wall (unset-able, like
 `CLAUDECODE`) — the wall is the harness permission layer; the fence's real value is not
 advertising footguns.
 
