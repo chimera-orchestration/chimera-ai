@@ -4,6 +4,7 @@ from hashlib import sha256
 from pathlib import Path
 from secrets import token_hex
 
+import pytest
 from giterator.testing import Repo
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
@@ -11,7 +12,9 @@ import chimera.__main__ as main
 import chimera.commands.errand as errand_mod
 from chimera.agents.claude import Claude
 from chimera.agents.registry import AgentSpec
+from chimera.commands.agent import live
 from chimera.commands.errand import GUARDRAIL, ErrandResult, _fresh_goal, errand
+from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.rm import remove
 from chimera.config import UserError
 from chimera.dry import Dry
@@ -21,6 +24,13 @@ from tests.cli import Command, action_logs, general_capture
 REFUSED_BYPASS = (
     '--dangerously-skip-permissions: not available when chimera is driven by an AI agent'
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_agents(replace: Replacer) -> None:
+    # the sweep's liveness guard must never consult a real claude — hermetic with or
+    # without the binary installed (the same pattern as tests/commands/project/test_rm.py)
+    replace.in_module(live, lambda worktree: [], module=worktree_rm)
 
 
 def _stub_run(
