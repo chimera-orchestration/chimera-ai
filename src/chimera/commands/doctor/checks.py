@@ -123,6 +123,43 @@ class WorkspaceDirsCheck:
             yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
+class CaptainCheck:
+    """The workspace names its captain, and roles/captain/ carries directives for it.
+
+    Naming a captain is schema completion, like ``WorkspaceConfigCheck``'s ``kind:`` —
+    ``--fix`` writes the literal default (``captain: captain``) onto a config.yaml that
+    predates the captain feature (creating one if there's none yet, same as that
+    check's legacy-root case); it never invents a unique persona name, that stays a
+    human's call. Writing its directives is a separate, unfixable choice: like
+    ``ProjectConfigCheck``'s ambiguous-kind case, an empty ``roles/captain/`` is only
+    ever reported — and only once a captain is actually named, so an unnamed captain's
+    empty directives aren't also flagged as noise.
+    """
+
+    name = 'captain'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        raw = read_raw(workspace)
+        if raw is None or 'captain' not in raw:
+            message = (
+                f'{workspace}/config.yaml has no captain: — '
+                'the workspace has never named its captain persona'
+            )
+            fixing = fix and not exclude.matches(self.name, message)
+            if fixing:
+                write_config(workspace, {**(raw or {}), 'captain': 'captain'})
+            yield Finding(self.name, message, resolved=fixing, fixable=True)
+            return
+        directives = workspace / 'roles' / 'captain'
+        if not directives.is_dir() or not any(directives.rglob('*.md')):
+            yield Finding(
+                self.name,
+                f'{directives} has no *.md directive files for the captain role',
+                resolved=False,
+                fixable=False,
+            )
+
+
 class ProjectConfigCheck:
     """Each project's config.yaml carries kind: project."""
 
@@ -765,6 +802,7 @@ CHECKS: tuple[Check, ...] = (
     WorkspaceConfigCheck(),
     GitignoreCheck(),
     WorkspaceDirsCheck(),
+    CaptainCheck(),
     ProjectConfigCheck(),
     StaleHumanWorktreeCheck(),
     InertBranchCheck(),

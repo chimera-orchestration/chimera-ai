@@ -10,6 +10,7 @@ from chimera.commands.doctor import checks as doctor_checks
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
     WorkspaceDirsCheck,
+    CaptainCheck,
     ChimeraUpToDateCheck,
     GitignoreCheck,
     InertBranchCheck,
@@ -312,6 +313,78 @@ class TestWorkspaceDirs:
             ],
         )
         assert not (ws / 'roles').exists()
+
+
+def _no_captain(ws, *, resolved: bool = False) -> Finding:
+    return Finding(
+        'captain',
+        f'{ws}/config.yaml has no captain: — the workspace has never named its captain persona',
+        resolved=resolved,
+        fixable=True,
+    )
+
+
+def _no_directives(ws) -> Finding:
+    return Finding(
+        'captain',
+        f'{ws / "roles" / "captain"} has no *.md directive files for the captain role',
+        resolved=False,
+        fixable=False,
+    )
+
+
+class TestCaptain:
+    def test_missing_config_reported_without_writing(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        compare(_run(CaptainCheck(), ws), expected=[_no_captain(ws)])
+        assert not (ws / 'config.yaml').exists()
+
+    def test_missing_config_fixed(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        compare(_run(CaptainCheck(), ws, fix=True), expected=[_no_captain(ws, resolved=True)])
+        compare(_config(ws), expected={'captain': 'captain'})
+
+    def test_missing_key_keeps_other_keys(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+        compare(_run(CaptainCheck(), ws, fix=True), expected=[_no_captain(ws, resolved=True)])
+        compare(_config(ws), expected={'kind': 'workspace', 'captain': 'captain'})
+
+    def test_excluded_fix_not_written(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        compare(
+            _run(CaptainCheck(), ws, fix=True, exclude=Exclusions(('captain',))),
+            expected=[_no_captain(ws)],
+        )
+        assert not (ws / 'config.yaml').exists()
+
+    def test_named_captain_with_no_directive_dir_reported(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
+        compare(_run(CaptainCheck(), ws, fix=True), expected=[_no_directives(ws)])  # unfixable
+        assert not (ws / 'roles' / 'captain').exists()
+
+    def test_named_captain_with_empty_directive_dir_reported(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
+        (ws / 'roles' / 'captain').mkdir()
+        compare(_run(CaptainCheck(), ws), expected=[_no_directives(ws)])
+
+    def test_named_captain_with_directives_is_silent(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
+        directives = ws / 'roles' / 'captain'
+        directives.mkdir()
+        (directives / 'directives.md').write_text('# Pegasus\n')
+        compare(_run(CaptainCheck(), ws), expected=[])
+
+    def test_dict_form_captain_config_counts_as_named(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump(
+            'lycia/config.yaml',
+            {'kind': 'workspace', 'captain': {'name': 'pegasus', 'model': 'opus'}},
+        )
+        compare(_run(CaptainCheck(), ws), expected=[_no_directives(ws)])
 
 
 class TestProjectConfig:

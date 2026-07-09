@@ -75,6 +75,16 @@ def _project(tmpdir, ws, *, name='proj', config=None):
     return ws / name
 
 
+def _captain(tmpdir: TempDir, ws: Path, name: str = 'pegasus') -> None:
+    """Name ws's captain and give it a directive file — keeps CaptainCheck silent for
+    tests whose focus is elsewhere."""
+    existing = tmpdir.parse(ws / 'config.yaml') if (ws / 'config.yaml').exists() else {}
+    tmpdir.dump(ws / 'config.yaml', {**existing, 'captain': name})
+    directives = ws / 'roles' / 'captain'
+    directives.mkdir(exist_ok=True)
+    (directives / 'directives.md').write_text(f'# {name}\n')
+
+
 def test_find_workspace_root_at_a_marked_root(tmpdir: TempDir) -> None:
     root = tmpdir.makedir('ws')
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
@@ -216,6 +226,13 @@ def _env_finding(workspace: Path) -> dict[str, object]:
     return _finding_line('workspace-env', _env_not_set_message(workspace), fixable=False)
 
 
+def _no_captain_message(workspace: Path) -> str:
+    return (
+        f'{workspace}/config.yaml has no captain: — '
+        'the workspace has never named its captain persona'
+    )
+
+
 def _doctor_logs(
     path: str | None,
     *,
@@ -253,11 +270,12 @@ def _doctor_logs(
 def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _ws(tmpdir)
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    _captain(tmpdir, ws)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor').check(  # cwd is the tmpdir, not ws, so the note appears
         output=(
             f'note: resolved workspace root: {ws.resolve()}\n'
-            'All checks passed! (ch doctor -v lists the 13 checks run)'
+            'All checks passed! (ch doctor -v lists the 14 checks run)'
         ),
         logging=_doctor_logs(None, fix=False),
     )
@@ -268,6 +286,7 @@ def test_doctor_cli_verbose_lists_every_check(
 ) -> None:
     ws = _ws(tmpdir)
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    _captain(tmpdir, ws)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor', '--verbose').check(
         output='\n'.join(
@@ -276,6 +295,7 @@ def test_doctor_cli_verbose_lists_every_check(
                 '[workspace-config] (ok)',
                 '[gitignore] (ok)',
                 '[workspace-dirs] (ok)',
+                '[captain] (ok)',
                 '[project-config] (ok)',
                 '[human-worktrees] (ok)',
                 '[inert-branches] (ok)',
@@ -298,6 +318,7 @@ def test_doctor_cli_verbose_notes_the_chimera_checkout(
 ) -> None:
     ws = _ws(tmpdir)
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    _captain(tmpdir, ws)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     # the autouse fixture above already patched chimera_repo via this same Replacer,
     # so its live attribute is no longer the original function in_module keys off of —
@@ -316,6 +337,7 @@ def test_doctor_cli_verbose_notes_the_chimera_checkout(
                 '[workspace-config] (ok)',
                 '[gitignore] (ok)',
                 '[workspace-dirs] (ok)',
+                '[captain] (ok)',
                 '[project-config] (ok)',
                 '[human-worktrees] (ok)',
                 '[inert-branches] (ok)',
@@ -338,10 +360,11 @@ def test_doctor_cli_flags_unset_workspace_env(
 ) -> None:
     ws = _ws(tmpdir)
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    _captain(tmpdir, ws)
     replace.in_environ('CHIMERA_WORKSPACE', not_there)
     os.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
     command.run('doctor').check(
-        output=_env_not_set(ws.resolve()) + '\n(+12 checks passed — ch doctor -v to list)',
+        output=_env_not_set(ws.resolve()) + '\n(+13 checks passed — ch doctor -v to list)',
         return_code=1,
         logging=_doctor_logs(
             None, fix=False, findings={'workspace-env': [_env_finding(ws.resolve())]}
@@ -350,12 +373,13 @@ def test_doctor_cli_flags_unset_workspace_env(
 
 
 def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command) -> None:
-    ws = _ws(tmpdir)  # missing root config.yaml → a fixable finding
+    ws = _ws(tmpdir)  # missing root config.yaml → workspace-config and captain both fire
     os.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
     command.run('doctor').check(
         output='\n'.join(
             [
                 f'[workspace-config] (would fix — run with --fix) {ws.resolve()}/config.yaml missing',
+                f'[captain] (would fix — run with --fix) {_no_captain_message(ws.resolve())}',
                 _env_not_set(ws.resolve()),
                 '(+11 checks passed — ch doctor -v to list)',
             ]
@@ -369,6 +393,9 @@ def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command)
                     _finding_line(
                         'workspace-config', f'{ws.resolve()}/config.yaml missing', fixable=True
                     )
+                ],
+                'captain': [
+                    _finding_line('captain', _no_captain_message(ws.resolve()), fixable=True)
                 ],
                 'workspace-env': [_env_finding(ws.resolve())],
             },
@@ -385,6 +412,7 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
     command.run('doctor', str(ws), '--fix').check(
         output=(
             f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing\n'
+            f'[captain] (fixed) {_no_captain_message(ws.resolve())}\n'
             '(+12 checks passed — ch doctor -v to list)'
         ),
         logging=_doctor_logs(
@@ -398,11 +426,16 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
                         fixable=True,
                         resolved=True,
                     )
-                ]
+                ],
+                'captain': [
+                    _finding_line(
+                        'captain', _no_captain_message(ws.resolve()), fixable=True, resolved=True
+                    )
+                ],
             },
         ),
     )
-    compare(tmpdir.parse('lycia/config.yaml'), expected={'kind': 'workspace'})
+    compare(tmpdir.parse('lycia/config.yaml'), expected={'kind': 'workspace', 'captain': 'captain'})
 
 
 def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Command) -> None:
@@ -413,6 +446,7 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Co
             [
                 f'[workspace-config] (needs attention) {ws.resolve()}/config.yaml '
                 'has kind: nonsense at the workspace root',
+                f'[captain] (fixed) {_no_captain_message(ws.resolve())}',
                 _env_not_set(ws.resolve()),
                 '(+11 checks passed — ch doctor -v to list)',
             ]
@@ -429,10 +463,17 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Co
                         fixable=False,
                     )
                 ],
+                'captain': [
+                    _finding_line(
+                        'captain', _no_captain_message(ws.resolve()), fixable=True, resolved=True
+                    )
+                ],
                 'workspace-env': [_env_finding(ws.resolve())],
             },
         ),
     )
+    # captain is fixable independent of the invalid kind — still grows the config
+    compare(tmpdir.parse('lycia/config.yaml'), expected={'kind': 'nonsense', 'captain': 'captain'})
 
 
 def test_doctor_cli_check_runs_only_the_named_checks(
@@ -522,11 +563,12 @@ def test_doctor_cli_exclude_mutes_a_finding(
 ) -> None:
     ws = _ws(tmpdir)
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    _captain(tmpdir, ws)
     replace.in_environ('CHIMERA_WORKSPACE', not_there)  # workspace-env would flag and exit 1
     os.chdir(ws)
     dropped = _excluded_log('workspace-env', _env_not_set_message(ws.resolve()))
     command.run('doctor', '-x', 'workspace-env').check(
-        output=('(+13 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
+        output=('(+14 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
         logging=_doctor_logs(
             None, fix=False, exclude=('workspace-env',), excluded={'workspace-env': [dropped]}
         ),
@@ -536,19 +578,20 @@ def test_doctor_cli_exclude_mutes_a_finding(
 def test_doctor_cli_exclude_prevents_the_fix(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
-    ws = _ws(tmpdir)  # missing root config.yaml → a fixable workspace-config finding
+    ws = _ws(tmpdir)  # missing root config.yaml → fixable workspace-config and captain findings
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    dropped = _excluded_log('workspace-config', f'{ws.resolve()}/config.yaml missing')
-    command.run('doctor', str(ws), '--fix', '-x', 'workspace-config').check(
-        output=('(+13 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
+    dropped_config = _excluded_log('workspace-config', f'{ws.resolve()}/config.yaml missing')
+    dropped_captain = _excluded_log('captain', _no_captain_message(ws.resolve()))
+    command.run('doctor', str(ws), '--fix', '-x', 'workspace-config', '-x', 'captain').check(
+        output=('(+14 checks passed — ch doctor -v to list)\n(2 findings excluded by -x)'),
         logging=_doctor_logs(
             str(ws),
             fix=True,
-            exclude=('workspace-config',),
-            excluded={'workspace-config': [dropped]},
+            exclude=('workspace-config', 'captain'),
+            excluded={'workspace-config': [dropped_config], 'captain': [dropped_captain]},
         ),
     )
-    assert not (ws / 'config.yaml').exists()  # excluded, so --fix never wrote it
+    assert not (ws / 'config.yaml').exists()  # both excluded, so --fix never wrote it
 
 
 def test_doctor_cli_exclude_unmatched_warns(
@@ -556,11 +599,12 @@ def test_doctor_cli_exclude_unmatched_warns(
 ) -> None:
     ws = _ws(tmpdir)
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    _captain(tmpdir, ws)
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor', str(ws), '-x', 'bogus').check(
         output=(
             "warning: -x 'bogus' matched nothing\n"
-            'All checks passed! (ch doctor -v lists the 13 checks run)'
+            'All checks passed! (ch doctor -v lists the 14 checks run)'
         ),
         logging=_doctor_logs(str(ws), fix=False, exclude=('bogus',)),
     )
@@ -571,6 +615,7 @@ def test_doctor_cli_navigates_from_a_project(
 ) -> None:
     ws = _ws(tmpdir)
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    _captain(tmpdir, ws)
     _project(tmpdir, ws, name='chimera')  # legacy repo:-only config
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     command.run('doctor', '--fix').check(  # cwd is the tmpdir, not ws, so the note appears
@@ -578,7 +623,7 @@ def test_doctor_cli_navigates_from_a_project(
             [
                 f'note: resolved workspace root: {ws.resolve()}',
                 f'[project-config] (fixed) {ws.resolve()}/chimera/config.yaml missing kind: project',
-                '(+12 checks passed — ch doctor -v to list)',
+                '(+13 checks passed — ch doctor -v to list)',
             ]
         ),
         logging=_doctor_logs(
