@@ -34,6 +34,7 @@ The loop:
   `ch goal adopt <branch>` brings an existing branch under management.
 - `ch agent resume -g <goal>` — talk to a goal's agent.
 - `ch review <PR>` — stand up a pre-human review of a pull request.
+- `ch errand <project> "<question>"` — fetch a one-shot read-only report from another project.
 - `ch goal sync <goal>` — bring the human branch up to the agent's work.
 - `ch goal finish <goal>` — sweep a done goal's branches and worktrees.
 
@@ -47,6 +48,9 @@ workspace.
 Work the goal here, committing as you go, so the branch always tells the story of the
 work. The branch is also how your work is picked up: your manager integrates and reviews
 it from their side — none of that happens from here.
+
+Facts from another project are an errand away: `ch errand <project> "<question>"` runs a
+one-shot read-only agent there and returns its report.
 
 `ch help` lists what you can run."""
 

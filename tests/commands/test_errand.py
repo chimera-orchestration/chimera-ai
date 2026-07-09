@@ -558,3 +558,48 @@ def test_foreign_has_exactly_one_caller() -> None:
     # widen the exemption into a general escape hatch (see _foreign's docstring)
     source = Path(str(main.__file__)).read_text()
     compare(source.count('_foreign('), expected=2)  # its def and the single call site
+
+
+def _fenced(tmpdir: TempDir, git_repo: Repo, replace: Replacer, role: str, scope: str) -> Path:
+    """Two projects, the session role-stamped and fenced to 'proj'; cwd inside it."""
+    ws = _workspace_project(tmpdir, git_repo, replace)
+    tmpdir.dump('lycia/other/config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    replace.in_environ('CHIMERA_ROLE', role)
+    replace.in_environ('CHIMERA_ROLE_SCOPE', scope)
+    os.chdir(ws / 'proj')
+    return ws
+
+
+class TestErrandFence:
+    """The target axis is unfenced while the "who I act as" axis stays fenced."""
+
+    def _dispatches_but_cannot_act(self, replace: Replacer, command: Command) -> None:
+        calls = _stub_errand(replace)
+        # dispatching INTO the other project proceeds…
+        compare(command.run('errand', 'other', 'q', '--dry').return_code, expected=0)
+        [call] = calls
+        compare(call['target'], expected='other')
+        compare(call['dry'], expected=Dry(True))
+        # …while acting AS it still refuses at the fence, from the very same session
+        command.run('worktree', 'ls', '-p', 'other').check(
+            output='Error: scoped to proj; ask the captain',
+            return_code=1,
+            logging=action_logs(
+                'worktree ls',
+                'chimera.commands.worktree.ls.ls',
+                {'project': 'other'},
+                error='CrossScopeError: scoped to proj; ask the captain',
+            ),
+        )
+
+    def test_manager_dispatches_across_the_fence(
+        self, tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+    ) -> None:
+        _fenced(tmpdir, git_repo, replace, 'manager', 'proj')
+        self._dispatches_but_cannot_act(replace, command)
+
+    def test_agent_dispatches_across_the_fence(
+        self, tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+    ) -> None:
+        _fenced(tmpdir, git_repo, replace, 'agent', 'proj@g')
+        self._dispatches_but_cannot_act(replace, command)

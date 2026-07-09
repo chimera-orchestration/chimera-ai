@@ -133,7 +133,10 @@ set is deleted from its group's `commands` dict, a group emptied by that is dele
 absent from parsing, `--help`, `ch help` and completion alike, and a synonym dies with its
 canonical target (`alias_group` resolves through the pruned dict). *Strip, don't admonish*:
 anything needing a "must not" in prose is instead absent from the session's world — written
-prohibitions advertise targets. The captain has no `ROLE_COMMANDS` entry — full tree (the
+prohibitions advertise targets. `errand` rides in **both** the manager's and the agent's
+allowlists — cross-project *reading* is knowledge, not capability (the same rule that leaves
+listers unfenced), and its target axis carries its own containment (below). The captain has
+no `ROLE_COMMANDS` entry — full tree (the
 option strip still applies: any role stamp marks an AI session); an **unknown role fails hard
 and early** — `ch`
 refuses to run at all, before any command parses — never a silent full tree, never a silently
@@ -164,6 +167,13 @@ any path or ref is built — and `chat -g` is stripped for managers
 anyway — a decision, not an accident. The refusal is `scoped to <project>; ask the captain`
 (a `UserError`, exit 1): *signpost depth, never privilege* — it states identity and
 escalates, never narrating the prevented operation or a flag that would permit it.
+
+`ch errand`'s *target* positional is the one deliberate exemption — an axis, not a hole: it
+names the project dispatched *into*, never who the session acts as, so it resolves through a
+dedicated helper (`__main__._foreign`) the fence never guards, whose single-caller status a
+test pins (`test_foreign_has_exactly_one_caller`). `-p` keeps its fenced meaning everywhere:
+an inherited `-p` reaching errand is refused, not reinterpreted. The verb's own narrow
+semantics — one-shot, read-only (`Agent.run(readonly=True)`) — are the containment.
 
 ## Destructive commands preview with --dry
 

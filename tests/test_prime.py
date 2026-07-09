@@ -69,9 +69,10 @@ class TestCitationsPinToTheRoleTree:
     def test_agent_citations_resolve_in_its_stripped_tree(self) -> None:
         _assert_citations_resolve(ROLE_AGENT)
 
-    def test_agent_cites_only_help(self) -> None:
-        # no orchestration commands: being managed is described, never commanded
-        compare(_citations(prime(ROLE_AGENT)), expected={('help',)})
+    def test_agent_cites_only_help_and_errand(self) -> None:
+        # no orchestration commands — being managed is described, never commanded;
+        # errand is the one verb an agent runs itself (read-only cross-project research)
+        compare(_citations(prime(ROLE_AGENT)), expected={('help',), ('errand',)})
 
     def test_every_role_signposts_help(self) -> None:
         for role in PRIMES:

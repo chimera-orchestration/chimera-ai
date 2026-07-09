@@ -39,9 +39,13 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
             'agent start',
             'agent resume',
             'review',
+            'errand',
         }
     ),
-    ROLE_AGENT: frozenset({'help', 'prime'}),  # empty would be admonishment by another name
+    # errand is deliberately in both trees: cross-project *reading* is knowledge, not
+    # capability (same rule that leaves listers unfenced), and its target axis has its
+    # own containment (see __main__._foreign)
+    ROLE_AGENT: frozenset({'help', 'prime', 'errand'}),
 }
 
 
