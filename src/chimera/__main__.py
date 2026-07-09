@@ -867,7 +867,7 @@ def chat(
     )
     dry_run = Dry(dry)
     context = materialize(scope.workspace, name, text)
-    _chat(
+    note = _chat(
         cwd,
         name,
         prompt,
@@ -883,6 +883,8 @@ def chat(
         'Resumed' if resume else 'Launched', 'Would resume' if resume else 'Would launch'
     )
     typer.echo(f'{verb} chat {name} in {cwd}')
+    if note is not None:
+        typer.echo(note)
     if dry:
         _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 

@@ -12,6 +12,7 @@ from chimera.agents.claude import Claude
 from chimera.commands.chat import ChatAlreadyLiveError, GoalHasAgentError, chat, chat_target
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
+from chimera.dry import Dry
 from chimera.worktrees import SEP
 from tests.cli import Command, action_logs, capture_env
 
@@ -71,7 +72,7 @@ class TestChat:
         ws = tmpdir.makedir('lycia')
         # another session is live in the same cwd — chat launches anyway (not exclusive)
         calls = _stub(replace, live=[Session('x', 'other', 'idle', ws, None)])
-        chat(ws, 'pegasus')
+        assert chat(ws, 'pegasus') is None  # no note: nothing to report
         compare(calls, expected=[(['claude', '--name', 'pegasus'], ws, True)])
 
     def test_resume_revives_by_name(self, tmpdir: TempDir, replace: Replacer) -> None:
@@ -88,6 +89,16 @@ class TestChat:
         with ShouldRaise(ChatAlreadyLiveError('pegasus')):  # resume can't attach either
             chat(ws, 'pegasus', resume=True)
         compare(calls, expected=[])  # never launched
+
+    def test_dry_reports_the_live_chat_instead_of_refusing(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        ws = tmpdir.makedir('lycia')
+        calls = _stub(replace, live=[Session('x', 'pegasus', 'idle', ws, None)])
+        note = "note: chat 'pegasus' is already live — a real launch would refuse"
+        compare(chat(ws, 'pegasus', dry=Dry(True)), expected=note)
+        compare(chat(ws, 'pegasus', resume=True, dry=Dry(True)), expected=note)
+        compare(calls, expected=[])  # previewed, never launched
 
     def test_extra_bypass_flags_refused_under_an_ai_agent(
         self, tmpdir: TempDir, replace: Replacer
@@ -385,6 +396,58 @@ def test_chat_cli_dry_previews_without_launching(
                 'sha256': digest,
                 'message': 'context: rendered',
             },
+            {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
+        ],
+    )
+    compare(calls, expected=[])  # nothing launched
+
+
+def test_chat_cli_dry_previews_beside_the_live_chat(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
+    calls = _stub(replace, live=[Session('x', 'pegasus', 'idle', ws, None)])
+    text = '# Role: captain\n\nYou are pegasus, the captain of the lycia workspace.'
+    digest = sha256(text.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
+    command.run('chat', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would launch chat pegasus in {ws}',
+                "note: chat 'pegasus' is already live — a real launch would refuse",
+                'harness: claude',
+                'role: captain',
+                'prompt: (interactive)',
+                f'context: {context}',
+                '---',
+                text,
+            ]
+        ),
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'chat',
+                'phase': 'start',
+                'function': 'chimera.commands.chat.chat',
+                'params': {
+                    'prompt': None,
+                    'resume': False,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': True,
+                    'project': None,
+                    'goal': None,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'pegasus',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'WARNING', 'session': 'pegasus', 'message': 'chat: already live'},
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],
     )

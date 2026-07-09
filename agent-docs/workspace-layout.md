@@ -94,7 +94,8 @@ project render (see *Launch context* below for the role section both lead with).
 
 A chat deliberately sits *alongside* whatever agent is working in the same cwd, so the
 one-session-per-worktree guard is off; instead the scope's chat itself being live refuses with
-an attach hint. `--resume`/`-r` revives the scope's previous (dead) chat session. `-p` overrides
+an attach hint (under `--dry` a `note:` on the preview instead — a preview mutates nothing, so
+a live chat never blocks it). `--resume`/`-r` revives the scope's previous (dead) chat session. `-p` overrides
 the scope as usual; prompt/`--`-passthrough/`--dangerous`/`--harness`/`-m` behave as on the other
 launchers. There is no goal scope: a goal already has its agent, so a pinned or explicitly
 requested goal (even a `-g` no project could be resolved for) refuses, pointing at

@@ -192,9 +192,12 @@ Report with `dry.verb('Removed', 'Would remove')`. Read-only commands never take
 file is written and logged; it's the same content-addressed artifact a real launch would use) —
 but every mutation (worktree/branch setup, the harness launch) routes through the same `Dry`,
 so nothing is created and nothing runs. The report names the target, then what would be
-injected: harness/model, prompt, passthrough, and the full context text. Guards *outside* the
-launch (e.g. chat's already-live-by-name refusal) still fire under `--dry`; the harness's own
-in-launch liveness check does not.
+injected: harness/model, prompt, passthrough, and the full context text. Scope guards (e.g.
+chat's a-goal-never-chats refusal) still fire under `--dry` — the command would be wrong at any
+time — but liveness never blocks a preview: the harness's in-launch check rides the skipped
+launch, and chat's already-live-by-name guard degrades to a `note:` line on the preview (a
+real launch would refuse; a preview mutates nothing, and the scope's chat being live is its
+normal state).
 
 ## Testing
 
