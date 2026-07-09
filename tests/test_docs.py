@@ -29,8 +29,10 @@ def _documented_launchers(text: str) -> set[str]:
 
 
 def test_launcher_list_matches_the_live_tree() -> None:
-    # the launchers are exactly the PassthroughCommands, and exactly the --dangerous carriers —
-    # a command gaining either without joining the doc's list fails here, as does a stale entry
+    # the launchers are exactly the PassthroughCommands, and — minus errand, whose headless
+    # print mode has no interactive permission cycle for --dangerous to enable — exactly the
+    # --dangerous carriers: a command gaining either without joining the doc's list fails
+    # here, as does a stale entry
     tree = dict(leaves(get_command(app)))
     documented = _documented_launchers(WORKSPACE_LAYOUT.read_text())
     compare(
@@ -38,7 +40,7 @@ def test_launcher_list_matches_the_live_tree() -> None:
         expected={path for path, cmd in tree.items() if isinstance(cmd, PassthroughCommand)},
     )
     compare(
-        documented,
+        documented - {'errand'},
         expected={
             path
             for path, cmd in tree.items()

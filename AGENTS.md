@@ -11,6 +11,7 @@ isn't built yet — the vocabulary stands regardless; what's implemented is the 
 - **Project** — a project managed by Chimera within a workspace
 - **Goal** — a thing that needs doing (e.g. "implement feature X")
 - **Task** — a tracked unit of work, discovered while planning or executing a goal
+- **Errand** — a one-shot, read-only, headless agent dispatched into another project to fetch a report (`ch errand`); its goal (`errand-<id>`) is ephemeral — swept as soon as the report is delivered
 - **Actor** — a participant in a goal: a **human** or an **agent**. Each works on its own **branch**; an agent additionally always works in a **worktree** (a human checks their branch out wherever they like).
 - **Branch** — a git branch named `<goal>/<actor>`
 - **Worktree** — a git worktree named `<goal>@<actor>` (agents only)

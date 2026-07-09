@@ -52,7 +52,7 @@ feature branch.
 
 ## Choosing the harness and model
 
-Every launching command (`agent start`/`resume`, `goal start`/`adopt`, `review`, `chat`) — the
+Every launching command (`agent start`/`resume`, `goal start`/`adopt`, `review`, `chat`, `errand`) — the
 one list, referred to below as *the launchers*; a test pins it to the live command tree — resolves an
 `AgentSpec` (`chimera.agents.registry.resolve_spec`): which registered harness runs the session
 (claude today) and which model it uses. Each field resolves independently, nearest wins:
@@ -100,6 +100,38 @@ launchers. There is no goal scope: a goal already has its agent, so a pinned or 
 requested goal (even a `-g` no project could be resolved for) refuses, pointing at
 `ch agent resume -g <goal>` to talk to the agent and `ch chat` *from the project dir* for a
 side conversation — inside the goal worktree, cwd re-pins the goal, so `-p` can't escape it.
+
+## Errands: one-shot research in a foreign project
+
+`ch errand <target-project> "<prompt>"` dispatches a one-shot, headless, **read-only** agent
+into another project and delivers its report. The target is a required positional (it
+tab-completes like `-p` but is deliberately not `-p`): it names the project dispatched *into*,
+never who the session acts as, so it resolves through a dedicated single-caller helper
+(`_foreign`, its one-caller status pinned by a test) the scope fence never guards — an
+inherited `-p` is refused, not reinterpreted. A reference project (no repo checkout) refuses
+up front. The lifecycle is `ch review`'s pattern compressed to one synchronous command
+(`chimera.commands.errand`): an ephemeral goal `errand-<6hex>` (fresh against the existing
+worktrees; branch + worktree via the goal machinery, refs on the `errand: refs` log line),
+the target's rendered context and agent role stamp, then a headless blocking run
+(`Agent.run`) on a guardrailed prompt. The guardrail is affirmative — identity plus "your
+final message is the report, captured verbatim" — never a prohibition list: writes are
+structurally impossible behind the harness's read-only tool wall (`readonly=True`; claude
+maps it to `--allowedTools` — Read/Grep/Glob plus read-only git Bash). No daemon, no
+polling: background the `ch errand` invocation itself for concurrency, or bound it with
+`--timeout <seconds>`.
+
+The report is delivered by *chimera*, not the errand: printed to stdout, or written to
+`--out <path>` (resolved against the caller's cwd) with an `errand: result` log line binding
+path/bytes/sha256 — the audit twin of `context: rendered`; the harness's `errand: run` line
+binds the session id, the pointer back to the transcript. The goal is then swept through
+`worktree rm`'s safety checks: a clean, trivially merged errand vanishes; one that somehow
+left work behind is reported and left standing — never an errand failure, the report was
+already delivered — and `--keep` opts out of the sweep deliberately. Either way the leftover
+is an ordinary goal: `ch goal finish <goal> -p <target>` cleans it up. A failed run still
+attempts the sweep, then exits non-zero. `--dry` resolves everything for real — target,
+generated goal id, rendered context — and runs/writes/removes nothing. Alone among the
+launchers, `errand` carries no `--dangerous` (nothing interactive to make bypass reachable
+in); its `--` passthrough is still fenced by `refuse_restricted`.
 
 ## Launch context: principles inline, knowledge indexes
 
@@ -343,7 +375,7 @@ checkout of `main` next to (not managed by) chimera's goal worktrees.
 
 Everything after a `--` on any of the launchers (the list under "Choosing the harness and model") is forwarded verbatim to `claude` (e.g. `ch agent resume -- --dangerously-skip-permissions`, `ch goal start x -- --model opus`). The split is done before arg parsing (like git/cargo), so a flag is never mistaken for the `[prompt]` positional even when no prompt is given. Forgetting the `--` makes `claude`'s flags unknown options and errors, rather than silently misparsing.
 
-The `--dangerous` flag (on every launcher) adds `--allow-dangerously-skip-permissions` so bypass-permissions mode is reachable with shift-tab — it only *enables* the mode, never activates it (the autonomous run keeps its resolved mode). It is **opt-in and off by default**: passing the flag *displaces* auto-accept from claude's shift-tab cycle (`normal → plan → bypass` instead of `normal → auto-accept → plan`), so the everyday default keeps auto-accept and only an explicit `--dangerous` pays that cost. **Agents must never pass `--dangerous` on their own — only when the user explicitly asks.** Under
+The `--dangerous` flag (on every launcher except `errand`, whose headless print mode has no interactive permission cycle to make the mode reachable in) adds `--allow-dangerously-skip-permissions` so bypass-permissions mode is reachable with shift-tab — it only *enables* the mode, never activates it (the autonomous run keeps its resolved mode). It is **opt-in and off by default**: passing the flag *displaces* auto-accept from claude's shift-tab cycle (`normal → plan → bypass` instead of `normal → auto-accept → plan`), so the everyday default keeps auto-accept and only an explicit `--dangerous` pays that cost. **Agents must never pass `--dangerous` on their own — only when the user explicitly asks.** Under
 Claude Code specifically this is enforced at the CLI level, not just convention: `--dangerous` (and
 `--force`) are stripped from the command tree entirely, so passing them fails with "no such option"
 — see `agent-docs/commands.md`'s "Agent-restricted options". A `--bg` session is an attachable fork, not headless, and the mode's availability is fixed at *its* launch, so the flag rides on background launches too — you cycle after attaching (`claude agents attach` / `ch agent resume`). Not duplicated when a `--dangerously-skip-permissions`/`--allow-dangerously-skip-permissions` is already passed after `--`. Note: claude rejects a `--bg` launch carrying any dangerous-skip flag unless the bypass disclaimer has been accepted (`skipDangerousModePermissionPrompt` in claude settings, or accepting it once interactively). The `--` passthrough is fenced separately: it is split off before Click parses, so the Click-level strip can't see it — instead each harness declares its own bypass spellings (`Agent.restricted`, e.g. claude's `--dangerously-skip-permissions`) and every launcher refuses them at launch (`refuse_restricted`) when chimera is driven by an AI agent.

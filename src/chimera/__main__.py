@@ -36,6 +36,7 @@ from chimera.commands.chat import chat_target
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
+from chimera.commands.errand import errand as _errand
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.goal.rename import rename as _goal_rename
@@ -362,6 +363,22 @@ def _project(ctx: typer.Context, explicit: str | None) -> Project:
     return project
 
 
+def _foreign(ctx: typer.Context, name: str) -> Project:
+    """The project an errand dispatches *into* — deliberately not :func:`_project`.
+
+    The scope fence guards the "who I act as" axis; an errand's positional names a
+    *target* whose whole point is being foreign, so it resolves unfenced — an axis,
+    not a hole: the verb's narrow semantics (one-shot, read-only) are the containment.
+    An inherited ``-p`` is refused rather than ignored — silently acting on the
+    positional while a flag said otherwise would be worse than either behaviour.
+    Exactly one caller — the errand command; a test pins that, so a second caller
+    can't quietly turn the exemption into a general escape hatch.
+    """
+    if _overrides(ctx).project is not None:
+        raise UserError('errand names its target positionally — drop -p')
+    return resolve_project(Path.cwd(), name)
+
+
 def _spec(project: Project, harness: str | None, model: str | None) -> AgentSpec:
     """The agent to launch: flags, then the project's ``agent:``, then the workspace's.
 
@@ -408,8 +425,18 @@ def _dry_preview(
     extra: list[str],
     context: Path | None,
     env: Mapping[str, str],
+    *,
+    target: str | None = None,
+    out: Path | None = None,
 ) -> None:
-    """What a --dry launch would inject: agent, role stamp, prompt, passthrough and context."""
+    """What a --dry launch would inject: agent, role stamp, prompt, passthrough and context.
+
+    ``target``/``out`` are errand's extra axes — the project dispatched into and where
+    the report would land (stdout when ``out`` is None); the other launchers leave them off.
+    """
+    if target is not None:
+        typer.echo(f'target: {target}')
+        typer.echo(f'out: {out}' if out is not None else 'out: (stdout)')
     typer.echo(f'harness: {spec.harness}' + (f'  model: {spec.model}' if spec.model else ''))
     role, scope = env[ROLE_ENV_VAR], env.get(ROLE_SCOPE_ENV_VAR)
     typer.echo(f'role: {role} (scope: {scope})' if scope else f'role: {role}')
@@ -695,6 +722,101 @@ def review(
                 context,
                 env,
             )
+
+
+@app.command(
+    'errand',
+    cls=PassthroughCommand,
+    help='Dispatch a one-shot read-only agent into a project; print or --out its report.',
+)
+@logs(_errand)
+def errand(
+    ctx: typer.Context,
+    target: Annotated[
+        str,
+        typer.Argument(help='Project to dispatch into', autocompletion=complete_project),
+    ],
+    prompt: Annotated[str, typer.Argument(help='What to research and report on')],
+    out: Annotated[
+        Path | None,
+        typer.Option('--out', help='Write the report here (default: print it to stdout)'),
+    ] = None,
+    keep: Annotated[
+        bool,
+        typer.Option('--keep', help="Keep the errand's branch and worktree for inspection"),
+    ] = False,
+    timeout: Annotated[
+        float | None, typer.Option('--timeout', help='Bound the run (seconds)')
+    ] = None,
+    frm: FromOpt = None,
+    offline: OfflineOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
+) -> None:
+    p = _foreign(ctx, target)
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context: Path | None = None
+    env: Mapping[str, str] = {}
+
+    def _render_context(name: str) -> Path | None:
+        # keyed by the resolved session name: only _errand knows the generated goal —
+        # the handle is kept so the --dry preview shows the artifact rendered exactly once
+        nonlocal context
+        goal = name.split(SEP)[1]
+        context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
+        return context
+
+    def _role_stamp(name: str) -> Mapping[str, str]:
+        # keyed the same way; the handle is kept so --dry previews the stamp the run got
+        nonlocal env
+        env = role_env(ROLE_AGENT, role_scope_for(p.name, name.split(SEP)[1]))
+        return env
+
+    result = _errand(
+        p.repo,
+        p.worktrees,
+        p.name,
+        prompt,
+        out.expanduser() if out else None,
+        _passthrough(ctx),
+        keep,
+        frm=frm,
+        fetch=not offline,
+        timeout=timeout,
+        spec=spec,
+        context=_render_context,
+        env=_role_stamp,
+        dry=dry_run,
+    )
+    if dry:
+        typer.echo(f'Would run errand {result.goal} in {result.worktree}')
+        _dry_preview(
+            spec,
+            f'{prompt} (guardrail prepended)',
+            _passthrough(ctx),
+            context,
+            env,
+            target=p.name,
+            out=result.out,
+        )
+        return
+    if result.out is None:
+        typer.echo(result.report)
+    else:
+        typer.echo(f'Wrote report to {result.out}')
+    if keep:
+        typer.echo(
+            f'Kept {result.worktree} — ch goal finish {result.goal} -p {p.name} cleans up',
+            err=True,
+        )
+    elif not result.cleaned:
+        typer.echo(
+            f'errand left work in {result.worktree} — inspect it; '
+            f'ch goal finish {result.goal} -p {p.name} cleans up',
+            err=True,
+        )
 
 
 @app.command(
