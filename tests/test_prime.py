@@ -117,6 +117,10 @@ class TestPrime:
     def test_captain_carries_the_persona(self) -> None:
         assert prime(ROLE_CAPTAIN, persona='pegasus').startswith('You are pegasus, the captain')
 
+    def test_captain_names_the_workspace(self) -> None:
+        assert 'the captain of the lycia workspace' in prime(ROLE_CAPTAIN, workspace='lycia')
+        assert 'the captain of the <workspace> workspace' in prime(ROLE_CAPTAIN)
+
     def test_manager_names_the_project(self) -> None:
         assert 'the manager of the proj project' in prime(ROLE_MANAGER, project='proj')
 
@@ -136,7 +140,7 @@ def test_prime_cli_captain_at_the_bare_workspace(
 ) -> None:
     os.chdir(_workspace(tmpdir, replace))
     command.run('prime').check(
-        output=prime(ROLE_CAPTAIN, persona='pegasus'),
+        output=prime(ROLE_CAPTAIN, persona='pegasus', workspace='lycia'),
         logging=action_logs('prime', 'chimera.prime.prime', {}),
     )
 

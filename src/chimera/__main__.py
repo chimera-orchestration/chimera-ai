@@ -511,6 +511,7 @@ def prime(ctx: typer.Context) -> None:
     typer.echo(
         _prime(
             resolve_role(session_role(), scope),
+            workspace=scope.workspace.name,
             project=scope.project.name if scope.project else None,
             goal=scope.goal,
             persona=workspace_config(scope.workspace).captain.name,
@@ -851,14 +852,15 @@ def chat(
     if scope.project is None:
         spec = resolve_spec(harness, model, config.captain, config.agent)
         role = ROLE_CAPTAIN
-        intro = f'You are {name}, the captain of the {scope.workspace.name} workspace.'
+        intro = _prime(ROLE_CAPTAIN, persona=name, workspace=scope.workspace.name)
         env = role_env(ROLE_CAPTAIN)  # no scope: the captain is unfenced
     else:
         spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
         role = ROLE_MANAGER
-        intro = f'You are the manager of the {scope.project.name} project.'
+        intro = _prime(ROLE_MANAGER, project=scope.project.name)
         env = role_env(ROLE_MANAGER, role_scope_for(scope.project.name))
-    # role directives + identity lead, then principles and the scope's knowledge index
+    # the role's prime leads (identity + golden path, so the session starts knowing the
+    # loop instead of pulling `ch prime`), then directives, principles, knowledge index
     text = '\n\n'.join(
         part
         for part in (

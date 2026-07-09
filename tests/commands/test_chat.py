@@ -6,15 +6,20 @@ from pathlib import Path
 
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
-from chimera.agent_env import ROLE_MANAGER
+from chimera.agent_env import ROLE_CAPTAIN, ROLE_MANAGER
 from chimera.agents import Session
 from chimera.agents.claude import Claude
 from chimera.commands.chat import ChatAlreadyLiveError, GoalHasAgentError, chat, chat_target
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
 from chimera.dry import Dry
+from chimera.prime import prime
 from chimera.worktrees import SEP
 from tests.cli import Command, action_logs, capture_env
+
+# the role's prime is the identity block of every chat launch context
+CAPTAIN_TEXT = f'# Role: captain\n\n{prime(ROLE_CAPTAIN, persona="pegasus", workspace="lycia")}'
+MANAGER_TEXT = f'# Role: manager\n\n{prime(ROLE_MANAGER, project="proj")}'
 
 
 def _project_obj(directory: Path) -> Project:
@@ -148,11 +153,7 @@ def test_chat_cli_launches_the_captain(
     tmpdir.write(ws / 'roles' / 'captain' / 'directives.md', 'Direct the work.\n')
     calls = _stub(replace)
     run = command.run('chat')
-    text = (
-        '# Role: captain\n\n'
-        'You are pegasus, the captain of the lycia workspace.\n\n'
-        'Direct the work.'
-    )
+    text = f'{CAPTAIN_TEXT}\n\nDirect the work.'
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
     compare(context.read_text(), expected=text)
@@ -195,9 +196,6 @@ def test_chat_cli_launches_the_captain(
         str(context),
     ]
     compare(calls, expected=[(claude_cmd, ws, True)])
-
-
-MANAGER_TEXT = '# Role: manager\n\nYou are the manager of the proj project.'
 
 
 def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -360,8 +358,8 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
     ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
     calls = _stub(replace)
     run = command.run('chat', '--resume')
-    # even without a roles/captain dir the intro line renders, so context is injected
-    text = '# Role: captain\n\nYou are pegasus, the captain of the lycia workspace.'
+    # even without a roles/captain dir the prime renders, so context is injected
+    text = CAPTAIN_TEXT
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
     compare(context.read_text(), expected=text)
@@ -403,7 +401,7 @@ def test_chat_cli_dry_previews_without_launching(
 ) -> None:
     ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
     calls = _stub(replace)
-    text = '# Role: captain\n\nYou are pegasus, the captain of the lycia workspace.'
+    text = CAPTAIN_TEXT
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
     command.run('chat', '--dry').check(
@@ -453,7 +451,7 @@ def test_chat_cli_dry_previews_beside_the_live_chat(
 ) -> None:
     ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
     calls = _stub(replace, live=[Session('x', 'pegasus', 'idle', ws, None)])
-    text = '# Role: captain\n\nYou are pegasus, the captain of the lycia workspace.'
+    text = CAPTAIN_TEXT
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
     command.run('chat', '--dry').check(
