@@ -21,9 +21,11 @@ from chimera.commands.agent import (
     shown,
     under,
 )
+from chimera.agent_env import ROLE_AGENT
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
-from tests.cli import Command, action_logs, capture_env
+from chimera.prime import prime
+from tests.cli import Command, action_logs, capture_env, context_sources, sources_lines
 
 
 def _project_obj(directory: Path) -> Project:
@@ -821,11 +823,9 @@ def test_agent_start_cli_model_from_project_config(
     compare(calls, expected=[(claude_cmd, expected, True)])
 
 
-# The role section leading every launched agent's context (see agent-docs/workspace-layout.md).
-AGENT_ROLE_TEXT = (
-    '# Role: agent\n\n'
-    'You are the agent for goal g on proj; this worktree and branch are your entire workspace.'
-)
+# The role section leading every launched agent's context: the whole agent prime, pushed
+# so the session never has to guess to pull it (see agent-docs/workspace-layout.md).
+AGENT_ROLE_TEXT = f'# Role: agent\n\n{prime(ROLE_AGENT, project="proj", goal="g")}'
 
 
 def test_agent_start_cli_model_from_workspace_config(
@@ -866,6 +866,7 @@ def test_agent_start_cli_model_from_workspace_config(
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
+                'sources': context_sources(ws, 'agent', pinned=project.resolve()),
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
@@ -937,9 +938,15 @@ def test_agent_start_cli_injects_rendered_context(
     os.chdir(project)
     calls = _stub(replace)
     expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
-    text = f'{AGENT_ROLE_TEXT}\n\n# Principles\n\nVerify before done.'
+    principle = ws / 'principles' / 'verify.md'
+    text = (
+        f'{AGENT_ROLE_TEXT}\n\n# Principles\n\n'
+        f'<!-- {principle.resolve()} (workspace) -->\nVerify before done.'
+    )
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    sources = context_sources(ws, 'agent', pinned=project.resolve())
+    sources[str(ws / 'principles' / '*.md')] = [str(principle)]
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected_wt}',
         logging=[
@@ -964,6 +971,7 @@ def test_agent_start_cli_injects_rendered_context(
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
+                'sources': sources,
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
@@ -987,9 +995,15 @@ def test_agent_start_cli_dry_previews_without_launching(
     os.chdir(project)
     calls = _stub(replace)
     expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
-    text_ = f'{AGENT_ROLE_TEXT}\n\n# Principles\n\nVerify before done.'
+    principle = ws / 'principles' / 'verify.md'
+    text_ = (
+        f'{AGENT_ROLE_TEXT}\n\n# Principles\n\n'
+        f'<!-- {principle.resolve()} (workspace) -->\nVerify before done.'
+    )
     digest = sha256(text_.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    sources = context_sources(ws, 'agent', pinned=project.resolve())
+    sources[str(ws / 'principles' / '*.md')] = [str(principle)]
     command.run('agent', 'start', 'do it', '-g', 'g', '-m', 'opus', '--dry').check(
         output='\n'.join(
             [
@@ -997,6 +1011,7 @@ def test_agent_start_cli_dry_previews_without_launching(
                 'harness: claude  model: opus',
                 'role: agent (scope: proj@g)',
                 'prompt: do it',
+                *sources_lines(sources),
                 f'context: {context}',
                 '---',
                 text_,
@@ -1024,6 +1039,7 @@ def test_agent_start_cli_dry_previews_without_launching(
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
+                'sources': sources,
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},

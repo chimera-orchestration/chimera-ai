@@ -73,6 +73,31 @@ def action_logs(
     ]
 
 
+def context_sources(
+    ws: Path, role: str, pinned: Path | None = None, knowledge: Sequence[Path] = ()
+) -> dict[str, list[str]]:
+    """The sources map a render logs, every glob empty — override entries for matches.
+
+    ``pinned`` is the pinned project's dir; ``knowledge`` the project dirs an unpinned
+    scope still indexes knowledge for.
+    """
+    sources: dict[str, list[str]] = {str(ws / 'roles' / role / '*.md'): []}
+    if pinned is not None:
+        sources[str(pinned / 'roles' / role / '*.md')] = []
+    sources[str(ws / 'principles' / '*.md')] = []
+    if pinned is not None:
+        sources[str(pinned / 'principles' / '*.md')] = []
+    sources[str(ws / 'knowledge' / '*.md')] = []
+    for project in [pinned] if pinned is not None else list(knowledge):
+        sources[str(project / 'knowledge' / '*.md')] = []
+    return sources
+
+
+def sources_lines(sources: dict[str, list[str]]) -> list[str]:
+    """The ``sources:`` block a --dry preview prints for a render's sources map."""
+    return ['sources:'] + [f'  {pattern} ({len(files)})' for pattern, files in sources.items()]
+
+
 def leaves(command: ClickCommand, path: str = '') -> Iterator[tuple[str, ClickCommand]]:
     """Every leaf of a Click tree as ``(canonical path, command)`` — the one notion of
     'leaf' shared by the doc pins (``test_docs``) and the role-allowlist pin

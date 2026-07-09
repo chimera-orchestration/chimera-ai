@@ -6,9 +6,11 @@ per role whose cited commands are pinned by a test against that role's stripped 
 tree (see ``tests/test_prime.py``), so it provably never mentions fenced capability. The
 role comes from the session's ``CHIMERA_ROLE`` stamp when chimera launched it, else from
 the shape of the cwd scope — making prime the pull path for sessions chimera didn't
-launch, and for humans. ``ch chat`` also *pushes* it: the captain's/manager's prime is
-the identity block of the launch context, so those sessions start already knowing the
-loop. Every template ends by signposting ``ch help``.
+launch, and for humans. The launchers also *push* it: the role's prime is the identity
+block of every launch context — chat the captain's/manager's, the goal launchers the
+agent's — so a session starts already knowing the loop instead of guessing to pull it.
+``ch errand`` alone keeps a bare identity sentence: the agent prime's commit-as-you-go
+would contradict its read-only wall. Every template ends by signposting ``ch help``.
 """
 
 from chimera.agent_env import ROLE_AGENT, ROLE_CAPTAIN, ROLE_MANAGER
@@ -26,6 +28,9 @@ The loop:
 - `ch goal sync <goal>` — bring the human branch up to the agent's work.
 - `ch goal finish <goal>` — sweep a done goal's branches and worktrees.
 
+Context here layers the workspace's `roles/captain/` and `principles/`; every project's
+`knowledge/` is indexed to read on demand — save workspace-wide learnings to `knowledge/`.
+
 `ch help` is the full reference; `ch help -v` adds each command's options."""
 
 MANAGER_PRIME = """\
@@ -41,6 +46,9 @@ The loop:
 - `ch goal sync <goal>` — bring the human branch up to the agent's work.
 - `ch goal finish <goal>` — sweep a done goal's branches and worktrees.
 
+Context layers workspace then project — `roles/manager/` and `principles/` inline whole;
+{project}'s `knowledge/` is indexed to read on demand — save what you learn there.
+
 Anything beyond {project} is the captain's to direct — escalate rather than reach.
 `ch help` is the full reference; `ch help -v` adds each command's options."""
 
@@ -54,6 +62,9 @@ it from their side — none of that happens from here.
 
 Facts from another project are an errand away: `ch errand <project> "<question>"` runs a
 one-shot read-only agent there and returns its report.
+
+Context layers workspace then project — `roles/agent/` and `principles/` inline whole;
+{project}'s `knowledge/` is indexed to read on demand — save what you learn there.
 
 `ch help` lists what you can run."""
 

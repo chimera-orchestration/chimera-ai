@@ -143,31 +143,40 @@ in); its `--` passthrough is still fenced by `refuse_restricted`.
 
 ## Launch context: principles inline, knowledge indexes
 
-The same launching commands inject a rendered launch context (`chimera.agents.context`).
-A `# Role:` section leads *every* chimera-launched session's context: an **affirmative**
-identity block stating what the session is, never what it must not do. For `ch chat` the
-block is the role's whole prime (`chimera/prime.py`) — identity plus the golden-path loop,
-so a captain or manager starts already knowing `ch` and its tools instead of pulling
-`ch prime` itself; the goal launchers inject a single identity sentence (`You are the agent
-for goal <goal> on <project>; this worktree and branch are your entire workspace.` — the
-agent prime's talk of committing would contradict e.g. errand's read-only wall, so it stays
-pull-only there). The block is followed by the role's
-`roles/<role>/*.md` directives, inlined whole and layered like principles (`role_context`):
-the workspace's first (the generic layer, every project's managers/agents), then the pinned
-project's (its specific persona). A scope with no project — the captain — has only the
-workspace layer; an absent dir on either level still introduces. The rest follows the
-Principle/Knowledge split: workspace + project
+The same launching commands inject a rendered launch context (`chimera.agents.context`,
+assembled by `assemble`). A `# Role:` section leads *every* chimera-launched session's
+context: an **affirmative** identity block stating what the session is, never what it must
+not do — the role's whole prime (`chimera/prime.py`), identity plus the golden-path loop,
+so a session starts already knowing `ch` and its tools instead of having to guess to pull
+`ch prime` itself (chat pushes the captain's/manager's, the goal launchers the agent's).
+`ch errand` alone keeps a single identity sentence (`You are the agent for goal <goal> on
+<project>; …`): the agent prime's commit-as-you-go would contradict its read-only wall.
+The block is followed by the role's `roles/<role>/*.md` directives, inlined whole and
+layered like principles: the workspace's first (the generic layer, every project's
+managers/agents), then the pinned project's (its specific persona). A scope with no
+project — the captain — has only the workspace layer; an absent dir on either level still
+introduces. The rest follows the Principle/Knowledge split: workspace + project
 `principles/*.md` inline whole (always-on, small), while `knowledge/*.md` lands as an *index*
 of trigger lines (`- topic: <abs path>`) the agent reads on demand with its own tools — a
 pinned project indexes only its own knowledge, an unpinned scope indexes every project's,
 qualified by name. `prompts/` is *not* injected — those are hand-curated prompt templates
 (e.g. `review.md`).
 
+Every inlined file sits behind a source-attribution line — `<!-- <abs path> (workspace) -->`
+or `(project)` — so the session can resolve a tension between directives by layer order
+(project builds on workspace), cite a directive back to its file, and propose an edit to the
+right place. Source dirs are read **non-recursively**: only `*.md` files at a dir's top level
+are live context — a subdir (`drafts/`, an archive) is structure, not payload. A directive
+big enough to want loading on demand is knowledge misfiled: move it to `knowledge/` and let
+the index carry it.
+
 The render is a build product, never committed: it's written content-addressed to
 `<workspace>/logs/context/<session>-<sha8>.md` (gitignored; identical re-renders land on the
 same file) and handed to the harness by path — claude gets `--append-system-prompt-file` — so
-the repo and worktree stay untouched. The `context: rendered` log line binds the path and full
-sha256: the audit record of exactly what a session was launched with. No workspace (a lone
+the repo and worktree stay untouched. The `context: rendered` log line binds the path, the
+full sha256 and a sources map (each glob searched → the files it matched): the audit record
+of exactly what a session was launched with, and of why a directive did or didn't make it in.
+No workspace (a lone
 project) → nothing rendered, nothing injected, no log line; with one, the role section always
 renders, so every workspace launch injects context.
 

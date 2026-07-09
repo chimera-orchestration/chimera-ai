@@ -15,7 +15,7 @@ from chimera.context import Project, Scope
 from chimera.dry import Dry
 from chimera.prime import prime
 from chimera.worktrees import SEP
-from tests.cli import Command, action_logs, capture_env
+from tests.cli import Command, action_logs, capture_env, context_sources, sources_lines
 
 # the role's prime is the identity block of every chat launch context
 CAPTAIN_TEXT = f'# Role: captain\n\n{prime(ROLE_CAPTAIN, persona="pegasus", workspace="lycia")}'
@@ -150,13 +150,15 @@ def test_chat_cli_launches_the_captain(
     ws = _workspace(
         tmpdir, replace, {'kind': 'workspace', 'captain': {'name': 'pegasus', 'model': 'opus'}}
     )
-    tmpdir.write(ws / 'roles' / 'captain' / 'directives.md', 'Direct the work.\n')
+    directive = tmpdir.write(ws / 'roles' / 'captain' / 'directives.md', 'Direct the work.\n')
     calls = _stub(replace)
     run = command.run('chat')
-    text = f'{CAPTAIN_TEXT}\n\nDirect the work.'
+    text = f'{CAPTAIN_TEXT}\n\n<!-- {directive.resolve()} (workspace) -->\nDirect the work.'
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
     compare(context.read_text(), expected=text)
+    sources = context_sources(ws, 'captain')
+    sources[str(ws / 'roles' / 'captain' / '*.md')] = [str(directive)]
     run.check(
         output=f'Launched chat pegasus in {ws}',
         logging=[
@@ -181,6 +183,7 @@ def test_chat_cli_launches_the_captain(
                 'session': 'pegasus',
                 'path': str(context),
                 'sha256': digest,
+                'sources': sources,
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
@@ -233,6 +236,7 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
                 'session': 'proj@manager',
                 'path': str(context),
                 'sha256': digest,
+                'sources': context_sources(ws, 'manager', pinned=project),
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
@@ -247,16 +251,25 @@ def test_chat_cli_manager_layers_project_role_directives(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
-    tmpdir.write(ws / 'roles' / 'manager' / 'all.md', 'Keep goals moving.\n')
+    generic = tmpdir.write(ws / 'roles' / 'manager' / 'all.md', 'Keep goals moving.\n')
     project = ws / 'proj'
-    tmpdir.write(project / 'roles' / 'manager' / 'own.md', 'Watch the datacenter feeds.\n')
+    persona = tmpdir.write(
+        project / 'roles' / 'manager' / 'own.md', 'Watch the datacenter feeds.\n'
+    )
     tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
     os.chdir(project)
     _stub(replace)
     # workspace directives (every manager) lead, the project's own persona follows
-    text = f'{MANAGER_TEXT}\n\nKeep goals moving.\n\nWatch the datacenter feeds.'
+    text = (
+        f'{MANAGER_TEXT}\n\n'
+        f'<!-- {generic.resolve()} (workspace) -->\nKeep goals moving.\n\n'
+        f'<!-- {persona.resolve()} (project) -->\nWatch the datacenter feeds.'
+    )
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'proj@manager-{digest[:8]}.md'
+    sources = context_sources(ws, 'manager', pinned=Path.cwd())
+    sources[str(ws / 'roles' / 'manager' / '*.md')] = [str(generic)]
+    sources[str(Path.cwd() / 'roles' / 'manager' / '*.md')] = [str(persona.resolve())]
     command.run('chat').check(
         output=f'Launched chat proj@manager in {Path.cwd()}',
         logging=[
@@ -281,6 +294,7 @@ def test_chat_cli_manager_layers_project_role_directives(
                 'session': 'proj@manager',
                 'path': str(context),
                 'sha256': digest,
+                'sources': sources,
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
@@ -387,6 +401,7 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
                 'session': 'pegasus',
                 'path': str(context),
                 'sha256': digest,
+                'sources': context_sources(ws, 'captain'),
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
@@ -411,6 +426,7 @@ def test_chat_cli_dry_previews_without_launching(
                 'harness: claude',
                 'role: captain',
                 'prompt: (interactive)',
+                *sources_lines(context_sources(ws, 'captain')),
                 f'context: {context}',
                 '---',
                 text,
@@ -438,6 +454,7 @@ def test_chat_cli_dry_previews_without_launching(
                 'session': 'pegasus',
                 'path': str(context),
                 'sha256': digest,
+                'sources': context_sources(ws, 'captain'),
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
@@ -462,6 +479,7 @@ def test_chat_cli_dry_previews_beside_the_live_chat(
                 'harness: claude',
                 'role: captain',
                 'prompt: (interactive)',
+                *sources_lines(context_sources(ws, 'captain')),
                 f'context: {context}',
                 '---',
                 text,
@@ -489,6 +507,7 @@ def test_chat_cli_dry_previews_beside_the_live_chat(
                 'session': 'pegasus',
                 'path': str(context),
                 'sha256': digest,
+                'sources': context_sources(ws, 'captain'),
                 'message': 'context: rendered',
             },
             {'level': 'WARNING', 'session': 'pegasus', 'message': 'chat: already live'},
@@ -517,6 +536,7 @@ def test_chat_cli_dry_project_scope_leads_with_the_manager_role(
                 'harness: claude',
                 'role: manager (scope: proj)',
                 'prompt: (interactive)',
+                *sources_lines(context_sources(ws, 'manager', pinned=project)),
                 f'context: {context}',
                 '---',
                 MANAGER_TEXT,
@@ -544,6 +564,7 @@ def test_chat_cli_dry_project_scope_leads_with_the_manager_role(
                 'session': 'proj@manager',
                 'path': str(context),
                 'sha256': digest,
+                'sources': context_sources(ws, 'manager', pinned=project),
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},

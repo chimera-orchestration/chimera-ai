@@ -4,8 +4,10 @@ from pathlib import Path
 
 from testfixtures import Replacer, TempDir, compare
 
+from chimera.agent_env import ROLE_AGENT
 from chimera.agents.claude import Claude
-from tests.cli import Command, action_logs
+from chimera.prime import prime
+from tests.cli import Command, action_logs, context_sources
 
 
 def _myproject(tmpdir: TempDir, workspace: Path) -> Path:
@@ -65,10 +67,7 @@ def test_goal_and_actor_before_the_command(
         subprocess.run, lambda cmd, cwd=None, check=False, env=None: calls.append((cmd, cwd))
     )
     worktree = workspace_with_env / 'myproject' / 'worktrees' / 'g@reviewer'
-    text = (
-        '# Role: agent\n\nYou are the agent for goal g on myproject; '
-        'this worktree and branch are your entire workspace.'
-    )
+    text = f'# Role: agent\n\n{prime(ROLE_AGENT, project="myproject", goal="g")}'
     digest = sha256(text.encode()).hexdigest()
     context = workspace_with_env / 'logs' / 'context' / f'myproject@g@reviewer-{digest[:8]}.md'
     command.run('agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start').check(
@@ -95,6 +94,9 @@ def test_goal_and_actor_before_the_command(
                 'session': 'myproject@g@reviewer',
                 'path': str(context),
                 'sha256': digest,
+                'sources': context_sources(
+                    workspace_with_env, 'agent', pinned=workspace_with_env / 'myproject'
+                ),
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},

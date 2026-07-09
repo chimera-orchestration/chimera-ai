@@ -19,7 +19,7 @@ from chimera.commands.worktree.rm import remove
 from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.git import Git
-from tests.cli import Command, action_logs, general_capture
+from tests.cli import Command, action_logs, context_sources, general_capture, sources_lines
 
 REFUSED_BYPASS = (
     '--dangerously-skip-permissions: not available when chimera is driven by an AI agent'
@@ -440,6 +440,9 @@ class TestErrandCli:
             'You are the agent for goal errand-abc123 on proj; '
             'this worktree and branch are your entire workspace.'
         ) in rendered.read_text()
+        # the bare identity sentence, never the agent prime: commit-as-you-go would
+        # contradict the errand's read-only wall
+        assert 'committing as you go' not in rendered.read_text()
 
     def test_out_reports_the_write(
         self, tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
@@ -534,6 +537,7 @@ class TestErrandCli:
         )
         digest = sha256(text.encode()).hexdigest()
         artifact = ws / 'logs' / 'context' / f'proj@errand-abc123@agent-{digest[:8]}.md'
+        sources = context_sources(ws, 'agent', pinned=ws / 'proj')
         start, end = action_logs('errand', 'chimera.commands.errand.errand', _params(dry=True))
         command.run('errand', 'proj', 'q', '--dry').check(
             output='\n'.join(
@@ -544,6 +548,7 @@ class TestErrandCli:
                     'harness: claude',
                     'role: agent (scope: proj@errand-abc123)',
                     'prompt: q (guardrail prepended)',
+                    *sources_lines(sources),
                     f'context: {artifact}',
                     '---',
                     text,
@@ -557,6 +562,7 @@ class TestErrandCli:
                     'session': 'proj@errand-abc123@agent',
                     'path': str(artifact),
                     'sha256': digest,
+                    'sources': sources,
                 },
                 end,
             ],

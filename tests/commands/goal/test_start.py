@@ -7,13 +7,15 @@ from giterator import Git
 from giterator.testing import Repo
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
+from chimera.agent_env import ROLE_AGENT
 from chimera.agents.registry import AgentSpec
 from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.commands.agent import agent
 from chimera.commands.goal import start as goal_start
 from chimera.commands.goal.start import start
-from tests.cli import Command, action_logs
+from chimera.prime import prime
+from tests.cli import Command, action_logs, context_sources, sources_lines
 
 
 def _project(tmpdir: TempDir, repo: Repo) -> Path:
@@ -330,13 +332,15 @@ def test_goal_start_cli_dry_role_leads_the_context(
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     os.chdir(ws / 'proj')
     worktree = Path.cwd() / 'worktrees' / 'g@agent'  # cwd resolves symlinks like the wrapper
+    persona = (Path.cwd() / 'roles' / 'agent' / 'persona.md').resolve()
     text = (
-        '# Role: agent\n\nYou are the agent for goal g on proj; '
-        'this worktree and branch are your entire workspace.\n\n'
-        'Guard the reactor.'
+        f'# Role: agent\n\n{prime(ROLE_AGENT, project="proj", goal="g")}\n\n'
+        f'<!-- {persona} (project) -->\nGuard the reactor.'
     )
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    sources = context_sources(ws, 'agent', pinned=Path.cwd())
+    sources[str(Path.cwd() / 'roles' / 'agent' / '*.md')] = [str(persona)]
     command.run('goal', 'start', 'g', '--dry').check(
         output='\n'.join(
             [
@@ -344,6 +348,7 @@ def test_goal_start_cli_dry_role_leads_the_context(
                 'harness: claude',
                 'role: agent (scope: proj@g)',
                 'prompt: (interactive)',
+                *sources_lines(sources),
                 f'context: {context}',
                 '---',
                 text,
@@ -372,6 +377,7 @@ def test_goal_start_cli_dry_role_leads_the_context(
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
+                'sources': sources,
                 'message': 'context: rendered',
             },
             {'level': 'INFO', 'command': 'goal start', 'phase': 'end'},

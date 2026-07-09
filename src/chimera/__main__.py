@@ -26,7 +26,7 @@ from chimera.agent_env import (
     session_role,
 )
 from chimera.agents import Session
-from chimera.agents.context import materialize, render, role_context
+from chimera.agents.context import Source, assemble, materialize
 from chimera.agents.registry import AgentSpec, resolve_spec
 from chimera.commands.agent import agents, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
@@ -395,32 +395,36 @@ def _spec(project: Project, harness: str | None, model: str | None) -> AgentSpec
 
 
 def _agent_intro(project: str, goal: str) -> str:
-    """The agent role's affirmative identity line — what the session is, never a prohibition."""
+    """Errand's affirmative identity line — what the session is, never a prohibition.
+
+    The working launchers push the whole agent prime instead; errand alone keeps the
+    bare sentence, since the prime's commit-as-you-go golden path would contradict its
+    read-only wall.
+    """
     return (
         f'You are the agent for goal {goal} on {project}; '
         'this worktree and branch are your entire workspace.'
     )
 
 
-def _context_file(project: Project | None, name: str, role: str, intro: str) -> Path | None:
-    """Render and store session ``name``'s launch context; ``None`` when there is none.
+def _context_file(
+    project: Project | None, name: str, role: str, intro: str
+) -> tuple[Path | None, tuple[Source, ...]]:
+    """Render and store session ``name``'s launch context; ``(None, ())`` when there is none.
 
-    Role directives + the ``intro`` identity line lead the render (every chimera-launched
+    Role directives + the ``intro`` identity block lead the render (every chimera-launched
     session knows what it is before anything else), then principles and knowledge. The
     render needs a workspace both for the role/workspace-level sources and as the home of
     the stored artifact (``logs/context/``), so a project standing outside any workspace
-    launches without injected context rather than failing.
+    launches without injected context rather than failing. The sources searched ride back
+    for the ``--dry`` preview.
     """
     try:
         workspace = resolve_workspace(Path.cwd())
     except NotInWorkspaceError:
-        return None
-    text = '\n\n'.join(
-        part
-        for part in (role_context(workspace, project, role, intro), render(workspace, project))
-        if part
-    )
-    return materialize(workspace, name, text)
+        return None, ()
+    rendered = assemble(workspace, project, role, intro)
+    return materialize(workspace, name, rendered), rendered.sources
 
 
 def _dry_preview(
@@ -430,13 +434,17 @@ def _dry_preview(
     context: Path | None,
     env: Mapping[str, str],
     *,
+    sources: tuple[Source, ...] = (),
     target: str | None = None,
     out: Path | None = None,
 ) -> None:
     """What a --dry launch would inject: agent, role stamp, prompt, passthrough and context.
 
-    ``target``/``out`` are errand's extra axes — the project dispatched into and where
-    the report would land (stdout when ``out`` is None); the other launchers leave them off.
+    ``sources`` lists each glob the render searched with its match count — a ``(0)`` is
+    the silent dead end the preview exists to reveal: a directive in the wrong place, or
+    a layer with nothing in it. ``target``/``out`` are errand's extra axes — the project
+    dispatched into and where the report would land (stdout when ``out`` is None); the
+    other launchers leave them off.
     """
     if target is not None:
         typer.echo(f'target: {target}')
@@ -447,6 +455,10 @@ def _dry_preview(
     typer.echo(f'prompt: {prompt}' if prompt is not None else 'prompt: (interactive)')
     if extra:
         typer.echo(f'passthrough: {" ".join(extra)}')
+    if sources:
+        typer.echo('sources:')
+        for source in sources:
+            typer.echo(f'  {source.pattern} ({len(source.matched)})')
     if context is None:
         typer.echo('context: (none)')
     else:
@@ -676,14 +688,17 @@ def review(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context: Path | None = None
+    sources: tuple[Source, ...] = ()
     env: Mapping[str, str] = {}
 
     def _render_context(name: str) -> Path | None:
         # keyed by the session name _review resolves (pr-<N>, even from a URL argument);
-        # the handle is kept so the --dry preview shows the artifact rendered exactly once
-        nonlocal context
+        # the handles are kept so the --dry preview shows the artifact rendered exactly once
+        nonlocal context, sources
         goal = name.split(SEP)[1]  # only the resolved name knows the goal, as with _role_stamp
-        context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
+        context, sources = _context_file(
+            p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=goal)
+        )
         return context
 
     def _role_stamp(name: str) -> Mapping[str, str]:
@@ -726,6 +741,7 @@ def review(
                 _passthrough(ctx),
                 context,
                 env,
+                sources=sources,
             )
 
 
@@ -763,14 +779,15 @@ def errand(
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context: Path | None = None
+    sources: tuple[Source, ...] = ()
     env: Mapping[str, str] = {}
 
     def _render_context(name: str) -> Path | None:
         # keyed by the resolved session name: only _errand knows the generated goal —
-        # the handle is kept so the --dry preview shows the artifact rendered exactly once
-        nonlocal context
+        # the handles are kept so the --dry preview shows the artifact rendered exactly once
+        nonlocal context, sources
         goal = name.split(SEP)[1]
-        context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
+        context, sources = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
         return context
 
     def _role_stamp(name: str) -> Mapping[str, str]:
@@ -803,6 +820,7 @@ def errand(
             _passthrough(ctx),
             context,
             env,
+            sources=sources,
             target=p.name,
             out=result.out,
         )
@@ -861,16 +879,9 @@ def chat(
         env = role_env(ROLE_MANAGER, role_scope_for(scope.project.name))
     # the role's prime leads (identity + golden path, so the session starts knowing the
     # loop instead of pulling `ch prime`), then directives, principles, knowledge index
-    text = '\n\n'.join(
-        part
-        for part in (
-            role_context(scope.workspace, scope.project, role, intro),
-            render(scope.workspace, scope.project),
-        )
-        if part
-    )
+    rendered = assemble(scope.workspace, scope.project, role, intro)
     dry_run = Dry(dry)
-    context = materialize(scope.workspace, name, text)
+    context = materialize(scope.workspace, name, rendered)
     note = _chat(
         cwd,
         name,
@@ -890,7 +901,7 @@ def chat(
     if note is not None:
         typer.echo(note)
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=rendered.sources)
 
 
 project_app = typer.Typer(
@@ -1117,8 +1128,11 @@ def goal_start(
     require_valid_goal(goal)  # before the session name reaches the context-file path
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(
-        p, session_name(p.name, goal, AGENT), ROLE_AGENT, _agent_intro(p.name, goal)
+    context, sources = _context_file(
+        p,
+        session_name(p.name, goal, AGENT),
+        ROLE_AGENT,
+        _prime(ROLE_AGENT, project=p.name, goal=goal),
     )
     env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
     worktree = _goal_start(
@@ -1138,7 +1152,7 @@ def goal_start(
     )
     typer.echo(f'{dry_run.verb("Started", "Would start")} {goal} in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
 
 
 @goal_app.command(
@@ -1161,8 +1175,11 @@ def goal_adopt(
     require_valid_goal(goal)  # before the session name reaches the context-file path
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(
-        p, session_name(p.name, goal, AGENT), ROLE_AGENT, _agent_intro(p.name, goal)
+    context, sources = _context_file(
+        p,
+        session_name(p.name, goal, AGENT),
+        ROLE_AGENT,
+        _prime(ROLE_AGENT, project=p.name, goal=goal),
     )
     env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
     worktree = _goal_adopt(
@@ -1180,7 +1197,7 @@ def goal_adopt(
     )
     typer.echo(f'{dry_run.verb("Adopted", "Would adopt")} {goal} in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
 
 
 @goal_app.command(
@@ -1323,12 +1340,14 @@ def agent_start(
     name = session_name(p.name, g, actor)
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, g))
+    context, sources = _context_file(
+        p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=g)
+    )
     env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
     _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
     typer.echo(f'{dry_run.verb("Launched", "Would launch")} agent in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
 
 
 @agent_app.command('resume', cls=PassthroughCommand, help="Reattach to an agent's session.")
@@ -1352,12 +1371,14 @@ def agent_resume(
     name = session_name(p.name, g, actor)
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
-    context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, g))
+    context, sources = _context_file(
+        p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=g)
+    )
     env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
     _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
 
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')
