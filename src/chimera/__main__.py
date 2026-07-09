@@ -46,6 +46,7 @@ from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.init import init as _init
 from chimera.commands.ls import Board, board
 from chimera.commands.project.add import add as _project_add
+from chimera.commands.project.checkout import checkout as _project_checkout
 from chimera.commands.project.ls import projects as _projects
 from chimera.commands.project.new import new as _project_new
 from chimera.commands.project.push import push as _project_push
@@ -940,14 +941,44 @@ def project_new(
 def project_push(
     ctx: typer.Context,
     url: Annotated[str, typer.Argument(help='Git URL to push to and track as origin')],
+    checkout: Annotated[
+        Path | None,
+        typer.Option('--checkout', help='Also check out the pushed branch here'),
+    ] = None,
     dry: Annotated[
         bool, typer.Option('--dry', help='Preview the push and remote wiring; change nothing')
     ] = False,
     project: ProjectOpt = None,
 ) -> None:
     dry_run = Dry(dry)
-    branch = _project_push(_project(ctx, project).repo, url, dry_run)
+    checkout = checkout.expanduser() if checkout else None
+    p = _project(ctx, project)
+    branch = _project_push(p.repo, url, dry_run, checkout, p.worktrees)
     typer.echo(f'{dry_run.verb("Pushed", "Would push")} {branch} to {url} (origin)')
+    if checkout is not None:
+        typer.echo(f'{dry_run.verb("Checked out", "Would check out")} at {checkout}')
+
+
+@project_app.command(
+    'checkout',
+    cls=LoggingCommand,
+    help='Check out a branch (default: the default branch) as a plain worktree at <path>.',
+)
+@logs(_project_checkout)
+def project_checkout(
+    ctx: typer.Context,
+    path: Annotated[Path, typer.Argument(help='Where to check the branch out')],
+    branch: Annotated[
+        str | None,
+        typer.Option('--branch', help='Branch to check out (default: the default branch)'),
+    ] = None,
+    offline: OfflineOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    path = path.expanduser()
+    p = _project(ctx, project)
+    branch = _project_checkout(p.repo, p.worktrees, path, branch, fetch=not offline)
+    typer.echo(f'Checked out {branch} at {path}')
 
 
 @project_app.command(

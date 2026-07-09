@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from giterator import Git
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, TempDir, not_there
 
@@ -40,6 +41,18 @@ def workspace(tmpdir: TempDir) -> Path:
 def git_repo(tmpdir: TempDir) -> Repo:
     repo = Repo.make(tmpdir / 'repo')
     repo.commit_content('seed')
+    return repo
+
+
+@pytest.fixture()
+def bare_repo(tmpdir: TempDir) -> Path:
+    """A bare `repo/` with one commit on main and no remote — what `ch project new` leaves,
+    so (unlike `git_repo`) main isn't checked out anywhere and is free to check out."""
+    source = Repo.make(tmpdir / 'source')
+    source.commit_content('seed')
+    repo = tmpdir / 'proj' / 'repo'
+    Git(tmpdir.path)('init', '--bare', '-b', 'main', str(repo))
+    source('push', str(repo), 'main')
     return repo
 
 

@@ -3,13 +3,20 @@ from pathlib import Path
 from giterator import GitError
 from loguru import logger
 
+from chimera.commands.project.checkout import checkout as project_checkout
 from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.git import Git
 from chimera.worktrees import default_branch
 
 
-def push(repo: Path, url: str, dry: Dry = Dry()) -> str:
+def push(
+    repo: Path,
+    url: str,
+    dry: Dry = Dry(),
+    checkout: Path | None = None,
+    worktrees: Path | None = None,
+) -> str:
     """Push the default branch to ``url`` and wire it in as ``origin``; return the branch.
 
     Graduates a workspace-only project (``ch project new``) into an ordinary remote-backed
@@ -24,7 +31,14 @@ def push(repo: Path, url: str, dry: Dry = Dry()) -> str:
     and the branch just pushed *is* the local default, so it needs no asking. Refuses when
     an origin already
     exists (change it with ``git remote`` directly) or there is no default branch to push.
+
+    ``checkout``, if given, also stands up a plain worktree of the pushed branch there once
+    the wiring is done — the same follow-on ``project new``/``project add`` offer, so
+    graduating and getting a checkout is one command. It needs ``worktrees`` (the project's
+    worktrees root, which the checkout must sit outside) alongside it.
     """
+    if checkout is not None and worktrees is None:
+        raise TypeError('checkout requires worktrees')
     git = Git(repo)
     if 'origin' in git('remote').split():
         existing = git('remote', 'get-url', 'origin').strip()
@@ -44,4 +58,6 @@ def push(repo: Path, url: str, dry: Dry = Dry()) -> str:
         logger.bind(url=url, branch=branch, sha=git.rev_parse(branch, short=False)).info,
         'project push: pushed',
     )
+    if checkout is not None and worktrees is not None:
+        dry(project_checkout, repo, worktrees, checkout, branch, fetch=False)
     return branch
