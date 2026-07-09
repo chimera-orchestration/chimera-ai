@@ -179,8 +179,16 @@ straight to the URL *before* writing any config, so a failed push leaves zero co
 behind; then `remote add origin`, `fetch --prune`, `remote set-head` to the pushed branch
 (explicit, not `-a` — an empty remote's unborn `HEAD` may name a branch that doesn't exist
 yet, which `-a` can't resolve), and upstream wired for the default branch only. Takes
-`--dry`. Refuses when an origin already exists.
+`--dry`. Refuses when an origin already exists. `--checkout <path>` also stands up a plain
+worktree of the pushed branch there once the wiring is done — graduate and get a checkout
+in one command, as `project new`/`project add` offer (skipped under `--dry`).
 After it, nothing distinguishes the project from a URL-added one.
+
+`ch project checkout <path> [--branch <name>]` stands up a plain worktree of `--branch`
+(default: the default branch) at `<path>` — the discoverable name for `ch worktree add
+<branch> <path>`'s ad-hoc mode (below), for when the `--checkout` moment at
+`new`/`add`/`push` has passed. Everything (existing vs new branch, upstream wiring,
+refusing a path under `worktrees/`) is that mode's behaviour, unchanged.
 
 `ch project add <url|path>` (run anywhere in the workspace) dispatches on its argument:
 - a git URL — bare-clones into `{project}/repo/` (no working tree there; all work happens in

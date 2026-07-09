@@ -18,10 +18,10 @@ def _target(tmpdir: TempDir) -> Path:
     return target
 
 
-def _cli_project(tmpdir: TempDir, repo: Repo, replace: Replacer) -> None:
+def _cli_project(tmpdir: TempDir, repo: Path, replace: Replacer) -> None:
     workspace = tmpdir.makedir('lycia')
     tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
-    tmpdir.dump('lycia/myproj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})
+    tmpdir.dump('lycia/myproj/config.yaml', {'kind': 'project', 'repo': str(repo)})
     replace.in_environ('CHIMERA_WORKSPACE', str(workspace))
     os.chdir(workspace / 'myproj')  # the CLI infers the project from cwd
 
@@ -86,6 +86,24 @@ def test_push_failure_records_no_origin(tmpdir: TempDir, git_repo: Repo) -> None
     assert not Git(git_repo.path)('remote').strip()  # no config written
 
 
+def test_push_checkout_stands_up_the_pushed_branch(tmpdir: TempDir, bare_repo: Path) -> None:
+    target = _target(tmpdir)
+    path = tmpdir / 'checkout'
+    push(bare_repo, str(target), checkout=path, worktrees=tmpdir / 'proj' / 'worktrees')
+    git = Git(path)
+    compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
+    compare(
+        git('for-each-ref', '--format=%(upstream:short)', 'refs/heads/main').strip(),
+        expected='origin/main',
+    )
+
+
+def test_push_checkout_requires_worktrees(tmpdir: TempDir, git_repo: Repo) -> None:
+    with ShouldRaise(TypeError('checkout requires worktrees')):
+        push(git_repo.path, str(_target(tmpdir)), checkout=tmpdir / 'checkout')
+    assert not Git(git_repo.path)('remote').strip()  # raised before anything ran
+
+
 def test_push_dry_mutates_nothing(tmpdir: TempDir, git_repo: Repo) -> None:
     target = _target(tmpdir)
     with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
@@ -116,13 +134,13 @@ def test_push_logs_the_pushed_branch(tmpdir: TempDir, git_repo: Repo) -> None:
 def test_project_push_cli(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
 ) -> None:
-    _cli_project(tmpdir, git_repo, replace)
+    _cli_project(tmpdir, git_repo.path, replace)
     target = _target(tmpdir)
     url = str(target)
     start, end = action_logs(
         'project push',
         'chimera.commands.project.push.push',
-        {'url': url, 'dry': False, 'project': None},
+        {'url': url, 'checkout': None, 'dry': False, 'project': None},
     )
     pushed = {
         'level': 'INFO',
@@ -141,7 +159,7 @@ def test_project_push_cli(
 def test_project_push_cli_dry_previews(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
 ) -> None:
-    _cli_project(tmpdir, git_repo, replace)
+    _cli_project(tmpdir, git_repo.path, replace)
     target = _target(tmpdir)
     url = str(target)
     command.run('project', 'push', url, '--dry').check(
@@ -149,8 +167,51 @@ def test_project_push_cli_dry_previews(
         logging=action_logs(
             'project push',
             'chimera.commands.project.push.push',
-            {'url': url, 'dry': True, 'project': None},
+            {'url': url, 'checkout': None, 'dry': True, 'project': None},
         ),
     )
     compare(Git(target).branches(), expected=[])  # untouched
     assert not Git(git_repo.path)('remote').strip()
+
+
+def test_project_push_cli_checkout(
+    tmpdir: TempDir, bare_repo: Path, replace: Replacer, command: Command
+) -> None:
+    _cli_project(tmpdir, bare_repo, replace)
+    target = _target(tmpdir)
+    url = str(target)
+    path = tmpdir / 'checkout'
+    start, end = action_logs(
+        'project push',
+        'chimera.commands.project.push.push',
+        {'url': url, 'checkout': str(path), 'dry': False, 'project': None},
+    )
+    pushed = {
+        'level': 'INFO',
+        'url': url,
+        'branch': 'main',
+        'sha': Git(bare_repo).rev_parse('main', short=False),
+        'message': 'project push: pushed',
+    }
+    command.run('project', 'push', url, '--checkout', str(path)).check(
+        output=f'Pushed main to {url} (origin)\nChecked out at {path}',
+        logging=[start, pushed, end],
+    )
+    compare(Git(path)('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
+
+
+def test_project_push_cli_checkout_dry_previews(
+    tmpdir: TempDir, bare_repo: Path, replace: Replacer, command: Command
+) -> None:
+    _cli_project(tmpdir, bare_repo, replace)
+    url = str(_target(tmpdir))
+    path = tmpdir / 'checkout'
+    command.run('project', 'push', url, '--checkout', str(path), '--dry').check(
+        output=f'Would push main to {url} (origin)\nWould check out at {path}',
+        logging=action_logs(
+            'project push',
+            'chimera.commands.project.push.push',
+            {'url': url, 'checkout': str(path), 'dry': True, 'project': None},
+        ),
+    )
+    assert not path.exists()
