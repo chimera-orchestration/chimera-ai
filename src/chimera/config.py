@@ -32,10 +32,16 @@ def _name_shorthand(value: object) -> object:
     return {'name': value} if isinstance(value, str) else value
 
 
+# How many days an unused launch-context render is kept before doctor's stale-context
+# check prunes it, when the workspace config doesn't say otherwise.
+CONTEXT_RETENTION_DAYS = 7
+
+
 class WorkspaceConfig(BaseModel):
     kind: Literal['workspace']
     agent: AgentConfig = AgentConfig()
     captain: Annotated[CaptainConfig, BeforeValidator(_name_shorthand)] = CaptainConfig()
+    context_retention_days: int = CONTEXT_RETENTION_DAYS
 
 
 class ProjectConfig(BaseModel):

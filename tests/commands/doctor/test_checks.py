@@ -12,7 +12,6 @@ from testfixtures.loguru import LoguruSource
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
-    CONTEXT_RETENTION,
     WorkspaceDirsCheck,
     CaptainCheck,
     ChimeraUpToDateCheck,
@@ -32,6 +31,7 @@ from chimera.commands.doctor.checks import (
 )
 from chimera.commands.doctor.core import Check, Exclusions, Finding
 from chimera.commands.init import TEMPLATE
+from chimera.config import CONTEXT_RETENTION_DAYS
 from chimera.worktrees import is_dirty, registered_worktrees
 
 
@@ -1488,8 +1488,8 @@ def _context_render(ws, name: str, *, age: timedelta | None = None):
     return path
 
 
-def _stale_context(path) -> str:
-    return f'stale context render {path} — unused for over {CONTEXT_RETENTION.days} days'
+def _stale_context(path, days: int = CONTEXT_RETENTION_DAYS) -> str:
+    return f'stale context render {path} — unused for over {days} days'
 
 
 class TestStaleContext:
@@ -1503,7 +1503,9 @@ class TestStaleContext:
 
     def test_stale_reported_without_fix(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
-        path = _context_render(ws, 'captain-ff8aa221', age=CONTEXT_RETENTION + timedelta(days=1))
+        path = _context_render(
+            ws, 'captain-ff8aa221', age=timedelta(days=CONTEXT_RETENTION_DAYS + 1)
+        )
         compare(
             _run(StaleContextCheck(), ws),
             expected=[Finding('stale-context', _stale_context(path), resolved=False, fixable=True)],
@@ -1512,7 +1514,9 @@ class TestStaleContext:
 
     def test_fix_prunes_stale_and_keeps_fresh(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
-        stale = _context_render(ws, 'captain-ff8aa221', age=CONTEXT_RETENTION + timedelta(days=1))
+        stale = _context_render(
+            ws, 'captain-ff8aa221', age=timedelta(days=CONTEXT_RETENTION_DAYS + 1)
+        )
         _context_render(ws, 'captain-cf93215f')
         compare(
             _run(StaleContextCheck(), ws, fix=True),
@@ -1522,12 +1526,31 @@ class TestStaleContext:
 
     def test_excluded_never_pruned(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
-        path = _context_render(ws, 'captain-ff8aa221', age=CONTEXT_RETENTION + timedelta(days=1))
+        path = _context_render(
+            ws, 'captain-ff8aa221', age=timedelta(days=CONTEXT_RETENTION_DAYS + 1)
+        )
         compare(
             _run(StaleContextCheck(), ws, fix=True, exclude=Exclusions((path.name,))),
             expected=[Finding('stale-context', _stale_context(path), resolved=False, fixable=True)],
         )
         assert path.exists()
+
+    def test_window_from_workspace_config(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump(ws / 'config.yaml', {'kind': 'workspace', 'context_retention_days': 1})
+        path = _context_render(ws, 'captain-ff8aa221', age=timedelta(days=2))
+        compare(
+            _run(StaleContextCheck(), ws),
+            expected=[
+                Finding('stale-context', _stale_context(path, days=1), resolved=False, fixable=True)
+            ],
+        )
+
+    def test_invalid_window_uses_the_default(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump(ws / 'config.yaml', {'kind': 'workspace', 'context_retention_days': 'soon'})
+        _context_render(ws, 'captain-ff8aa221', age=timedelta(days=CONTEXT_RETENTION_DAYS - 1))
+        compare(_run(StaleContextCheck(), ws), expected=[])
 
 
 class TestWorkspaceClean:

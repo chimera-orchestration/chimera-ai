@@ -51,6 +51,14 @@ def test_load_config_agent_cascade_levels(tmpdir: TempDir) -> None:
     )
 
 
+def test_load_config_context_retention(tmpdir: TempDir) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'context_retention_days': 3})
+    compare(
+        load_config(tmpdir.path / 'ws'),
+        expected=WorkspaceConfig(kind='workspace', context_retention_days=3),
+    )
+
+
 def test_workspace_config_parses_the_root(workspace: Path) -> None:
     compare(workspace_config(workspace), expected=WorkspaceConfig(kind='workspace'))
 
