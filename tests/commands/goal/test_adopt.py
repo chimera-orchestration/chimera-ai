@@ -1,5 +1,5 @@
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from giterator import Git
@@ -7,6 +7,9 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
+from chimera.agents.registry import AgentSpec
+from chimera.config import UserError
+from chimera.dry import Dry
 from chimera.commands.agent import agent
 from chimera.commands.goal import adopt as goal_adopt
 from chimera.commands.goal.adopt import adopt
@@ -29,8 +32,12 @@ def _stub_agent(replace: Replacer) -> list[object]:
         prompt: str | None = None,
         extra: Sequence[str] = (),
         dangerous: bool = False,
+        spec: AgentSpec = AgentSpec(),
+        context: Path | None = None,
+        env: Mapping[str, str] = {},
+        dry: Dry = Dry(),
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context, env))
 
     replace.in_module(agent, record, module=goal_adopt)
     return calls
@@ -38,6 +45,20 @@ def _stub_agent(replace: Replacer) -> list[object]:
 
 def _rev(repo_path: Path, ref: str) -> str:
     return Git(repo_path).rev_parse(ref, short=False)
+
+
+def test_adopt_dry_restructures_nothing(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    git_repo('checkout', '-b', 'feature')
+    git_repo.commit_content('feature-work')
+    git_repo('checkout', 'main')
+    worktrees = tmpdir / 'worktrees'
+    _stub_agent(replace)
+    compare(
+        adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent', dry=Dry(True)),
+        expected=worktrees / 'feature@agent',
+    )
+    assert not worktrees.exists()  # no worktree dir
+    compare(Git(git_repo.path).branches(), expected=['feature', 'main'])  # branch untouched
 
 
 def test_adopt_restructures_the_branch_then_launches_the_agent(
@@ -57,7 +78,21 @@ def test_adopt_restructures_the_branch_then_launches_the_agent(
     compare(Git(git_repo.path).branches(), expected=['feature/agent', 'feature/human', 'main'])
     compare(_rev(git_repo.path, 'feature/human'), expected=tip)
     compare(_rev(git_repo.path, 'feature/agent'), expected=tip)
-    compare(calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', None, (), False)])
+    compare(
+        calls,
+        expected=[
+            (
+                worktrees / 'feature@agent',
+                'proj@feature@agent',
+                None,
+                (),
+                False,
+                AgentSpec(),
+                None,
+                {},
+            )
+        ],
+    )
 
 
 def test_adopt_keeps_the_adopted_branchs_upstream(
@@ -104,7 +139,19 @@ def test_adopt_passes_the_prompt_to_the_agent(
     calls = _stub_agent(replace)
     adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent', prompt='do it')
     compare(
-        calls, expected=[(worktrees / 'feature@agent', 'proj@feature@agent', 'do it', (), False)]
+        calls,
+        expected=[
+            (
+                worktrees / 'feature@agent',
+                'proj@feature@agent',
+                'do it',
+                (),
+                False,
+                AgentSpec(),
+                None,
+                {},
+            )
+        ],
     )
 
 
@@ -144,6 +191,23 @@ def test_adopt_refuses_when_no_branch_to_adopt(
     _stub_agent(replace)
     with ShouldRaise(RuntimeError("no branch 'ghost' to adopt")):
         adopt(git_repo.path, tmpdir / 'worktrees', 'ghost', 'proj@ghost@agent')
+
+
+def test_adopt_refuses_a_nested_branch(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    # the adopted branch becomes the goal name verbatim, so a '/'-nested branch can't fit
+    # the <goal>/<actor> / <goal>@<actor> grammar — refused even under --dry, untouched
+    git_repo('branch', 'feature/x')
+    _stub_agent(replace)
+    with ShouldRaise(
+        UserError(
+            "'feature/x' is not a valid goal name: no path separators — "
+            "goal names are single path segments, like 'feature-x' or 'pr-123'"
+        )
+    ):
+        adopt(
+            git_repo.path, tmpdir / 'worktrees', 'feature/x', 'proj@feature/x@agent', dry=Dry(True)
+        )
+    compare(Git(git_repo.path).branches(), expected=['feature/x', 'main'])
 
 
 def test_adopt_logs_the_refs_before_and_after(
@@ -188,7 +252,15 @@ def _adopt_logs(base: str, worktree: object, *, dangerous: bool = False) -> list
     start, end = action_logs(
         'goal adopt',
         'chimera.commands.goal.adopt.adopt',
-        {'goal': 'feature-x', 'prompt': None, 'project': None, 'dangerous': dangerous},
+        {
+            'goal': 'feature-x',
+            'prompt': None,
+            'project': None,
+            'dangerous': dangerous,
+            'harness': None,
+            'model': None,
+            'dry': False,
+        },
     )
     event = {
         'level': 'INFO',
@@ -217,7 +289,21 @@ def test_goal_adopt_cli(
     )
     tmpdir.compare(['feature-x@agent'], path='project/worktrees', recursive=False)
     compare(Git(git_repo.path).branches(), expected=['feature-x/agent', 'feature-x/human', 'main'])
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], False)])
+    compare(
+        calls,
+        expected=[
+            (
+                expected,
+                'project@feature-x@agent',
+                None,
+                [],
+                False,
+                AgentSpec(),
+                None,
+                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+            )
+        ],
+    )
 
 
 def test_goal_adopt_cli_passes_extra_flags_through(
@@ -233,7 +319,19 @@ def test_goal_adopt_cli_passes_extra_flags_through(
         logging=_adopt_logs(base, expected),
     )
     compare(
-        calls, expected=[(expected, 'project@feature-x@agent', None, ['--model', 'opus'], False)]
+        calls,
+        expected=[
+            (
+                expected,
+                'project@feature-x@agent',
+                None,
+                ['--model', 'opus'],
+                False,
+                AgentSpec(),
+                None,
+                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+            )
+        ],
     )
 
 
@@ -249,4 +347,65 @@ def test_goal_adopt_cli_dangerous(
         output=f'Adopted feature-x in {expected}',
         logging=_adopt_logs(base, expected, dangerous=True),
     )
-    compare(calls, expected=[(expected, 'project@feature-x@agent', None, [], True)])
+    compare(
+        calls,
+        expected=[
+            (
+                expected,
+                'project@feature-x@agent',
+                None,
+                [],
+                True,
+                AgentSpec(),
+                None,
+                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+            )
+        ],
+    )
+
+
+def test_goal_adopt_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -> None:
+    git_repo('checkout', '-b', 'feature')
+    tip = git_repo.commit_content('feature-work', short=False)
+    git_repo('checkout', 'main')
+    project = _project(tmpdir, git_repo)
+    worktree = Path.cwd() / 'worktrees' / 'feature@agent'  # cwd resolves symlinks like the wrapper
+    command.run('goal', 'adopt', 'feature', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would adopt feature in {worktree}',
+                'harness: claude',
+                'role: agent (scope: project@feature)',
+                'prompt: (interactive)',
+                'context: (none)',
+            ]
+        ),
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'goal adopt',
+                'phase': 'start',
+                'function': 'chimera.commands.goal.adopt.adopt',
+                'params': {
+                    'goal': 'feature',
+                    'prompt': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': True,
+                    'project': None,
+                },
+            },
+            {
+                'level': 'INFO',
+                'message': 'goal adopt: refs',
+                'goal': 'feature',
+                # nothing moved: the bare branch is the state on both sides
+                'git': {'before': {'feature': tip}, 'after': {'feature': tip}},
+                'worktree': str(worktree),
+            },
+            {'level': 'INFO', 'command': 'goal adopt', 'phase': 'end'},
+        ],
+    )
+    assert not (project / 'worktrees').exists()  # nothing created
+    compare(Git(git_repo.path).branches(), expected=['feature', 'main'])

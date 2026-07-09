@@ -7,7 +7,8 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.commands.agent import live_sessions
+from chimera.agents import Session
+from chimera.commands.agent import live
 from chimera.commands.goal.rename import RenameResult, rename
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
@@ -17,7 +18,7 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
+    replace.in_module(live, lambda worktree: [], module=worktree_rm)
 
 
 def _goal(tmpdir: TempDir, repo: Repo, actors: tuple[str, ...] | None = None) -> Path:
@@ -229,6 +230,16 @@ class TestRefusals:
         with ShouldRaise(UserError("'bad..name' is not a valid goal name")):
             rename(git_repo.path, worktrees, 'g', 'bad..name')
 
+    def test_path_separator_in_new_name(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        worktrees = _goal(tmpdir, git_repo)
+        with ShouldRaise(
+            UserError(
+                "'a/b' is not a valid goal name: no path separators — "
+                "goal names are single path segments, like 'feature-x' or 'pr-123'"
+            )
+        ):
+            rename(git_repo.path, worktrees, 'g', 'a/b')
+
     def test_bare_branch_blocks_the_new_namespace(self, tmpdir: TempDir, git_repo: Repo) -> None:
         worktrees = _goal(tmpdir, git_repo)
         git_repo('branch', 'h')
@@ -257,8 +268,8 @@ class TestRefusals:
     ) -> None:
         worktrees = _goal(tmpdir, git_repo)
         replace.in_module(
-            live_sessions,
-            lambda worktree: [{'pid': 4242, 'status': 'idle', 'sessionId': 'x'}],
+            live,
+            lambda worktree: [Session('x', 'x', 'idle', worktree, None, pid=4242)],
             module=worktree_rm,
         )
         with ShouldRaise(

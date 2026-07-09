@@ -37,6 +37,26 @@ class TestGoalMode:
             Git(git_repo.path).branches(), expected=['g/agent', 'g/human', 'g/reviewer', 'main']
         )
 
+    def test_refuses_a_traversal_goal(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        with ShouldRaise(
+            UserError(
+                "'../escape' is not a valid goal name: no path separators — "
+                "goal names are single path segments, like 'feature-x' or 'pr-123'"
+            )
+        ):
+            add(git_repo.path, tmpdir / 'worktrees', goal='../escape')
+        assert not (tmpdir / 'worktrees').exists()
+
+    def test_refuses_a_traversal_actor(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        with ShouldRaise(
+            UserError(
+                "'../escape' is not a valid actor name: no path separators — "
+                "actor names are single path segments, like 'agent' or 'reviewer'"
+            )
+        ):
+            add(git_repo.path, tmpdir / 'worktrees', goal='g', actors=('../escape',))
+        assert not (tmpdir / 'worktrees').exists()
+
     def test_checks_out_the_agent_branch_in_its_worktree(
         self, tmpdir: TempDir, git_repo: Repo
     ) -> None:

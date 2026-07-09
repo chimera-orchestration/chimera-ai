@@ -5,7 +5,7 @@ from giterator.testing import Repo
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.commands.worktree.add import add
-from chimera.config import NotInWorkspaceError, ProjectConfig
+from chimera.config import NotInWorkspaceError, ProjectConfig, UserError
 from chimera.context import (
     CannotIdentifyProjectError,
     GoalRequiredError,
@@ -124,6 +124,18 @@ class TestResolveGoal:
         project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
         compare(resolve_goal(tmpdir.path, project, 'whatever'), expected='whatever')
 
+    def test_explicit_traversal_refuses(self, tmpdir: TempDir, git_repo: Repo) -> None:
+        project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
+        # '-g ../../projb/worktrees/g' must never come back as a goal — it would path-escape
+        # the project's worktrees dir when joined into a worktree path
+        with ShouldRaise(
+            UserError(
+                "'../../projb/worktrees/g' is not a valid goal name: no path separators — "
+                "goal names are single path segments, like 'feature-x' or 'pr-123'"
+            )
+        ):
+            resolve_goal(tmpdir.path, project, '../../projb/worktrees/g')
+
     def test_infers_from_a_goal_branch(self, tmpdir: TempDir, git_repo: Repo) -> None:
         project = _project_with_goal(tmpdir, tmpdir.path, git_repo)
         checkout = tmpdir / 'human'
@@ -183,6 +195,17 @@ class TestGoalFromWorktree:
 
 
 class TestResolveScope:
+    def test_explicit_goal_must_be_a_valid_name(self, tmpdir: TempDir, workspace: Path) -> None:
+        _project(tmpdir, workspace)
+        # widening covers inference failures; a -g the grammar can't hold raises, like -p
+        with ShouldRaise(
+            UserError(
+                "'../x' is not a valid goal name: no path separators — "
+                "goal names are single path segments, like 'feature-x' or 'pr-123'"
+            )
+        ):
+            resolve_scope(workspace, goal='../x')
+
     def test_widens_to_all_projects_at_the_workspace_root(
         self, tmpdir: TempDir, workspace: Path
     ) -> None:

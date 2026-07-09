@@ -1,9 +1,18 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
+from chimera.dry import Dry
 from chimera.git import Git
-from chimera.worktrees import AGENT, HUMAN, branch, registered_worktrees, worktree_path
+from chimera.worktrees import (
+    AGENT,
+    HUMAN,
+    branch,
+    registered_worktrees,
+    require_valid_goal,
+    worktree_path,
+)
 
 
 def adopt(
@@ -14,12 +23,17 @@ def adopt(
     prompt: str | None = None,
     extra: Sequence[str] = (),
     dangerous: bool = False,
+    spec: AgentSpec = AgentSpec(),
+    context: Path | None = None,
+    env: Mapping[str, str] = {},
+    dry: Dry = Dry(),
 ) -> Path:
     """Adopt an existing branch ``<goal>`` as a goal, then launch its agent.
 
     Restructures the branch into ``<goal>/human`` and ``<goal>/agent`` — preserving its
     commits as the base — creates the agent worktree, and launches the agent, otherwise
-    behaving like ``goal start``. ``dangerous`` makes bypass-permissions mode reachable.
+    behaving like ``goal start`` (``env`` is the role stamp, as there).
+    ``dangerous`` makes bypass-permissions mode reachable.
     Idempotent: the restructure is skipped once both actor branches exist, and the worktree
     is reused when it is already checked out. Returns the agent worktree.
 
@@ -27,17 +41,21 @@ def adopt(
     are logged before/after the change (see ``agent-docs/logging.md``): the ``before`` snapshot
     is captured prior to touching anything, so the record can restore what the rename moved.
     """
+    # the adopted branch *becomes* the goal name verbatim, so it must fit the goal grammar —
+    # a '/'-nested branch can't be adopted (and, before the Dry guard, --dry refuses it too)
+    require_valid_goal(goal)
     git = Git(repo)
     # the snapshot covers the branch being adopted (``<goal>``) and both actor branches, so the
     # same refs describe the state before adoption (the bare branch) and after (the pair);
     # ``always`` because the line lands the worktree too — the recovery record even on a re-run
+    agent_worktree = worktree_path(worktrees_root, goal, AGENT)
     with git.ref_log(
         'goal adopt: refs', goal, branch(goal, HUMAN), branch(goal, AGENT), always=True, goal=goal
     ) as refs:
-        restructure(git, goal)
-        agent_worktree = ensure_worktree(git, worktrees_root, goal)
+        dry(restructure, git, goal)
+        dry(ensure_worktree, git, worktrees_root, goal)
         refs.bind(worktree=str(agent_worktree))
-    agent(agent_worktree, name, prompt, extra, dangerous)
+    agent(agent_worktree, name, prompt, extra, dangerous, spec, context, env, dry)
     return agent_worktree
 
 

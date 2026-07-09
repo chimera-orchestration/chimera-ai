@@ -20,6 +20,9 @@ def replace() -> Iterator[Replacer]:
 def _clear_workspace_env(replace: Replacer) -> None:
     replace.in_environ('CHIMERA_WORKSPACE', not_there)  # tests opt in explicitly
     replace.in_environ('SHELL', not_there)  # keeps the shell-completion check inert
+    replace.in_environ('CLAUDECODE', not_there)  # the suite itself often runs under an AI agent
+    replace.in_environ('CHIMERA_ROLE', not_there)  # …possibly one chimera itself launched
+    replace.in_environ('CHIMERA_ROLE_SCOPE', not_there)
 
 
 @pytest.fixture()

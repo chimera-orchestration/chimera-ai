@@ -630,6 +630,19 @@ def test_refuses_when_move_and_to_are_the_same(tmpdir: TempDir, git_repo: Repo) 
         sync(git_repo.path, 'g', mover='agent', target='agent')
 
 
+def test_refuses_a_traversal_mover(tmpdir: TempDir, git_repo: Repo) -> None:
+    # the mover may be created, and lands in refs and the append-marker path — a '../' name
+    # would escape both
+    _goal(tmpdir, git_repo)
+    with ShouldRaise(
+        UserError(
+            "'../x' is not a valid actor name: no path separators — "
+            "actor names are single path segments, like 'agent' or 'reviewer'"
+        )
+    ):
+        sync(git_repo.path, 'g', mover='../x', target='agent')
+
+
 def test_materialises_a_custom_actor(tmpdir: TempDir, git_repo: Repo) -> None:
     _goal(tmpdir, git_repo)
     result = sync(git_repo.path, 'g', mover='reviewer', target='agent')

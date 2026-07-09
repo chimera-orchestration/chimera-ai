@@ -99,6 +99,30 @@ class GitignoreCheck:
             yield Finding(self.name, messages[entry], resolved=fixing[entry], fixable=True)
 
 
+class WorkspaceDirsCheck:
+    """Every directory the current workspace template ships exists in the workspace.
+
+    Reconciles workspaces created before a template dir was added (e.g. ``roles/``).
+    Derived from the template itself, never a hand-kept list, so it can't drift.
+    ``--fix`` creates the dir with a ``.gitkeep`` (matching what ``init`` ships), which
+    the workspace-clean sweep then commits.
+    """
+
+    name = 'workspace-dirs'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        for template_dir in sorted(d for d in TEMPLATE.iterdir() if d.is_dir()):
+            target = workspace / template_dir.name
+            if target.is_dir():
+                continue
+            message = f'{target} missing'
+            fixing = fix and not exclude.matches(self.name, message)
+            if fixing:
+                target.mkdir()
+                (target / '.gitkeep').touch()
+            yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
 class ProjectConfigCheck:
     """Each project's config.yaml carries kind: project."""
 
@@ -740,6 +764,7 @@ class WorkspaceCommitCheck:
 CHECKS: tuple[Check, ...] = (
     WorkspaceConfigCheck(),
     GitignoreCheck(),
+    WorkspaceDirsCheck(),
     ProjectConfigCheck(),
     StaleHumanWorktreeCheck(),
     InertBranchCheck(),

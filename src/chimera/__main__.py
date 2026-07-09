@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -11,13 +11,32 @@ from typer.core import TyperCommand, TyperGroup
 from typer.main import get_command
 
 from chimera import logging
-from chimera.agent_env import RESTRICTED_OPTIONS, running_under_ai_agent
-from chimera.commands.agent import Agent, agents, scope_line, scoped
+from chimera.agent_env import (
+    RESTRICTED_OPTIONS,
+    ROLE_AGENT,
+    ROLE_CAPTAIN,
+    ROLE_COMMANDS,
+    ROLE_ENV_VAR,
+    ROLE_MANAGER,
+    ROLE_SCOPE_ENV_VAR,
+    ai_session,
+    refuse_cross_scope,
+    role_env,
+    role_scope_for,
+    session_role,
+)
+from chimera.agents import Session
+from chimera.agents.context import materialize, render, role_context
+from chimera.agents.registry import AgentSpec, resolve_spec
+from chimera.commands.agent import agents, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
+from chimera.commands.chat import chat as _chat
+from chimera.commands.chat import chat_target
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
+from chimera.commands.errand import errand as _errand
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.goal.rename import rename as _goal_rename
@@ -35,8 +54,14 @@ from chimera.commands.review import review as _review
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
-from chimera.completions import complete_actor, complete_check, complete_goal, complete_project
-from chimera.config import UserError
+from chimera.completions import (
+    complete_actor,
+    complete_check,
+    complete_goal,
+    complete_harness,
+    complete_project,
+)
+from chimera.config import NotInWorkspaceError, UserError, workspace_config
 from chimera.context import (
     Project,
     Scope,
@@ -46,8 +71,18 @@ from chimera.context import (
     resolve_workspace,
 )
 from chimera.dry import Dry
+from chimera.git import completing
 from chimera.help import command_index, render_json, render_text
-from chimera.worktrees import AGENT, SEP, session_name, worktree_path
+from chimera.prime import prime as _prime
+from chimera.prime import resolve_role
+from chimera.worktrees import (
+    AGENT,
+    SEP,
+    require_valid_actor,
+    require_valid_goal,
+    session_name,
+    worktree_path,
+)
 
 # Reusable option types — declared once, shared across commands (callables never see them).
 ProjectOpt = Annotated[
@@ -136,6 +171,28 @@ DangerousOpt = Annotated[
         '--dangerous',
         help='Make bypass-permissions mode reachable via shift-tab, dropping auto-accept from '
         'the cycle. AGENTS: never pass this on your own — only with explicit user instruction.',
+    ),
+]
+HarnessOpt = Annotated[
+    str | None,
+    typer.Option(
+        '--harness',
+        help='Harness to launch (default: config cascade, then claude)',
+        autocompletion=complete_harness,
+    ),
+]
+ModelOpt = Annotated[
+    str | None,
+    typer.Option(
+        '--model',
+        '-m',
+        help="Model for the session (default: config cascade, then the harness's own)",
+    ),
+]
+LaunchDryOpt = Annotated[
+    bool,
+    typer.Option(
+        '--dry', help='Preview the launch — harness, prompt, injected context — changing nothing'
     ),
 ]
 
@@ -292,9 +349,106 @@ def _passthrough(ctx: typer.Context) -> list[str]:
 
 
 def _project(ctx: typer.Context, explicit: str | None) -> Project:
-    return resolve_project(
+    """The project an action targets, held to the session's scope fence.
+
+    The single funnel every project-scoped *action* resolves through, so the fence
+    (``refuse_cross_scope``) checks the project actually resolved — an explicit
+    cross-scope ``-p`` and a cwd in another project refuse identically. Listers
+    resolve through ``_scope`` instead and are never fenced.
+    """
+    project = resolve_project(
         Path.cwd(), explicit if explicit is not None else _overrides(ctx).project
     )
+    refuse_cross_scope(project.name)
+    return project
+
+
+def _foreign(ctx: typer.Context, name: str) -> Project:
+    """The project an errand dispatches *into* — deliberately not :func:`_project`.
+
+    The scope fence guards the "who I act as" axis; an errand's positional names a
+    *target* whose whole point is being foreign, so it resolves unfenced — an axis,
+    not a hole: the verb's narrow semantics (one-shot, the read-only tool wall and
+    the ephemeral-worktree sweep) are the containment.
+    An inherited ``-p`` is refused rather than ignored — silently acting on the
+    positional while a flag said otherwise would be worse than either behaviour.
+    Exactly one caller — the errand command; a test pins that, so a second caller
+    can't quietly turn the exemption into a general escape hatch.
+    """
+    if _overrides(ctx).project is not None:
+        raise UserError('errand names its target positionally — drop -p')
+    return resolve_project(Path.cwd(), name)
+
+
+def _spec(project: Project, harness: str | None, model: str | None) -> AgentSpec:
+    """The agent to launch: flags, then the project's ``agent:``, then the workspace's.
+
+    A project is usable without a workspace around it (independence), so the workspace
+    level simply drops out of the cascade when none resolves.
+    """
+    try:
+        workspace = workspace_config(resolve_workspace(Path.cwd())).agent
+    except NotInWorkspaceError:
+        workspace = None
+    return resolve_spec(harness, model, project.config.agent, workspace)
+
+
+def _agent_intro(project: str, goal: str) -> str:
+    """The agent role's affirmative identity line — what the session is, never a prohibition."""
+    return (
+        f'You are the agent for goal {goal} on {project}; '
+        'this worktree and branch are your entire workspace.'
+    )
+
+
+def _context_file(project: Project | None, name: str, role: str, intro: str) -> Path | None:
+    """Render and store session ``name``'s launch context; ``None`` when there is none.
+
+    Role directives + the ``intro`` identity line lead the render (every chimera-launched
+    session knows what it is before anything else), then principles and knowledge. The
+    render needs a workspace both for the role/workspace-level sources and as the home of
+    the stored artifact (``logs/context/``), so a project standing outside any workspace
+    launches without injected context rather than failing.
+    """
+    try:
+        workspace = resolve_workspace(Path.cwd())
+    except NotInWorkspaceError:
+        return None
+    text = '\n\n'.join(
+        part for part in (role_context(workspace, role, intro), render(workspace, project)) if part
+    )
+    return materialize(workspace, name, text)
+
+
+def _dry_preview(
+    spec: AgentSpec,
+    prompt: str | None,
+    extra: list[str],
+    context: Path | None,
+    env: Mapping[str, str],
+    *,
+    target: str | None = None,
+    out: Path | None = None,
+) -> None:
+    """What a --dry launch would inject: agent, role stamp, prompt, passthrough and context.
+
+    ``target``/``out`` are errand's extra axes — the project dispatched into and where
+    the report would land (stdout when ``out`` is None); the other launchers leave them off.
+    """
+    if target is not None:
+        typer.echo(f'target: {target}')
+        typer.echo(f'out: {out}' if out is not None else 'out: (stdout)')
+    typer.echo(f'harness: {spec.harness}' + (f'  model: {spec.model}' if spec.model else ''))
+    role, scope = env[ROLE_ENV_VAR], env.get(ROLE_SCOPE_ENV_VAR)
+    typer.echo(f'role: {role} (scope: {scope})' if scope else f'role: {role}')
+    typer.echo(f'prompt: {prompt}' if prompt is not None else 'prompt: (interactive)')
+    if extra:
+        typer.echo(f'passthrough: {" ".join(extra)}')
+    if context is None:
+        typer.echo('context: (none)')
+    else:
+        typer.echo(f'context: {context}\n---')
+        typer.echo(context.read_text().rstrip())
 
 
 def _scope(
@@ -318,8 +472,14 @@ app = typer.Typer(
 
 @app.command(cls=LoggingCommand, help='Create a Chimera workspace at PATH.')
 @logs(_init)
-def init(path: Annotated[Path, typer.Argument()]) -> None:
-    typer.echo(f'Initialized workspace at {_init(path)}')
+def init(
+    path: Annotated[Path, typer.Argument()],
+    captain: Annotated[
+        str | None,
+        typer.Option('--captain', help="Name the workspace's captain persona (e.g. pegasus)"),
+    ] = None,
+) -> None:
+    typer.echo(f'Initialized workspace at {_init(path, captain)}')
 
 
 @app.command(
@@ -335,6 +495,24 @@ def help_(
 ) -> None:
     entries = command_index(ctx.find_root().command)
     typer.echo(render_json(entries) if as_json else render_text(entries, verbose=verbose))
+
+
+@app.command(
+    'prime',
+    cls=LoggingCommand,
+    help='How to work here, right now — the golden path for this scope.',
+)
+@logs(_prime)
+def prime(ctx: typer.Context) -> None:
+    scope = _scope(ctx, None, None)
+    typer.echo(
+        _prime(
+            resolve_role(session_role(), scope),
+            project=scope.project.name if scope.project else None,
+            goal=scope.goal,
+            persona=workspace_config(scope.workspace).captain.name,
+        )
+    )
 
 
 @app.command(cls=LoggingCommand, help='Check and (with --fix) repair workspace health.')
@@ -414,26 +592,37 @@ def _tag(finding: Finding) -> str:
 )
 @logs(board)
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
-    _render_board(board(_scope(ctx, project, goal, infer=False), agents()))
+    scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
+    rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
+    _render_board(board(scope, rows))
 
 
 # Detail (session title / last prompt) past this many chars is trimmed for listings.
 DETAIL_MAX = 80
 
 
-def _name(a: Agent) -> str:
-    """The agent's name, blanked when it merely echoes the id column."""
+def _name(a: Session) -> str:
+    """The session's name, blanked when it merely echoes the id column."""
     return '' if a.name == a.id else a.name
 
 
-def _detail(a: Agent) -> str:
-    """The agent's one-line detail, trimmed to ``DETAIL_MAX`` with an ellipsis."""
-    return a.detail if len(a.detail) <= DETAIL_MAX else a.detail[: DETAIL_MAX - 1] + '…'
+def _detail(a: Session) -> str:
+    """The session's one-line detail, trimmed to ``DETAIL_MAX`` with an ellipsis.
+
+    A stale row's detail is its reason — the mark is what the row is showing.
+    """
+    detail = a.stale if a.stale is not None else a.detail
+    return detail if len(detail) <= DETAIL_MAX else detail[: DETAIL_MAX - 1] + '…'
 
 
-def _summary(a: Agent) -> str:
+def _status(a: Session) -> str:
+    """The status column: ``stale`` displaces the registry's claim on a marked row."""
+    return 'stale' if a.stale is not None else a.status
+
+
+def _summary(a: Session) -> str:
     """``id  name  status  detail`` for a board row, dropping the name when blank."""
-    return '  '.join(part for part in (a.id, _name(a), a.status, _detail(a)) if part)
+    return '  '.join(part for part in (a.short, _name(a), a.status, _detail(a)) if part)
 
 
 def _render_board(b: Board) -> None:
@@ -474,9 +663,32 @@ def review(
         bool,
         typer.Option('--no-agent', help='Branch, fetch and check out the PR, but launch no agent'),
     ] = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context: Path | None = None
+    env: Mapping[str, str] = {}
+
+    def _render_context(name: str) -> Path | None:
+        # keyed by the session name _review resolves (pr-<N>, even from a URL argument);
+        # the handle is kept so the --dry preview shows the artifact rendered exactly once
+        nonlocal context
+        goal = name.split(SEP)[1]  # only the resolved name knows the goal, as with _role_stamp
+        context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
+        return context
+
+    def _role_stamp(name: str) -> Mapping[str, str]:
+        # keyed the same way; the handle is kept so --dry previews the stamp the launch
+        # actually got, never a re-derivation
+        nonlocal env
+        env = role_env(ROLE_AGENT, role_scope_for(p.name, name.split(SEP)[1]))
+        return env
+
     worktree = _review(
         p.repo,
         p.worktrees,
@@ -487,16 +699,191 @@ def review(
         dangerous,
         Path.cwd(),
         launch=not no_agent,
+        spec=spec,
+        context=_render_context,
+        env=_role_stamp,
+        dry=dry_run,
     )
     if no_agent:
         goal = worktree.name.split(SEP, 1)[0]
-        typer.echo(f'Prepared review of {pr} in {worktree}')
+        typer.echo(f'{dry_run.verb("Prepared", "Would prepare")} review of {pr} in {worktree}')
         typer.echo(
             f'ch agent start -g {goal} launches an agent there; '
             f'ch review {goal.removeprefix("pr-")} runs the standard review'
         )
     else:
-        typer.echo(f'Reviewing {pr} in {worktree}')
+        typer.echo(f'{dry_run.verb("Reviewing", "Would review")} {pr} in {worktree}')
+        if dry:
+            override = p.prompts / 'review.md'
+            template = str(override) if override.exists() else 'packaged default'
+            _dry_preview(
+                spec,
+                f'review template ({template}) + guardrail',
+                _passthrough(ctx),
+                context,
+                env,
+            )
+
+
+@app.command(
+    'errand',
+    cls=PassthroughCommand,
+    help='Dispatch a one-shot read-only agent into a project; print or --out its report.',
+)
+@logs(_errand)
+def errand(
+    ctx: typer.Context,
+    target: Annotated[
+        str,
+        typer.Argument(help='Project to dispatch into', autocompletion=complete_project),
+    ],
+    prompt: Annotated[str, typer.Argument(help='What to research and report on')],
+    out: Annotated[
+        Path | None,
+        typer.Option('--out', help='Write the report here (default: print it to stdout)'),
+    ] = None,
+    keep: Annotated[
+        bool,
+        typer.Option('--keep', help="Keep the errand's branch and worktree for inspection"),
+    ] = False,
+    timeout: Annotated[
+        float | None, typer.Option('--timeout', help='Bound the run (seconds)')
+    ] = None,
+    frm: FromOpt = None,
+    offline: OfflineOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
+) -> None:
+    p = _foreign(ctx, target)
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context: Path | None = None
+    env: Mapping[str, str] = {}
+
+    def _render_context(name: str) -> Path | None:
+        # keyed by the resolved session name: only _errand knows the generated goal —
+        # the handle is kept so the --dry preview shows the artifact rendered exactly once
+        nonlocal context
+        goal = name.split(SEP)[1]
+        context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
+        return context
+
+    def _role_stamp(name: str) -> Mapping[str, str]:
+        # keyed the same way; the handle is kept so --dry previews the stamp the run got
+        nonlocal env
+        env = role_env(ROLE_AGENT, role_scope_for(p.name, name.split(SEP)[1]))
+        return env
+
+    result = _errand(
+        p.repo,
+        p.worktrees,
+        p.name,
+        prompt,
+        out.expanduser() if out else None,
+        _passthrough(ctx),
+        keep,
+        frm=frm,
+        fetch=not offline,
+        timeout=timeout,
+        spec=spec,
+        context=_render_context,
+        env=_role_stamp,
+        dry=dry_run,
+    )
+    if dry:
+        typer.echo(f'Would run errand {result.goal} in {result.worktree}')
+        _dry_preview(
+            spec,
+            f'{prompt} (guardrail prepended)',
+            _passthrough(ctx),
+            context,
+            env,
+            target=p.name,
+            out=result.out,
+        )
+        return
+    if result.out is None:
+        typer.echo(result.report)
+    else:
+        typer.echo(f'Wrote report to {result.out}')
+    if keep:
+        typer.echo(
+            f'Kept {result.worktree} — ch goal finish {result.goal} -p {p.name} cleans up',
+            err=True,
+        )
+    elif not result.cleaned:
+        typer.echo(
+            f'errand left work in {result.worktree} — inspect it; '
+            f'ch goal finish {result.goal} -p {p.name} cleans up',
+            err=True,
+        )
+
+
+@app.command(
+    'chat',
+    cls=PassthroughCommand,
+    help='Chat at the current scope: the workspace captain or a project.',
+)
+@logs(_chat)
+def chat(
+    ctx: typer.Context,
+    prompt: PromptArg = None,
+    resume: Annotated[
+        bool, typer.Option('--resume', '-r', help="Revive the scope's previous chat session")
+    ] = False,
+    dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
+    project: ProjectOpt = None,
+    goal: GoalOpt = None,
+) -> None:
+    scope = _scope(ctx, project, goal)
+    config = workspace_config(scope.workspace)
+    # an explicit -g the scope couldn't pin (no project) must still reach the refusal
+    cwd, name = chat_target(
+        scope, config.captain.name, goal if goal is not None else _overrides(ctx).goal
+    )
+    if scope.project is None:
+        spec = resolve_spec(harness, model, config.captain, config.agent)
+        role = ROLE_CAPTAIN
+        intro = f'You are {name}, the captain of the {scope.workspace.name} workspace.'
+        env = role_env(ROLE_CAPTAIN)  # no scope: the captain is unfenced
+    else:
+        spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
+        role = ROLE_MANAGER
+        intro = f'You are the manager of the {scope.project.name} project.'
+        env = role_env(ROLE_MANAGER, role_scope_for(scope.project.name))
+    # role directives + identity lead, then principles and the scope's knowledge index
+    text = '\n\n'.join(
+        part
+        for part in (
+            role_context(scope.workspace, role, intro),
+            render(scope.workspace, scope.project),
+        )
+        if part
+    )
+    dry_run = Dry(dry)
+    context = materialize(scope.workspace, name, text)
+    _chat(
+        cwd,
+        name,
+        prompt,
+        _passthrough(ctx),
+        dangerous,
+        spec,
+        context,
+        env,
+        resume,
+        dry_run,
+    )
+    verb = dry_run.verb(
+        'Resumed' if resume else 'Launched', 'Would resume' if resume else 'Would launch'
+    )
+    typer.echo(f'{verb} chat {name} in {cwd}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 project_app = typer.Typer(
@@ -684,9 +1071,19 @@ def goal_start(
     frm: FromOpt = None,
     offline: OfflineOpt = False,
     dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
+    require_valid_goal(goal)  # before the session name reaches the context-file path
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context = _context_file(
+        p, session_name(p.name, goal, AGENT), ROLE_AGENT, _agent_intro(p.name, goal)
+    )
+    env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
     worktree = _goal_start(
         p.repo,
         p.worktrees,
@@ -697,8 +1094,14 @@ def goal_start(
         _passthrough(ctx),
         fetch=not offline,
         dangerous=dangerous,
+        spec=spec,
+        context=context,
+        env=env,
+        dry=dry_run,
     )
-    typer.echo(f'Started {goal} in {worktree}')
+    typer.echo(f'{dry_run.verb("Started", "Would start")} {goal} in {worktree}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 @goal_app.command(
@@ -712,9 +1115,19 @@ def goal_adopt(
     goal: Annotated[str, typer.Argument(help='Existing branch to adopt as a goal')],
     prompt: PromptArg = None,
     dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
+    require_valid_goal(goal)  # before the session name reaches the context-file path
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context = _context_file(
+        p, session_name(p.name, goal, AGENT), ROLE_AGENT, _agent_intro(p.name, goal)
+    )
+    env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
     worktree = _goal_adopt(
         p.repo,
         p.worktrees,
@@ -723,8 +1136,14 @@ def goal_adopt(
         prompt,
         _passthrough(ctx),
         dangerous,
+        spec,
+        context,
+        env,
+        dry_run,
     )
-    typer.echo(f'Adopted {goal} in {worktree}')
+    typer.echo(f'{dry_run.verb("Adopted", "Would adopt")} {goal} in {worktree}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 @goal_app.command(
@@ -854,15 +1273,25 @@ def agent_start(
     goal: GoalOpt = None,
     actor: ActorOpt = None,
     dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
     p = _project(ctx, project)
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
-    actor = actor or overrides.actor or AGENT
+    actor = require_valid_actor(actor or overrides.actor or AGENT)
     worktree = worktree_path(p.worktrees, g, actor)
-    _agent(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous)
-    typer.echo(f'Launched agent in {worktree}')
+    name = session_name(p.name, g, actor)
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, g))
+    env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
+    _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
+    typer.echo(f'{dry_run.verb("Launched", "Would launch")} agent in {worktree}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 @agent_app.command('resume', cls=PassthroughCommand, help="Reattach to an agent's session.")
@@ -873,32 +1302,53 @@ def agent_resume(
     goal: GoalOpt = None,
     actor: ActorOpt = None,
     dangerous: DangerousOpt = False,
+    harness: HarnessOpt = None,
+    model: ModelOpt = None,
+    dry: LaunchDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     overrides = _overrides(ctx)
     p = _project(ctx, project)
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
-    actor = actor or overrides.actor or AGENT
+    actor = require_valid_actor(actor or overrides.actor or AGENT)
     worktree = worktree_path(p.worktrees, g, actor)
-    _resume(worktree, session_name(p.name, g, actor), prompt, _passthrough(ctx), dangerous)
-    typer.echo(f'Resumed agent in {worktree}')
+    name = session_name(p.name, g, actor)
+    dry_run = Dry(dry)
+    spec = _spec(p, harness, model)
+    context = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, g))
+    env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
+    _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
+    typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
+    if dry:
+        _dry_preview(spec, prompt, _passthrough(ctx), context, env)
 
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')
 @logs(scoped)
-def agent_ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
+def agent_ls(
+    ctx: typer.Context,
+    verbose: Annotated[
+        bool,
+        typer.Option('--verbose', '-v', help='Also show stale sessions, each with why it is stale'),
+    ] = False,
+    project: ProjectOpt = None,
+    goal: GoalOpt = None,
+) -> None:
     scope = _scope(ctx, project, goal)
     typer.echo(scope_line(scope))
-    listing = scoped(agents(), scope, otherwise=None)
-    if not listing:
+    rows, withheld = shown(scoped(agents(), scope, otherwise=None), verbose)
+    if not rows:
         typer.echo('No agents running')
-        return
-    id_w = max(len(a.id) for a in listing)
-    name_w = max(len(_name(a)) for a in listing)
-    status_w = max(len(a.status) for a in listing)
-    for a in listing:
-        row = f'{a.id:<{id_w}}  {_name(a):<{name_w}}  {a.status:<{status_w}}  {_detail(a)}'
-        typer.echo(row.rstrip())
+    else:
+        id_w = max(len(a.short) for a in rows)
+        name_w = max(len(_name(a)) for a in rows)
+        status_w = max(len(_status(a)) for a in rows)
+        for a in rows:
+            row = f'{a.short:<{id_w}}  {_name(a):<{name_w}}  {_status(a):<{status_w}}  {_detail(a)}'
+            typer.echo(row.rstrip())
+    if withheld:
+        plural = 's' if withheld != 1 else ''
+        typer.echo(f'(+{withheld} stale session{plural} — ch agent ls -v to show)')
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
@@ -919,13 +1369,44 @@ def _strip_restricted_options(command: Command) -> None:
         _strip_restricted_options(sub)
 
 
+def _strip_to_role(command: Command, allowed: frozenset[str], path: str = '') -> None:
+    """Prune the Click tree to the ``allowed`` canonical leaf paths — the option strip one
+    level up. A fenced command isn't hidden but absent: parsing, ``--help``, ``ch help`` and
+    completion all forget it, a group emptied by the prune is deleted with it, and a synonym
+    dies with its canonical target (``alias_group.get_command`` resolves through the pruned
+    ``commands`` dict, so nothing is left to dispatch to)."""
+    commands: dict[str, Command] = getattr(command, 'commands', {})
+    for name, sub in list(commands.items()):
+        if getattr(sub, 'commands', None) is not None:  # a group — prune inside, then itself
+            _strip_to_role(sub, allowed, f'{path}{name} ')
+            if not getattr(sub, 'commands'):
+                del commands[name]
+        elif f'{path}{name}' not in allowed:
+            del commands[name]
+
+
 def main() -> None:
-    if running_under_ai_agent():
+    role = session_role()
+    if role is not None and role != ROLE_CAPTAIN and role not in ROLE_COMMANDS:
+        if completing():
+            # a completer must never raise or print — a stale role stamp in a shell
+            # would otherwise break every TAB; fail closed and complete nothing
+            raise SystemExit(0)
+        # fail hard and early: never a silent full tree, never a silently narrowed one
+        typer.echo(
+            f'Error: unknown CHIMERA_ROLE {role!r} '
+            f'(known: {", ".join((ROLE_CAPTAIN, *ROLE_COMMANDS))})',
+            err=True,
+        )
+        raise SystemExit(1)
+    if ai_session():  # a role stamp alone marks an AI session — CLAUDECODE isn't required
         command = get_command(app)
+        if role in ROLE_COMMANDS:  # prune first: the option strip then walks the smaller tree
+            _strip_to_role(command, ROLE_COMMANDS[role])
         _strip_restricted_options(command)
         command()
     else:
-        app()
+        app()  # a human at a terminal — typer's own path
 
 
 if __name__ == '__main__':  # pragma: no cover

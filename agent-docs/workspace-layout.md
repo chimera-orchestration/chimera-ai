@@ -7,6 +7,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
   .gitignore                    # ignores: */repo/ */worktrees/
   config.yaml                   # `kind: workspace` — marks the workspace root
   processes/                    # workspace-wide process definitions
+  roles/                        # role directives: roles/{role}/*.md (e.g. roles/captain/)
   principles/                   # workspace-wide principles
   knowledge/                    # workspace-wide extracted knowledge (plain markdown)
   {project}/
@@ -49,6 +50,123 @@ Commands resolve four axes (see `chimera.context`), each with an explicit overri
 trusted for goal/actor only when it matches the `<goal>/<actor>` shape — never for a review or
 feature branch.
 
+## Choosing the harness and model
+
+Every launching command (`agent start`/`resume`, `goal start`/`adopt`, `review`, `chat`, `errand`) — the
+one list, referred to below as *the launchers*; a test pins it to the live command tree — resolves an
+`AgentSpec` (`chimera.agents.registry.resolve_spec`): which registered harness runs the session
+(claude today) and which model it uses. Each field resolves independently, nearest wins:
+`--harness`/`-m/--model` flags → the project `config.yaml`'s `agent:` block → the workspace's →
+harness `claude`, model the harness's own default. A project standing alone (no workspace) just
+loses the workspace level. An explicit `-- --model X` passthrough beats the resolved model; an
+unknown harness name errors, listing what's registered.
+
+```yaml
+# config.yaml (workspace or project)
+agent:
+  harness: claude   # optional; must be registered
+  model: opus       # optional; harness-native name
+```
+
+Every launcher also stamps role identity into the session's environment
+(`chimera.agent_env.role_env`, threaded to the harness as an `env` overlay on the parent
+environment): `CHIMERA_ROLE` — `captain` for the bare-workspace chat, `manager` for a project
+chat, `agent` for the goal-scoped launchers — plus `CHIMERA_ROLE_SCOPE` naming what it's fenced
+to (`<project>` for a manager, `<project>@<goal>` for an agent; the captain gets none —
+unfenced). The overlay wins over the launching session's own values, so a captain running
+`ch goal start` hands the child `agent`, never its own `captain`. The stamp drives the per-role
+command strip and, for a scoped manager, the arg-level project fence (both under
+`agent-docs/commands.md`, *Role-scoped commands*); `--dry` previews the stamp as a
+`role:` line. Honesty: env identity is a fence, not a wall — unset-able, like `CLAUDECODE`; the
+wall is the harness permission layer — the fence's value is not advertising footguns.
+
+## Chat: the captain and scoped conversations
+
+`ch chat` launches a conversation at the current scope, resolved like the listers: in a project
+as `<project>@manager` in the project dir, and at the bare workspace as the **captain** — the
+workspace-level agent that directs all work. Session names carry the role at every layer: the
+captain's bare persona, a project's `<project>@manager`, a goal's `<project>@<goal>@agent`. The captain has no goal, branch or worktree: it
+works on the workspace as a whole. Its persona name comes from `config.yaml` (`captain: pegasus`,
+or the full form `captain: {name: …, harness: …, model: …}` to also override the agent cascade;
+`ch init --captain pegasus` sets it at creation) and *is* the session name. The captain's
+context indexes workspace-wide knowledge (every project, qualified); a manager's is the
+project render (see *Launch context* below for the role section both lead with).
+
+A chat deliberately sits *alongside* whatever agent is working in the same cwd, so the
+one-session-per-worktree guard is off; instead the scope's chat itself being live refuses with
+an attach hint. `--resume`/`-r` revives the scope's previous (dead) chat session. `-p` overrides
+the scope as usual; prompt/`--`-passthrough/`--dangerous`/`--harness`/`-m` behave as on the other
+launchers. There is no goal scope: a goal already has its agent, so a pinned or explicitly
+requested goal (even a `-g` no project could be resolved for) refuses, pointing at
+`ch agent resume -g <goal>` to talk to the agent and `ch chat` *from the project dir* for a
+side conversation — inside the goal worktree, cwd re-pins the goal, so `-p` can't escape it.
+
+## Errands: one-shot research in a foreign project
+
+`ch errand <target-project> "<prompt>"` dispatches a one-shot, headless, **read-only** agent
+into another project and delivers its report. It is deliberately not the **Task** concept:
+a Task is tracked and subordinate to a goal, and spending that noun here would leave the
+real feature homeless — an errand is untracked and self-sweeping. The target is a required positional (it
+tab-completes like `-p` but is deliberately not `-p`): it names the project dispatched *into*,
+never who the session acts as, so it resolves through a dedicated single-caller helper
+(`_foreign`, its one-caller status pinned by a test) the scope fence never guards — an
+inherited `-p` is refused, not reinterpreted. A reference project (no repo checkout) refuses
+up front. The lifecycle is `ch review`'s pattern compressed to one synchronous command
+(`chimera.commands.errand`): an ephemeral goal `errand-<6hex>` (fresh against the existing
+worktrees; branch + worktree via the goal machinery, refs on the `errand: refs` log line),
+the target's rendered context and agent role stamp, then a headless blocking run
+(`Agent.run`) on a guardrailed prompt. The guardrail is affirmative — identity plus "your
+final message is the report, captured verbatim" — never a prohibition list: the harness's
+read-only tool wall (`readonly=True`; claude maps it to `--allowedTools` — Read/Grep/Glob
+plus curated git Bash) blocks Write/Edit and general Bash. Not watertight: claude's
+allowlist prefix-matches, so the git commands admit git's own writing flags (e.g.
+`--output`) — an accepted, bounded residual; the ephemeral worktree, the sweep and the
+caller's own audit of the report are the containment. No daemon, no
+polling: background the `ch errand` invocation itself for concurrency, or bound it with
+`--timeout <seconds>`.
+
+The report is delivered by *chimera*, not the errand: printed to stdout, or written to
+`--out <path>` (resolved against the caller's cwd) with an `errand: result` log line binding
+path/bytes/sha256 — the audit twin of `context: rendered`; the harness's `errand: run` line
+binds the session id, the pointer back to the transcript. The goal is then swept through
+`worktree rm`'s safety checks: a clean, trivially merged errand vanishes; one that somehow
+left work behind is reported and left standing — never an errand failure, the report was
+already delivered — and `--keep` opts out of the sweep deliberately. Either way the leftover
+is an ordinary goal: `ch goal finish <goal> -p <target>` cleans it up. A failed run still
+attempts the sweep, then exits non-zero — a sweep failure is logged (WARNING), never
+displacing the run's own error. `--dry` resolves everything for real — target,
+generated goal id, rendered context — and runs/writes/removes nothing. Alone among the
+launchers, `errand` carries no `--dangerous` (nothing interactive to make bypass reachable
+in); its `--` passthrough is still fenced by `refuse_restricted`.
+
+## Launch context: principles inline, knowledge indexes
+
+The same launching commands inject a rendered launch context (`chimera.agents.context`).
+A `# Role:` section leads *every* chimera-launched session's context: an **affirmative**
+identity line stating what the session is, never what it must not do — the captain's
+`You are <persona>, the captain of the <workspace> workspace.`, a manager's `You are the
+manager of the <project> project.`, an agent's `You are the agent for goal <goal> on
+<project>; this worktree and branch are your entire workspace.` — followed by the workspace's
+`roles/<role>/*.md` directives, inlined whole (`role_context`; an absent dir still
+introduces). The rest follows the Principle/Knowledge split: workspace + project
+`principles/*.md` inline whole (always-on, small), while `knowledge/*.md` lands as an *index*
+of trigger lines (`- topic: <abs path>`) the agent reads on demand with its own tools — a
+pinned project indexes only its own knowledge, an unpinned scope indexes every project's,
+qualified by name. `prompts/` is *not* injected — those are hand-curated prompt templates
+(e.g. `review.md`).
+
+The render is a build product, never committed: it's written content-addressed to
+`<workspace>/logs/context/<session>-<sha8>.md` (gitignored; identical re-renders land on the
+same file) and handed to the harness by path — claude gets `--append-system-prompt-file` — so
+the repo and worktree stay untouched. The `context: rendered` log line binds the path and full
+sha256: the audit record of exactly what a session was launched with. No workspace (a lone
+project) → nothing rendered, nothing injected, no log line; with one, the role section always
+renders, so every workspace launch injects context.
+
+`ch prime` is the *pull* counterpart of this pushed context: run anywhere, it prints the
+scope's role-shaped golden path (the role from `CHIMERA_ROLE` when the session was launched
+by chimera, else inferred from cwd) — see `agent-docs/commands.md`, *Self-documentation*.
+
 The `-p/-g/-a` flags may appear at any level of a project-scoped command — before the group,
 between group and subcommand, or after it — so `ch -p chimera goal ls`, `ch goal -p chimera ls`
 and `ch goal ls -p chimera` are equivalent. A shared `_context` callback (in `chimera.__main__`)
@@ -82,6 +200,9 @@ the workspace. Two rules:
     is given), else the project, else **every** agent on the machine (the flat global list; the
     workspace tree is `ch ls`'s job); `-p/-g` filter explicitly. A `scope:` banner heads the
     output naming what it's bounded to (`<project>@<goal>`, `<project>`, or `all agents`).
+    Stale-marked sessions (registry corpses — `Session.stale`) surface only under `-v`, status
+    `stale` with the reason as the detail; the default withholds them, ending with a one-line
+    `-v` hint when any were in scope.
   - `ch ls` — the workspace-wide dashboard (project → goal → agent tree), the same wherever you
     run it; `-p` focuses on one project, `-g` on one goal (by name, across projects). Agents not
     under any goal/project surface as `loose` so a running agent is never hidden.
@@ -103,6 +224,9 @@ It's a registry of independent checks (`chimera.commands.doctor`,
 add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-config / project-config** — add/upgrade `config.yaml` `kind:` markers (migrates
   pre-marker workspaces and legacy `repo:`-only project configs)
+- **workspace-dirs** — every directory the current workspace template ships (`processes/`,
+  `roles/`, …) exists; derived from the template itself so it can't drift. `--fix` creates the
+  dir with a `.gitkeep` (matching `ch init`), which workspace-clean then commits
 - **gitignore** — the workspace `.gitignore` carries every entry the current template ships
   (`logs/`, `*/repo/`, …); `--fix` appends any missing ones, preserving existing/custom lines.
   Reconciles workspaces created before a template entry was added
@@ -243,7 +367,7 @@ checkout of `main` next to (not managed by) chimera's goal worktrees.
   auto-tracking behaviour — unlike a goal actor branch, it isn't forced `--no-track`, since it
   isn't meant to be managed by `ch goal sync`.
 
-`ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background when a `[prompt]` positional is given). `ch goal adopt <branch>` is the same orchestrator for *existing* work: it takes a branch already carrying commits and restructures it into the `{branch}/{human,agent}` pair (renaming `{branch}` to `{branch}/human` — git can't hold `refs/heads/{branch}` beside `refs/heads/{branch}/*`, and the rename carries any checkout's HEAD along — then splitting `{branch}/agent` off that tip), creates the agent worktree, and launches the agent. Unlike `start`, the base is the adopted branch's own tip, not main. It is idempotent: the restructure is skipped once both actor branches exist, and the worktree is reused if already checked out, so a re-run only (re)launches the agent. `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches. It sweeps **every** actor in the goal's namespace, not just the default human/agent pair: any `{goal}/{actor}` branch and any `{goal}@{actor}` worktree is discovered (see `goal_actors`) and, if the same cleanup rules hold (clean, merged), removed. It refuses while a claude session is live in *any* of the goal's worktrees, reporting each session's pid/kind/status/start/name (sessions can be invisible — see `research/claude-session-registration.md`); `--force` bypasses the liveness check as well as discarding unsaved work. `ch project rm --force` never bypasses it. `--dry` (on `worktree rm`/`goal finish`, and `project rm`) runs every discovery and safety check but deletes nothing, reporting what *would* go — pair with `--force` to preview a forced teardown. It shares the real code path (`chimera.dry.Dry` guards each mutation), so the preview can't drift from the actual run.
+`ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background when a `[prompt]` positional is given). `ch goal adopt <branch>` is the same orchestrator for *existing* work: it takes a branch already carrying commits and restructures it into the `{branch}/{human,agent}` pair (renaming `{branch}` to `{branch}/human` — git can't hold `refs/heads/{branch}` beside `refs/heads/{branch}/*`, and the rename carries any checkout's HEAD along — then splitting `{branch}/agent` off that tip), creates the agent worktree, and launches the agent. Unlike `start`, the base is the adopted branch's own tip, not main. It is idempotent: the restructure is skipped once both actor branches exist, and the worktree is reused if already checked out, so a re-run only (re)launches the agent. `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches. It sweeps **every** actor in the goal's namespace, not just the default human/agent pair: any `{goal}/{actor}` branch and any `{goal}@{actor}` worktree is discovered (see `goal_actors`) and, if the same cleanup rules hold (clean, merged), removed. It refuses while an agent session — from *any* registered harness (`chimera.commands.agent.live`, pid-verified via `Agent.live`) — is live in any of the goal's worktrees, reporting each session's pid/kind/status/start/name (sessions can be invisible — see `research/claude-session-registration.md`); `--force` bypasses the liveness check as well as discarding unsaved work. `ch project rm --force` never bypasses it. `--dry` (on `worktree rm`/`goal finish`, and `project rm`) runs every discovery and safety check but deletes nothing, reporting what *would* go — pair with `--force` to preview a forced teardown. It shares the real code path (`chimera.dry.Dry` guards each mutation), so the preview can't drift from the actual run.
 
 `ch goal rename <old> <new>` (synonym: `goal mv`) renames a goal across everything local: every `{old}/{actor}` branch (`git branch -m`, which carries any checkout's HEAD *and* the branch's `branch.<name>.*` config section along), every registered `{old}@{actor}` worktree (`git worktree move`), and the goal's sync state — watermark refs and append markers. It refuses while an agent is live in any of the goal's worktrees, on a collision (an actor branch/worktree already under `<new>`, or a bare branch `<new>` blocking the `new/*` namespace — `ch goal adopt` that first), and on a name git or the `@` separator can't hold. Remote branches are **never touched**: a `<remote>/{old}/{actor}` ref, and an upstream still tracking the old name on the remote, are each warned about — renaming the remote side is the human's call. Idempotent: each actor's branch/worktree moves only while still under the old name, so a rename that died half-way completes on re-run. The renamed refs are logged before/after (`goal rename: refs`), the worktree moves on `goal rename: worktrees`; an unregistered dir under `worktrees/` is left in place with a warning (doctor's problem). When your cwd was inside a moved worktree, the new path is printed to `cd` back into.
 
@@ -255,12 +379,12 @@ checkout of `main` next to (not managed by) chimera's goal worktrees.
 
 `ch agent start` launches `claude` in an existing worktree (`--name <project>@<goal>@<actor>`); `ch agent resume` reattaches to that same session label (`claude --resume <name>`). Resume exists because `claude` has no `--cwd`: Chimera knows the worktree and sets it, so a dead session is revived in the right place from anywhere. Both run foreground, or background (`--bg`) when a `[prompt]` is given, and both refuse if a session is already live in the worktree.
 
-Everything after a `--` on `ch agent start`, `ch agent resume`, `ch goal start` or `ch goal adopt` is forwarded verbatim to `claude` (e.g. `ch agent resume -- --dangerously-skip-permissions`, `ch goal start x -- --model opus`). The split is done before arg parsing (like git/cargo), so a flag is never mistaken for the `[prompt]` positional even when no prompt is given. Forgetting the `--` makes `claude`'s flags unknown options and errors, rather than silently misparsing.
+Everything after a `--` on any of the launchers (the list under "Choosing the harness and model") is forwarded verbatim to `claude` (e.g. `ch agent resume -- --dangerously-skip-permissions`, `ch goal start x -- --model opus`). The split is done before arg parsing (like git/cargo), so a flag is never mistaken for the `[prompt]` positional even when no prompt is given. Forgetting the `--` makes `claude`'s flags unknown options and errors, rather than silently misparsing.
 
-The `--dangerous` flag (on `ch agent start`, `ch agent resume`, `ch goal start`, `ch goal adopt`) adds `--allow-dangerously-skip-permissions` so bypass-permissions mode is reachable with shift-tab — it only *enables* the mode, never activates it (the autonomous run keeps its resolved mode). It is **opt-in and off by default**: passing the flag *displaces* auto-accept from claude's shift-tab cycle (`normal → plan → bypass` instead of `normal → auto-accept → plan`), so the everyday default keeps auto-accept and only an explicit `--dangerous` pays that cost. **Agents must never pass `--dangerous` on their own — only when the user explicitly asks.** Under
+The `--dangerous` flag (on every launcher except `errand`, whose headless print mode has no interactive permission cycle to make the mode reachable in) adds `--allow-dangerously-skip-permissions` so bypass-permissions mode is reachable with shift-tab — it only *enables* the mode, never activates it (the autonomous run keeps its resolved mode). It is **opt-in and off by default**: passing the flag *displaces* auto-accept from claude's shift-tab cycle (`normal → plan → bypass` instead of `normal → auto-accept → plan`), so the everyday default keeps auto-accept and only an explicit `--dangerous` pays that cost. **Agents must never pass `--dangerous` on their own — only when the user explicitly asks.** Under
 Claude Code specifically this is enforced at the CLI level, not just convention: `--dangerous` (and
 `--force`) are stripped from the command tree entirely, so passing them fails with "no such option"
-— see `agent-docs/commands.md`'s "Agent-restricted options". A `--bg` session is an attachable fork, not headless, and the mode's availability is fixed at *its* launch, so the flag rides on background launches too — you cycle after attaching (`claude agents attach` / `ch agent resume`). Not duplicated when a `--dangerously-skip-permissions`/`--allow-dangerously-skip-permissions` is already passed after `--`. Note: claude rejects a `--bg` launch carrying any dangerous-skip flag unless the bypass disclaimer has been accepted (`skipDangerousModePermissionPrompt` in claude settings, or accepting it once interactively).
+— see `agent-docs/commands.md`'s "Agent-restricted options". A `--bg` session is an attachable fork, not headless, and the mode's availability is fixed at *its* launch, so the flag rides on background launches too — you cycle after attaching (`claude agents attach` / `ch agent resume`). Not duplicated when a `--dangerously-skip-permissions`/`--allow-dangerously-skip-permissions` is already passed after `--`. Note: claude rejects a `--bg` launch carrying any dangerous-skip flag unless the bypass disclaimer has been accepted (`skipDangerousModePermissionPrompt` in claude settings, or accepting it once interactively). The `--` passthrough is fenced separately: it is split off before Click parses, so the Click-level strip can't see it — instead each harness declares its own bypass spellings (`Agent.restricted`, e.g. claude's `--dangerously-skip-permissions`) and every launcher refuses them at launch (`refuse_restricted`) when chimera is driven by an AI agent.
 
 Refuses if the repo has no commits (nothing to branch from) — including bare repos.
 

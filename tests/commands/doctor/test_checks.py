@@ -9,6 +9,7 @@ from testfixtures.loguru import LoguruSource
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
+    WorkspaceDirsCheck,
     ChimeraUpToDateCheck,
     GitignoreCheck,
     InertBranchCheck,
@@ -31,6 +32,7 @@ from chimera.worktrees import is_dirty, registered_worktrees
 def _ws(tmpdir: TempDir):
     ws = tmpdir.makedir('lycia')
     (ws / 'processes').mkdir()
+    (ws / 'roles').mkdir()
     shutil.copy(TEMPLATE / '.gitignore', ws / '.gitignore')  # a healthy workspace
     return ws
 
@@ -273,6 +275,43 @@ class TestWorkspaceEnv:
             _run(WorkspaceEnvCheck(), ws),
             expected=[_env_finding(ws, f'is {other}, not this workspace')],
         )
+
+
+class TestWorkspaceDirs:
+    def test_current_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(WorkspaceDirsCheck(), _ws(tmpdir)), expected=[])
+
+    def test_missing_dir_reported(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        shutil.rmtree(ws / 'roles')
+        compare(
+            _run(WorkspaceDirsCheck(), ws),
+            expected=[
+                Finding('workspace-dirs', f'{ws / "roles"} missing', resolved=False, fixable=True)
+            ],
+        )
+
+    def test_missing_dir_fixed(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        shutil.rmtree(ws / 'roles')
+        compare(
+            _run(WorkspaceDirsCheck(), ws, fix=True),
+            expected=[
+                Finding('workspace-dirs', f'{ws / "roles"} missing', resolved=True, fixable=True)
+            ],
+        )
+        tmpdir.compare(['.gitkeep'], path=ws / 'roles')  # tracked once workspace-clean commits
+
+    def test_excluded_not_created(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        shutil.rmtree(ws / 'roles')
+        compare(
+            _run(WorkspaceDirsCheck(), ws, fix=True, exclude=Exclusions(('workspace-dirs',))),
+            expected=[
+                Finding('workspace-dirs', f'{ws / "roles"} missing', resolved=False, fixable=True)
+            ],
+        )
+        assert not (ws / 'roles').exists()
 
 
 class TestProjectConfig:

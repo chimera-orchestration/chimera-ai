@@ -4,7 +4,8 @@ from pathlib import Path
 from testfixtures import Replacer, TempDir, compare
 
 from chimera import __main__ as chimera_main
-from chimera.commands.agent import Agent, agents
+from chimera.agents import Session
+from chimera.commands.agent import agents
 from chimera.commands.ls import Board, GoalBoard, ProjectBoard, board
 from chimera.context import Scope, resolve_project
 from tests.cli import Command, action_logs
@@ -23,8 +24,8 @@ def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
 
 def _agent(
     cwd: Path, name: str, status: str = 'idle', summary: str | None = None, id: str = 'id'
-) -> Agent:
-    return Agent(id, name, status, cwd, summary)
+) -> Session:
+    return Session(id, name, status, cwd, summary)
 
 
 def test_board_partitions_agents_into_goals_project_loose_and_workspace_loose(
@@ -62,7 +63,11 @@ def test_ls_cli_renders_the_tree(
     worktree = workspace_with_env / 'alpha' / 'worktrees' / 'g@agent'
     replace.in_module(
         agents,
-        lambda: [Agent('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug')],
+        lambda: [
+            Session('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug'),
+            # a stale-marked corpse never lands on the dashboard — agent ls -v is its surface
+            Session('deadbeef', 'ghost', 'idle', worktree, None, stale='claimed pid 9 dead'),
+        ],
         module=chimera_main,
     )
     command.run('ls').check(
@@ -86,10 +91,10 @@ def test_ls_cli_renders_loose_agents(
     replace.in_module(
         agents,
         lambda: [
-            Agent(
+            Session(
                 '012a9550', 'repo-sess', 'busy', workspace_with_env / 'alpha' / 'repo', 'building'
             ),
-            Agent('39d68dfa', 'stray', 'idle', stray, None),
+            Session('39d68dfa', 'stray', 'idle', stray, None),
         ],
         module=chimera_main,
     )

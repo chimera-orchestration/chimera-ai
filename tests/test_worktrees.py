@@ -20,6 +20,8 @@ from chimera.worktrees import (
     is_dirty,
     is_merged,
     registered_worktrees,
+    require_valid_actor,
+    require_valid_goal,
     session_name,
     worktree_dirs,
     worktree_path,
@@ -46,6 +48,58 @@ def test_worktree_path_joins_goal_and_actor_with_an_at_sign() -> None:
 
 def test_session_name_joins_project_goal_and_actor() -> None:
     compare(session_name('proj', 'my-goal', 'agent'), expected='proj@my-goal@agent')
+
+
+class TestRequireValidGoal:
+    def test_accepts_the_shapes_in_use(self) -> None:
+        for name in ('feature-x', 'pr-123', 'v1.2', 'goal_x'):
+            compare(require_valid_goal(name), expected=name)
+
+    def test_rejects_the_goal_actor_separator(self) -> None:
+        with ShouldRaise(
+            UserError("'a@b' is not a valid goal name: '@' separates goal from actor")
+        ):
+            require_valid_goal('a@b')
+
+    def test_rejects_path_separators(self) -> None:
+        for name in ('../x', 'a/b', 'a\\b', '../../projb/worktrees/g'):
+            with ShouldRaise(
+                UserError(
+                    f'{name!r} is not a valid goal name: no path separators — '
+                    f"goal names are single path segments, like 'feature-x' or 'pr-123'"
+                )
+            ):
+                require_valid_goal(name)
+
+    def test_rejects_names_git_refuses(self) -> None:
+        for name in ('', '.', '..', 'a b', 'a..b'):
+            with ShouldRaise(UserError(f'{name!r} is not a valid goal name')):
+                require_valid_goal(name)
+
+
+class TestRequireValidActor:
+    def test_accepts_the_shapes_in_use(self) -> None:
+        for name in ('agent', 'human', 'reviewer', 'pr'):
+            compare(require_valid_actor(name), expected=name)
+
+    def test_rejects_the_goal_actor_separator(self) -> None:
+        with ShouldRaise(
+            UserError("'a@b' is not a valid actor name: '@' separates goal from actor")
+        ):
+            require_valid_actor('a@b')
+
+    def test_rejects_path_separators(self) -> None:
+        with ShouldRaise(
+            UserError(
+                "'../x' is not a valid actor name: no path separators — "
+                "actor names are single path segments, like 'agent' or 'reviewer'"
+            )
+        ):
+            require_valid_actor('../x')
+
+    def test_rejects_names_git_refuses(self) -> None:
+        with ShouldRaise(UserError("'a b' is not a valid actor name")):
+            require_valid_actor('a b')
 
 
 def test_worktree_dirs_lists_only_dirs_sorted(tmpdir: TempDir) -> None:

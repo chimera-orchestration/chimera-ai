@@ -1,6 +1,6 @@
 import json
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib.resources import files
 from pathlib import Path
 from string import Template
@@ -9,9 +9,11 @@ from urllib.parse import urlsplit
 from giterator import GitError
 from loguru import logger
 
+from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
+from chimera.dry import Dry
 from chimera.git import Git
 from chimera.worktrees import (
     ACTORS,
@@ -46,6 +48,10 @@ def review(
     dangerous: bool = False,
     into: Path | None = None,
     launch: bool = True,
+    spec: AgentSpec = AgentSpec(),
+    context: Callable[[str], Path | None] | None = None,
+    env: Callable[[str], Mapping[str, str]] | None = None,
+    dry: Dry = Dry(),
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
 
@@ -55,12 +61,21 @@ def review(
     ``prompts/review.md`` if present, else the packaged default, both behind a no-publish
     guardrail. ``into`` optionally lands the human branch in place (see ``checkout_here``).
 
+    ``context`` is a factory keyed by session name, called with the *resolved*
+    ``<project>@pr-<N>@agent`` — the number is only known here, once ``gh`` has resolved
+    ``pr``, so a URL argument still lands its context artifact (and the ``context:
+    rendered`` log line) under the real session name. Never called without ``launch``:
+    no session, nothing to render for. ``env`` — the role stamp overlaid on the
+    session's environment — is a factory keyed the same way, for the same reason: its
+    scope carries the goal only the resolved name knows.
+
     ``launch=False`` (CLI ``--no-agent``) stops after the checkout: branches, worktree and
     upstream all stand, but no agent runs — kick one off later with ``ch agent start``. The
     agent-only knobs (``dangerous``, ``extra``) are refused with it: nothing would read them.
 
     Idempotent: an existing ``<goal>@agent`` worktree is reused, so a re-run only relaunches.
-    The goal's branches are logged before/after creation (see ``agent-docs/logging.md``).
+    The goal's branches are logged before/after creation (see ``agent-docs/logging.md``) —
+    quiet when nothing changed, so a re-run or ``dry`` lands no ref line.
     Returns the agent worktree.
     """
     if not launch and (dangerous or extra):
@@ -77,19 +92,33 @@ def review(
     _check_pr_repo(git, meta['url'], project)
     number, head_oid = int(str(meta['number'])), str(meta['headRefOid'])
     goal = f'pr-{number}'
-    tracking = _wire_upstream(git, number, head_oid)
-    before = _goal_refs(git, goal)
-    agent_worktree = _ensure_goal(git, repo, worktrees_root, goal, head_oid, tracking)
-    logger.bind(
+    tracking = f'origin/pr/{number}'
+    dry(_wire_upstream, git, number, head_oid, tracking)
+    agent_worktree = worktree_path(worktrees_root, goal, AGENT)
+    with git.ref_log(
+        'review: refs',
+        branch(goal, HUMAN),
+        branch(goal, AGENT),
         goal=goal,
-        git={'before': before, 'after': _goal_refs(git, goal)},
         worktree=str(agent_worktree),
-    ).info('review: refs')
+    ):
+        dry(_ensure_goal, git, repo, worktrees_root, goal, head_oid, tracking)
     if into is not None:
-        checkout_here(git, branch(goal, HUMAN), into, 'review')
+        dry(checkout_here, git, branch(goal, HUMAN), into, 'review')
     if launch:
+        name = session_name(project, goal, AGENT)
         prompt = _prompt(prompts_dir, meta, goal, project)
-        agent(agent_worktree, session_name(project, goal, AGENT), prompt, extra, dangerous)
+        agent(
+            agent_worktree,
+            name,
+            prompt,
+            extra,
+            dangerous,
+            spec,
+            context(name) if context is not None else None,
+            env(name) if env is not None else {},
+            dry,
+        )
     return agent_worktree
 
 
@@ -194,8 +223,8 @@ def _origin_slug(url: str) -> str:
     return ''  # a local-path origin has no remote identity to compare
 
 
-def _wire_upstream(git: Git, number: int, head_oid: str) -> str:
-    """Fetch ``refs/pull/<number>/head`` as ``origin/pr/<number>`` and verify it is ``head_oid``.
+def _wire_upstream(git: Git, number: int, head_oid: str, tracking: str) -> str:
+    """Fetch ``refs/pull/<number>/head`` as ``tracking`` and verify it is ``head_oid``.
 
     Fetches the PR head into the tracking ref *first* — a targeted fetch that touches no config —
     then persists the fetch refspec (once, idempotent) so the PR head stays a real remote-tracking
@@ -205,7 +234,6 @@ def _wire_upstream(git: Git, number: int, head_oid: str) -> str:
     ``headRefOid`` as the source of truth — a mismatch means a stale fetch and is refused. Returns
     the tracking ref name.
     """
-    tracking = f'origin/pr/{number}'
     spec = f'+refs/pull/{number}/head:refs/remotes/{tracking}'
     git('fetch', 'origin', spec)  # validate + create the ref without mutating config on failure
     try:
@@ -223,19 +251,12 @@ def _wire_upstream(git: Git, number: int, head_oid: str) -> str:
 
 def _ensure_goal(
     git: Git, repo: Path, worktrees_root: Path, goal: str, head_oid: str, tracking: str
-) -> Path:
+) -> None:
     """Create ``<goal>/{human,agent}`` at ``head_oid`` tracking ``tracking``; reuse if present."""
-    agent_worktree = worktree_path(worktrees_root, goal, AGENT)
-    if agent_worktree.resolve() not in registered_worktrees(git):
+    if worktree_path(worktrees_root, goal, AGENT).resolve() not in registered_worktrees(git):
         add(repo, worktrees_root, goal=goal, actors=ACTORS, frm=head_oid, fetch=False)
         for actor in ACTORS:
             git('branch', f'--set-upstream-to={tracking}', branch(goal, actor))
-    return agent_worktree
-
-
-def _goal_refs(git: Git, goal: str) -> dict[str, str]:
-    """The goal's actor branches that exist, each mapped to its full sha (for logging)."""
-    return git.ref_shas(branch(goal, HUMAN), branch(goal, AGENT))
 
 
 def _prompt(prompts_dir: Path, meta: dict[str, object], goal: str, project: str) -> str:

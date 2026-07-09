@@ -1,43 +1,45 @@
 import os
 import subprocess
+from hashlib import sha256
 from collections.abc import Iterable
 from pathlib import Path
-from types import SimpleNamespace
 
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera import __main__ as chimera_main
+from chimera.agents import Session
+from chimera.agents.claude import Claude
+from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import (
-    Agent,
     agent,
     agents,
-    all_sessions,
     in_goal,
-    live_sessions,
+    live,
     resume,
     scope_line,
     scoped,
-    session_summary,
+    shown,
     under,
 )
-from chimera.config import ProjectConfig
+from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
-from tests.cli import Command, action_logs
+from tests.cli import Command, action_logs, capture_env
 
 
 def _project_obj(directory: Path) -> Project:
     return Project(directory, ProjectConfig(kind='project', repo=Path('/r')))
 
 
-def _agent_at(cwd: Path, name: str = 'a') -> Agent:
-    return Agent(name, name, 'idle', cwd, None)
+def _agent_at(cwd: Path, name: str = 'a') -> Session:
+    return Session(name, name, 'idle', cwd, None)
 
 
-def _stub(replace: Replacer, sessions: Iterable[object] = ()) -> list[object]:
+def _stub(replace: Replacer, sessions: Iterable[Session] = ()) -> list[object]:
     calls: list[object] = []
-    replace.in_module(live_sessions, lambda worktree: list(sessions))
+    replace.on_class(Claude.live, lambda self, cwd=None: list(sessions))
     replace.in_module(
-        subprocess.run, lambda cmd, cwd=None, check=False: calls.append((cmd, cwd, check))
+        subprocess.run,
+        lambda cmd, cwd=None, check=False, env=None: calls.append((cmd, cwd, check)),
     )
     return calls
 
@@ -85,7 +87,7 @@ def test_agent_background_carries_bypass_when_dangerous(tmpdir: TempDir, replace
 
 def test_agent_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
-    calls = _stub(replace, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
+    calls = _stub(replace, sessions=[_agent_at(worktree, 'abc123')])
     with ShouldRaise(
         RuntimeError(f'an agent is already live in {worktree}: abc123 (idle) — attach or stop it')
     ):
@@ -159,7 +161,7 @@ def test_resume_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -
 
 def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
-    calls = _stub(replace, sessions=[{'sessionId': 'abc123', 'status': 'idle'}])
+    calls = _stub(replace, sessions=[_agent_at(worktree, 'abc123')])
     with ShouldRaise(
         RuntimeError(f'an agent is already live in {worktree}: abc123 (idle) — attach or stop it')
     ):
@@ -170,86 +172,6 @@ def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replace
 def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
     with ShouldRaise(FileNotFoundError(tmpdir / 'nope')):
         resume(tmpdir / 'nope', 'x')
-
-
-def test_live_sessions_queries_claude_by_cwd(tmpdir: TempDir, replace: Replacer) -> None:
-    worktree = tmpdir.makedir('wt')
-    captured: dict[str, object] = {}
-    pid = os.getpid()
-
-    def fake_run(
-        cmd: object, capture_output: bool = False, text: bool = False, check: bool = False
-    ):
-        captured['cmd'] = cmd
-        return SimpleNamespace(stdout=f'[{{"sessionId": "x", "status": "idle", "pid": {pid}}}]')
-
-    replace.in_module(subprocess.run, fake_run)
-    compare(live_sessions(worktree), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': pid}])
-    compare(captured['cmd'], expected=['claude', 'agents', '--json', '--cwd', str(worktree)])
-
-
-def test_all_sessions_queries_claude_unscoped(replace: Replacer) -> None:
-    captured: dict[str, object] = {}
-    pid = os.getpid()
-
-    def fake_run(
-        cmd: object, capture_output: bool = False, text: bool = False, check: bool = False
-    ):
-        captured['cmd'] = cmd
-        return SimpleNamespace(stdout=f'[{{"sessionId": "x", "status": "idle", "pid": {pid}}}]')
-
-    replace.in_module(subprocess.run, fake_run)
-    compare(all_sessions(), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': pid}])
-    compare(captured['cmd'], expected=['claude', 'agents', '--json'])  # no --cwd → every project
-
-
-def _dead(pid: int, sig: int) -> None:
-    raise ProcessLookupError
-
-
-def _foreign(pid: int, sig: int) -> None:
-    raise PermissionError
-
-
-def test_sessions_filters_out_an_entry_whose_pid_has_died(
-    tmpdir: TempDir, replace: Replacer
-) -> None:
-    worktree = tmpdir.makedir('wt')
-    replace.in_module(
-        subprocess.run,
-        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
-            stdout='[{"sessionId": "x", "status": "idle", "pid": 999999}]'
-        ),
-    )
-    replace.in_module(os.kill, _dead, module=os)
-    compare(live_sessions(worktree), expected=[])
-
-
-def test_sessions_filters_out_an_entry_with_no_pid_at_all(
-    tmpdir: TempDir, replace: Replacer
-) -> None:
-    worktree = tmpdir.makedir('wt')
-    replace.in_module(
-        subprocess.run,
-        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
-            stdout='[{"kind": "background", "startedAt": 1781247747055, "name": "x"}]'
-        ),
-    )  # the degraded shape claude's registry reports briefly after a killed pid is pruned
-    compare(live_sessions(worktree), expected=[])
-
-
-def test_sessions_keeps_an_entry_whose_pid_belongs_to_another_user(
-    tmpdir: TempDir, replace: Replacer
-) -> None:
-    worktree = tmpdir.makedir('wt')
-    replace.in_module(
-        subprocess.run,
-        lambda cmd, capture_output=False, text=False, check=False: SimpleNamespace(
-            stdout='[{"sessionId": "x", "status": "idle", "pid": 1}]'
-        ),
-    )
-    replace.in_module(os.kill, _foreign, module=os)
-    compare(live_sessions(worktree), expected=[{'sessionId': 'x', 'status': 'idle', 'pid': 1}])
 
 
 def _project_with_worktree(tmpdir: TempDir) -> Path:
@@ -269,7 +191,16 @@ def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent']  # no bypass flag by default
@@ -287,7 +218,16 @@ def test_agent_start_cli_dangerous_makes_bypass_reachable(
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': True},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': True,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent', '--allow-dangerously-skip-permissions']
@@ -303,7 +243,16 @@ def test_agent_start_cli_with_prompt(tmpdir: TempDir, replace: Replacer, command
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': 'do it', 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': 'do it',
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
         ),
     )
     claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', 'do it']
@@ -320,7 +269,16 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command:
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': 'g', 'actor': 'reviewer', 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': 'reviewer',
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@reviewer']
@@ -339,7 +297,16 @@ def test_agent_start_cli_forwards_flags_after_dashdash(
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
         ),
     )
     claude_cmd = ['claude', '--name', 'myproject@g@agent', '--dangerously-skip-permissions']
@@ -357,7 +324,16 @@ def test_agent_start_cli_with_prompt_and_passthrough(
         logging=action_logs(
             'agent start',
             'chimera.commands.agent.agent',
-            {'prompt': 'do it', 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': 'do it',
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
         ),
     )
     claude_cmd = ['claude', '--bg', '--name', 'myproject@g@agent', '--model', 'opus', 'do it']
@@ -373,7 +349,16 @@ def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) 
         logging=action_logs(
             'agent resume',
             'chimera.commands.agent.resume',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
         ),
     )
     claude_cmd = ['claude', '--resume', 'myproject@g@agent']  # no bypass flag by default
@@ -391,156 +376,93 @@ def test_agent_resume_cli_with_passthrough(
         logging=action_logs(
             'agent resume',
             'chimera.commands.agent.resume',
-            {'prompt': None, 'goal': 'g', 'actor': None, 'project': None, 'dangerous': False},
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
         ),
     )
     claude_cmd = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
     compare(calls, expected=[(claude_cmd, expected, True)])
 
 
-def _transcript(folder: Path, name: str, body: str, mtime: float) -> Path:
-    folder.mkdir(parents=True, exist_ok=True)
-    f = folder / name
-    f.write_text(body)
-    os.utime(f, (mtime, mtime))
-    return f
+def test_agents_aggregates_registered_harnesses(replace: Replacer) -> None:
+    # the sole registered harness today is claude
+    lonely = Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
+    replace.on_class(Claude.sessions, lambda self: [lonely])
+    compare(agents(), expected=[lonely])
 
 
-def test_session_summary_reads_newest_transcript_for_cwd(tmpdir: TempDir) -> None:
-    projects = tmpdir.makedir('projects')
-    folder = projects / '-work-proj'  # munged from the cwd below
-    _transcript(folder, 'old.jsonl', '{"type": "last-prompt", "lastPrompt": "stale"}\n', 1000)
-    _transcript(
-        folder,
-        'live.jsonl',
-        '{"type": "user", "message": "hi"}\n'
-        '{"type": "last-prompt", "lastPrompt": "fix\\nthe   bug"}\n'
-        '\n'  # blank lines are skipped (this one is reached first, in reverse)
-        '{"type": "assistant", "message": "ok"}\n',
-        2000,
+def _ghost_at(cwd: Path, name: str = 'ghost') -> Session:
+    return Session(name, name, 'idle', cwd, None, stale='claimed pid 999 is not running')
+
+
+def test_shown_default_withholds_stale_sessions(tmpdir: TempDir) -> None:
+    running, ghost = _agent_at(tmpdir / 'wt'), _ghost_at(tmpdir / 'wt')
+    compare(shown([running, ghost], verbose=False), expected=([running], 1))
+
+
+def test_shown_verbose_withholds_nothing(tmpdir: TempDir) -> None:
+    running, ghost = _agent_at(tmpdir / 'wt'), _ghost_at(tmpdir / 'wt')
+    compare(shown([running, ghost], verbose=True), expected=([running, ghost], 0))
+
+
+def test_shown_default_with_nothing_stale_withholds_nothing(tmpdir: TempDir) -> None:
+    running = _agent_at(tmpdir / 'wt')
+    compare(shown([running], verbose=False), expected=([running], 0))
+
+
+def test_live_aggregates_registered_harnesses(tmpdir: TempDir, replace: Replacer) -> None:
+    # cleanup's question is "is *any* harness's agent live here" — claude's answer flows through
+    worktree = tmpdir.makedir('wt')
+    session = _agent_at(worktree, 'busy-one')
+    replace.on_class(Claude.live, lambda self, cwd=None: [session] if cwd == worktree else [])
+    compare(live(worktree), expected=[session])
+
+
+def test_extra_bypass_flags_refused_under_an_ai_agent(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    replace.in_environ('CLAUDECODE', '1')
+    calls = _stub(replace)
+    refused = UserError(
+        '--dangerously-skip-permissions: not available when chimera is driven by an AI agent'
     )
-    compare(session_summary('/work/proj', 'agent', projects), expected='fix the bug')
+    with ShouldRaise(refused):
+        agent(worktree, 'n', extra=['--dangerously-skip-permissions'])
+    with ShouldRaise(refused):
+        resume(worktree, 'n', extra=['--dangerously-skip-permissions'])
+    compare(calls, expected=[])  # never launched
 
 
-def test_session_summary_prefers_title_over_prompt(tmpdir: TempDir) -> None:
-    projects = tmpdir.makedir('projects')
-    _transcript(
-        projects / '-work-proj',
-        's.jsonl',
-        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n'
-        '{"type": "ai-title", "aiTitle": "ai topic"}\n'
-        '{"type": "custom-title", "customTitle": "my title"}\n',
-        1000,
-    )
-    compare(session_summary('/work/proj', 'agent', projects), expected='my title')
-
-
-def test_session_summary_uses_ai_title_when_no_custom_title(tmpdir: TempDir) -> None:
-    projects = tmpdir.makedir('projects')
-    _transcript(
-        projects / '-work-proj',
-        's.jsonl',
-        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n'
-        '{"type": "ai-title", "aiTitle": "ai topic"}\n',
-        1000,
-    )
-    compare(session_summary('/work/proj', 'agent', projects), expected='ai topic')
-
-
-def test_session_summary_skips_title_equal_to_name(tmpdir: TempDir) -> None:
-    projects = tmpdir.makedir('projects')
-    _transcript(
-        projects / '-work-proj',
-        's.jsonl',
-        # Claude persists --name as a custom-title; it must not just echo the name.
-        '{"type": "custom-title", "customTitle": "proj@goal@agent"}\n'
-        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n',
-        1000,
-    )
-    compare(session_summary('/work/proj', 'proj@goal@agent', projects), expected='fix the bug')
-
-
-def test_session_summary_takes_latest_of_each_record(tmpdir: TempDir) -> None:
-    projects = tmpdir.makedir('projects')
-    _transcript(
-        projects / '-work-proj',
-        's.jsonl',
-        '{"type": "custom-title", "customTitle": "old name"}\n'
-        '{"type": "custom-title", "customTitle": "new name"}\n',
-        1000,
-    )
-    compare(session_summary('/work/proj', 'agent', projects), expected='new name')
-
-
-def test_session_summary_skips_typed_record_missing_its_value(tmpdir: TempDir) -> None:
-    projects = tmpdir.makedir('projects')
-    _transcript(
-        projects / '-work-proj',
-        's.jsonl',
-        # a last-prompt record may carry no lastPrompt field; fall through to what does
-        '{"type": "last-prompt"}\n{"type": "ai-title", "aiTitle": "ai topic"}\n',
-        1000,
-    )
-    compare(session_summary('/work/proj', 'agent', projects), expected='ai topic')
-
-
-def test_session_summary_when_no_folder(tmpdir: TempDir) -> None:
-    assert session_summary('/work/proj', 'agent', tmpdir.path) is None
-
-
-def test_session_summary_when_transcript_has_no_title_or_prompt(tmpdir: TempDir) -> None:
-    projects = tmpdir.makedir('projects')
-    _transcript(projects / '-work-proj', 'sess.jsonl', '{"type": "user", "message": "hi"}\n', 1000)
-    assert session_summary('/work/proj', 'agent', projects) is None
-
-
-def test_agents_enriches_sessions_with_name_cwd_and_summary(
+def test_extra_bypass_flags_refused_under_a_role_stamp_alone(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
-    projects = tmpdir.makedir('projects')
-    _transcript(
-        projects / '-work-proj', 'a.jsonl', '{"type": "last-prompt", "lastPrompt": "do it"}\n', 1000
-    )
-    replace.in_module(
-        all_sessions,
-        lambda: [
-            {'id': 'x', 'status': 'busy', 'name': 'proj@goal@agent', 'cwd': '/work/proj'},
-            {'sessionId': 'bare', 'status': 'idle', 'cwd': '/elsewhere'},  # no name, no transcript
-        ],
-    )
-    compare(
-        agents(projects),
-        expected=[
-            Agent(
-                id='x',
-                name='proj@goal@agent',
-                status='busy',
-                cwd=Path('/work/proj'),
-                summary='do it',
-            ),
-            Agent(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
-        ],
-    )
+    # no CLAUDECODE (conftest clears it): the role stamp alone marks the AI session
+    worktree = tmpdir.makedir('wt')
+    replace.in_environ('CHIMERA_ROLE', 'manager')
+    calls = _stub(replace)
+    with ShouldRaise(
+        UserError(
+            '--dangerously-skip-permissions: not available when chimera is driven by an AI agent'
+        )
+    ):
+        agent(worktree, 'n', extra=['--dangerously-skip-permissions'])
+    compare(calls, expected=[])  # never launched
 
 
-def test_agents_tolerates_sessions_missing_fields(replace: Replacer) -> None:
-    replace.in_module(
-        all_sessions,
-        # a session without status/cwd (e.g. a foreground session) must not crash the listing;
-        # status falls back to state, then '?', and a missing cwd yields no summary
-        lambda: [{'sessionId': 'lonely', 'state': 'working'}],
-    )
-    compare(
-        agents(),
-        expected=[Agent(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)],
-    )
-
-
-def test_agent_detail_falls_back_to_tilde_cwd(replace: Replacer) -> None:
-    replace.on_class(Path.home, lambda cls: Path('/home/me'))
-    compare(Agent('i', 'n', 'idle', Path('/home/me/work'), 'a prompt').detail, expected='a prompt')
-    compare(Agent('i', 'n', 'idle', Path('/home/me/work'), None).detail, expected='~/work')
-    compare(Agent('i', 'n', 'idle', Path('/other'), None).detail, expected='/other')
+def test_extra_bypass_flags_pass_for_a_human(tmpdir: TempDir, replace: Replacer) -> None:
+    # conftest clears CLAUDECODE: the same passthrough launches untouched for a human
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(worktree, 'n', extra=['--allow-dangerously-skip-permissions'])
+    expected = ['claude', '--name', 'n', '--allow-dangerously-skip-permissions']
+    compare(calls, expected=[(expected, worktree, True)])
 
 
 def test_scoped_unpinned_keeps_every_agent_when_otherwise_is_none(tmpdir: TempDir) -> None:
@@ -618,12 +540,16 @@ def test_agent_ls_cli_unpinned_lists_every_agent(
     replace.in_module(
         agents,
         lambda: [
-            Agent(
-                id='aaa11111', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'
+            Session(  # a full-UUID id renders as its 8-char short form
+                id='aaa11111-9f80-4c8e-b3d7-1234567890ab',
+                name='proj@g@agent',
+                status='busy',
+                cwd=worktree,
+                summary='fix it',
             ),
-            Agent(id='bbb22222', name='other', status='idle', cwd=worktree, summary='do a thing'),
-            Agent(id='ccc', name='ccc', status='idle', cwd=worktree, summary='unnamed'),
-            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
+            Session(id='bbb22222', name='other', status='idle', cwd=worktree, summary='do a thing'),
+            Session(id='ccc', name='ccc', status='idle', cwd=worktree, summary='unnamed'),
+            Session(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
         ],
         module=chimera_main,
     )
@@ -638,7 +564,9 @@ def test_agent_ls_cli_unpinned_lists_every_agent(
             ]
         ),
         logging=action_logs(
-            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
         ),
     )
 
@@ -651,13 +579,15 @@ def test_agent_ls_cli_trims_long_detail(
     detail = 'x' * 200
     replace.in_module(
         agents,
-        lambda: [Agent(id='aaa', name='named', status='busy', cwd=worktree, summary=detail)],
+        lambda: [Session(id='aaa', name='named', status='busy', cwd=worktree, summary=detail)],
         module=chimera_main,
     )
     command.run('agent', 'ls').check(
         output='scope: all agents\naaa  named  busy  ' + 'x' * 79 + '…',
         logging=action_logs(
-            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
         ),
     )
 
@@ -670,15 +600,17 @@ def test_agent_ls_cli_pinned_to_project_filters_strays(
     replace.in_module(
         agents,
         lambda: [
-            Agent(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
-            Agent(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
+            Session(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            Session(id='ddd', name='stray', status='idle', cwd=tmpdir / 'outside', summary='x'),
         ],
         module=chimera_main,
     )
     command.run('agent', 'ls', '-p', 'proj').check(
         output='scope: proj\naaa  proj@g@agent  busy  fix it',
         logging=action_logs(
-            'agent ls', 'chimera.commands.agent.scoped', {'project': 'proj', 'goal': None}
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': 'proj', 'goal': None},
         ),
     )
 
@@ -691,6 +623,478 @@ def test_agent_ls_cli_when_nothing_running(
     command.run('agent', 'ls').check(
         output='scope: all agents\nNo agents running',
         logging=action_logs(
-            'agent ls', 'chimera.commands.agent.scoped', {'project': None, 'goal': None}
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
         ),
     )
+
+
+def test_agent_ls_cli_default_withholds_stale_and_hints(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _scoped_cli(tmpdir, replace)
+    worktree = project / 'worktrees' / 'g@agent'
+    replace.in_module(
+        agents,
+        lambda: [
+            Session(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            _ghost_at(worktree, 'bbb'),
+        ],
+        module=chimera_main,
+    )
+    command.run('agent', 'ls').check(  # the stale row never shows; only the hint betrays it
+        output='\n'.join(
+            [
+                'scope: all agents',
+                'aaa  proj@g@agent  busy  fix it',
+                '(+1 stale session — ch agent ls -v to show)',
+            ]
+        ),
+        logging=action_logs(
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
+        ),
+    )
+
+
+def test_agent_ls_cli_verbose_shows_stale_with_reason(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _scoped_cli(tmpdir, replace)
+    worktree = project / 'worktrees' / 'g@agent'
+    replace.in_module(
+        agents,
+        lambda: [
+            Session(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            _ghost_at(worktree, 'bbb'),
+        ],
+        module=chimera_main,
+    )
+    command.run('agent', 'ls', '-v').check(  # live rows unchanged; no hint — nothing is hidden
+        output='\n'.join(
+            [
+                'scope: all agents',
+                'aaa  proj@g@agent  busy   fix it',
+                'bbb                stale  claimed pid 999 is not running',  # name blanked: echoes id
+            ]
+        ),
+        logging=action_logs(
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': True, 'project': None, 'goal': None},
+        ),
+    )
+
+
+def test_agent_ls_cli_only_stale_reports_nothing_running_plus_hint(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _scoped_cli(tmpdir, replace)
+    worktree = project / 'worktrees' / 'g@agent'
+    replace.in_module(
+        agents,
+        lambda: [_ghost_at(worktree, 'bbb'), _ghost_at(worktree, 'ccc')],
+        module=chimera_main,
+    )
+    command.run('agent', 'ls').check(
+        output='\n'.join(
+            [
+                'scope: all agents',
+                'No agents running',
+                '(+2 stale sessions — ch agent ls -v to show)',
+            ]
+        ),
+        logging=action_logs(
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': None, 'goal': None},
+        ),
+    )
+
+
+def test_agent_ls_cli_out_of_scope_stale_earns_no_hint(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _scoped_cli(tmpdir, replace)
+    worktree = project / 'worktrees' / 'g@agent'
+    replace.in_module(
+        agents,
+        lambda: [
+            Session(id='aaa', name='proj@g@agent', status='busy', cwd=worktree, summary='fix it'),
+            _ghost_at(tmpdir / 'outside', 'bbb'),  # scoped out before the withhold count
+        ],
+        module=chimera_main,
+    )
+    command.run('agent', 'ls', '-p', 'proj').check(
+        output='scope: proj\naaa  proj@g@agent  busy  fix it',
+        logging=action_logs(
+            'agent ls',
+            'chimera.commands.agent.scoped',
+            {'verbose': False, 'project': 'proj', 'goal': None},
+        ),
+    )
+
+
+def test_agent_spec_model_rides_as_model_flag(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(worktree, 'proj@goal@agent', spec=AgentSpec('claude', 'opus'))
+    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'opus']
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_agent_passthrough_model_beats_spec_model(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(
+        worktree, 'proj@goal@agent', extra=['--model', 'sonnet'], spec=AgentSpec('claude', 'opus')
+    )
+    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'sonnet']
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_resume_spec_model_rides_as_model_flag(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    resume(worktree, 'proj@goal@agent', spec=AgentSpec('claude', 'opus'))
+    expected = ['claude', '--resume', 'proj@goal@agent', '--model', 'opus']
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_agent_start_cli_with_model_flag(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'start', '-g', 'g', '-m', 'opus').check(
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': 'opus',
+                'dry': False,
+            },
+        ),
+    )
+    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--model', 'opus']
+    compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+def test_agent_start_cli_model_from_project_config(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    project = _project_with_worktree(tmpdir)
+    tmpdir.dump(
+        project / 'config.yaml',
+        {'kind': 'project', 'repo': str(project), 'agent': {'model': 'sonnet'}},
+    )
+    calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'start', '-g', 'g').check(
+        output=f'Launched agent in {expected}',
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': False,
+            },
+        ),
+    )
+    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--model', 'sonnet']
+    compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+# The role section leading every launched agent's context (see agent-docs/workspace-layout.md).
+AGENT_ROLE_TEXT = (
+    '# Role: agent\n\n'
+    'You are the agent for goal g on proj; this worktree and branch are your entire workspace.'
+)
+
+
+def test_agent_start_cli_model_from_workspace_config(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace', 'agent': {'model': 'ws-model'}})
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(project)
+    calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    digest = sha256(AGENT_ROLE_TEXT.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    command.run('agent', 'start', '-g', 'g').check(
+        output=f'Launched agent in {expected}',
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'agent start',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.agent',
+                'params': {
+                    'prompt': None,
+                    'goal': 'g',
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': False,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@g@agent',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+        ],
+    )
+    claude_cmd = [
+        'claude',
+        '--name',
+        'proj@g@agent',
+        '--model',
+        'ws-model',
+        '--append-system-prompt-file',
+        str(context),
+    ]
+    compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+def test_agent_start_cli_unknown_harness_errors(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    calls = _stub(replace)
+    command.run('agent', 'start', '-g', 'g', '--harness', 'codex').check(
+        output="Error: no harness 'codex' (available: claude)",
+        return_code=1,
+        logging=action_logs(
+            'agent start',
+            'chimera.commands.agent.agent',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': 'codex',
+                'model': None,
+                'dry': False,
+            },
+            error="UnknownHarnessError: no harness 'codex' (available: claude)",
+        ),
+    )
+    compare(calls, expected=[])  # never launched
+
+
+def test_agent_context_rides_as_system_prompt_file(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    agent(worktree, 'proj@goal@agent', context=tmpdir / 'ctx.md')
+    expected = [
+        'claude',
+        '--name',
+        'proj@goal@agent',
+        '--append-system-prompt-file',
+        str(tmpdir / 'ctx.md'),
+    ]
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def test_agent_start_cli_injects_rendered_context(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    tmpdir.write(ws / 'principles' / 'verify.md', 'Verify before done.\n')
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(project)
+    calls = _stub(replace)
+    expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
+    text = f'{AGENT_ROLE_TEXT}\n\n# Principles\n\nVerify before done.'
+    digest = sha256(text.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    command.run('agent', 'start', '-g', 'g').check(
+        output=f'Launched agent in {expected_wt}',
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'agent start',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.agent',
+                'params': {
+                    'prompt': None,
+                    'goal': 'g',
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': False,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@g@agent',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+        ],
+    )
+    compare(context.read_text(), expected=text)
+    claude_cmd = ['claude', '--name', 'proj@g@agent', '--append-system-prompt-file', str(context)]
+    compare(calls, expected=[(claude_cmd, expected_wt, True)])
+
+
+def test_agent_start_cli_dry_previews_without_launching(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    tmpdir.write(ws / 'principles' / 'verify.md', 'Verify before done.\n')
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(project)
+    calls = _stub(replace)
+    expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
+    text_ = f'{AGENT_ROLE_TEXT}\n\n# Principles\n\nVerify before done.'
+    digest = sha256(text_.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    command.run('agent', 'start', 'do it', '-g', 'g', '-m', 'opus', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would launch agent in {expected_wt}',
+                'harness: claude  model: opus',
+                'role: agent (scope: proj@g)',
+                'prompt: do it',
+                f'context: {context}',
+                '---',
+                text_,
+            ]
+        ),
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'agent start',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.agent',
+                'params': {
+                    'prompt': 'do it',
+                    'goal': 'g',
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': 'opus',
+                    'dry': True,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@g@agent',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+        ],
+    )
+    compare(calls, expected=[])  # nothing launched
+
+
+def test_agent_resume_cli_dry_without_context(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    calls = _stub(replace)
+    expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
+    # no workspace, no sources: the preview shows an interactive launch with no context
+    command.run('agent', 'resume', '-g', 'g', '--dry', '--', '--verbose').check(
+        output='\n'.join(
+            [
+                f'Would resume agent in {expected_wt}',
+                'harness: claude',
+                'role: agent (scope: myproject@g)',
+                'prompt: (interactive)',
+                'passthrough: --verbose',
+                'context: (none)',
+            ]
+        ),
+        logging=action_logs(
+            'agent resume',
+            'chimera.commands.agent.resume',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': True,
+            },
+        ),
+    )
+    compare(calls, expected=[])  # nothing launched
+
+
+def test_agent_env_overlay_reaches_the_adapter(tmpdir: TempDir, replace: Replacer) -> None:
+    worktree = tmpdir.makedir('wt')
+    envs = capture_env(replace)
+    agent(worktree, 'n', env={'CHIMERA_ROLE': 'agent'})
+    resume(worktree, 'n', env={'CHIMERA_ROLE': 'agent'})
+    compare(envs, expected=[{'CHIMERA_ROLE': 'agent'}, {'CHIMERA_ROLE': 'agent'}])
+
+
+def test_agent_env_defaults_to_empty(tmpdir: TempDir, replace: Replacer) -> None:
+    envs = capture_env(replace)
+    agent(tmpdir.makedir('wt'), 'n')
+    compare(envs, expected=[{}])
+
+
+def test_agent_start_cli_stamps_the_agent_role(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    envs = capture_env(replace)
+    command.run('agent', 'start', '-g', 'g')
+    compare(envs, expected=[{'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'myproject@g'}])
+
+
+def test_agent_resume_cli_stamps_the_agent_role(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    envs = capture_env(replace)
+    command.run('agent', 'resume', '-g', 'g')
+    compare(envs, expected=[{'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'myproject@g'}])

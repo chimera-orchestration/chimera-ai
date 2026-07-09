@@ -7,7 +7,8 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.commands.agent import live_sessions
+from chimera.agents import Session
+from chimera.commands.agent import live
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
 from chimera.commands.worktree.rm import remove
@@ -18,7 +19,7 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live_sessions, lambda worktree: [], module=worktree_rm)
+    replace.in_module(live, lambda worktree: [], module=worktree_rm)
 
 
 def _goal(tmpdir: TempDir, repo: Repo) -> Path:
@@ -43,16 +44,18 @@ def test_remove_aborts_when_an_agent_is_running(
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
     replace.in_module(
-        live_sessions,
+        live,
         lambda worktree: [
-            {
-                'pid': 4242,
-                'kind': 'interactive',
-                'status': 'idle',
-                'startedAt': 1781247747055,
-                'name': 'sybil@g@agent',
-                'sessionId': 'x',
-            }
+            Session(
+                id='x',
+                name='sybil@g@agent',
+                status='idle',
+                cwd=worktree,
+                summary=None,
+                pid=4242,
+                kind='interactive',
+                started=datetime.fromtimestamp(1781247747055 / 1000),
+            )
         ],
         module=worktree_rm,
     )
@@ -74,8 +77,8 @@ def test_remove_force_bypasses_the_liveness_check(
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
     replace.in_module(
-        live_sessions,
-        lambda worktree: [{'sessionId': 'x', 'status': 'idle'}],
+        live,
+        lambda worktree: [Session('x', 'x', 'idle', worktree, None)],
         module=worktree_rm,
     )
     remove(git_repo.path, worktrees, 'g', force=True)
@@ -194,8 +197,8 @@ def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
     add(git_repo.path, worktrees, goal='g', actors=('scout',))
     scout = worktrees / 'g@scout'
     replace.in_module(
-        live_sessions,
-        lambda worktree: [{'sessionId': 'x'}] if worktree == scout else [],
+        live,
+        lambda worktree: [Session('x', 'x', '?', worktree, None)] if worktree == scout else [],
         module=worktree_rm,
     )
     with ShouldRaise(

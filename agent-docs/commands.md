@@ -79,18 +79,32 @@ list, so it can't drift. Default lists canonical leaf commands + summaries; `-v`
 command's options and synonyms; `--json` emits the structured index. A leaf with no `help=`
 shows blank — a test (`test_every_command_has_a_summary`) fails on it.
 
+`ch prime` is `ch help`'s editorial counterpart: help is the *reference* (what exists —
+derived, exhaustive), prime the *orientation* (how to work here, right now — the golden path
+for the scope you stand in). Its per-role templates (`chimera/prime.py`) are editorial prose,
+so they *could* drift — a test (`tests/test_prime.py`) pins every backtick-cited `ch …`
+command to a live leaf of that role's **stripped** tree (the captain's against the full
+tree), so prime provably never mentions fenced capability. The role is the session's
+`CHIMERA_ROLE` stamp when set, else inferred from cwd (goal worktree → agent, project dir →
+manager, bare workspace → captain) — the pull path for sessions chimera didn't launch, and
+for humans. Every template ends by signposting `ch help`.
+
 **Terse-default `-v` hint** (the *Terse defaults signpost their depth* principle). A view that
-hides detail behind `-v` (`ch help`, `ch doctor`) must end with a one-line hint naming the `-v`
-command — but only when it actually withheld something *and* `-v` wasn't given. Never under `-v`
-(nothing left to reveal) and never in machine output (`--json`). So the hint reveals what's
-hidden exactly when an agent would otherwise have no way to discover it: `ch help` trails
-`ch help -v also lists…`; `ch doctor` reveals the count of passing checks it suppressed.
+hides detail behind `-v` (`ch help`, `ch doctor`, `ch agent ls`) must end with a one-line hint
+naming the `-v` command — but only when it actually withheld something *and* `-v` wasn't given.
+Never under `-v` (nothing left to reveal) and never in machine output (`--json`). So the hint
+reveals what's hidden exactly when an agent would otherwise have no way to discover it: `ch help`
+trails `ch help -v also lists…`; `ch doctor` reveals the count of passing checks it suppressed;
+`ch agent ls` the count of stale sessions it withheld.
 
 ## Agent-restricted options
 
 An option too risky to trust to an AI agent's own judgement (`--force`, `--dangerous`) is named
-in `chimera.agent_env.RESTRICTED_OPTIONS`. When `chimera.agent_env.running_under_ai_agent()` is
-true (currently: `CLAUDECODE` is set), `__main__.main()` builds the Click command tree via
+in `chimera.agent_env.RESTRICTED_OPTIONS`. When `chimera.agent_env.ai_session()` is true —
+either signal: a harness marker (`running_under_ai_agent()`, currently `CLAUDECODE`) *or* a
+chimera role stamp (`CHIMERA_ROLE`; launchers only ever stamp roles into AI sessions, so a
+future non-claude harness with no marker of its own still can't hand the options back) —
+`__main__.main()` builds the Click command tree via
 `typer.main.get_command(app)` and strips any parameter matching `RESTRICTED_OPTIONS` from every
 command's `.params` before invoking it (`_strip_restricted_options`) — not hidden, physically
 absent, so Click's own parser, `--help`, and `ch help`/`ch help -v`/`--json` (which all read
@@ -99,6 +113,69 @@ never parses the flag, so it never reaches one. A future high-risk option joins 
 frozenset rather than inventing a new mechanism. This only works because console-script entry
 points point at `main()`, not `app` directly — `Typer.__call__` rebuilds an unstripped tree from
 scratch on every call, so stripping has to happen on a tree we build and invoke ourselves.
+
+The `--` passthrough tail is the one place this strip can't reach — `PassthroughCommand`
+splits it off before Click parses. Its fence is per-harness: each `Agent` subclass declares
+its own bypass spellings (`Agent.restricted`, e.g. claude's `--dangerously-skip-permissions`),
+and `chimera.commands.agent.refuse_restricted` — called by every launcher once the spec is
+resolved — refuses them (never silently drops: a session launched *without* the bypass its
+caller asked for would just be confusing). It triggers on the same `ai_session()` pair.
+
+## Role-scoped commands
+
+The same machinery one level up: where `RESTRICTED_OPTIONS` strips options, per-role command
+allowlists (`chimera.agent_env.ROLE_COMMANDS`, canonical leaf paths keyed by role) strip whole
+commands. The launchers themselves set the variable — every launch stamps
+`role_env(role, scope)` into the session's environment (see `agent-docs/workspace-layout.md`,
+*Choosing the harness and model*). When `CHIMERA_ROLE` names a listed role (`session_role()`;
+empty counts as unset), `main()` prunes the tree it built (`_strip_to_role`) before invoking: a leaf not in the role's
+set is deleted from its group's `commands` dict, a group emptied by that is deleted too —
+absent from parsing, `--help`, `ch help` and completion alike, and a synonym dies with its
+canonical target (`alias_group` resolves through the pruned dict). *Strip, don't admonish*:
+anything needing a "must not" in prose is instead absent from the session's world — written
+prohibitions advertise targets. `errand` rides in **both** the manager's and the agent's
+allowlists — cross-project *reading* is knowledge, not capability (the same rule that leaves
+listers unfenced), and its target axis carries its own containment (below). The captain has
+no `ROLE_COMMANDS` entry — full tree (the
+option strip still applies: any role stamp marks an AI session); an **unknown role fails hard
+and early** — `ch`
+refuses to run at all, before any command parses — never a silent full tree, never a silently
+narrowed one. One carve-out: Click's completion dispatch (`chimera.git.completing`, the same
+detection that mutes the git DEBUG trace) instead completes *nothing*, silently, exit 0 — a
+completer must never raise or print, and a stale role stamp in a shell would otherwise break
+every TAB; fail-closed keeps both rules standing (loud for invocations, silent for completers).
+Honesty: env-based identity is a fence, not a wall (unset-able, like
+`CLAUDECODE`) — the wall is the harness permission layer; the fence's real value is not
+advertising footguns.
+
+**Arg-level scope fencing** — policy the strip can't express: a command fine in-scope whose
+`-p` could reach another project. The fence arms when `session_role()` is `manager` and
+`role_scope()` names a project (`chimera.agent_env.fenced_project`; the agent role needs no
+fence — its tree carries no `-p` anywhere — but is fenced identically anyway, its scope's
+first `@` segment naming the project, since the symmetry costs one membership test and a
+split). The chokepoint is `_project()` in `__main__.py` — the single funnel every
+project-scoped **action** resolves through: after `resolve_project` returns,
+`refuse_cross_scope` compares the **resolved** project against the fence, so an explicit
+cross-scope `-p` and a cwd standing in another project refuse identically. Listers are
+**never** fenced: `ls`/`goal ls`/`agent ls` resolve through `_scope()`, untouched —
+cross-project listing is knowledge, not capability. There is deliberately no `-g` rule: a
+goal resolves inside the already-fenced project — guaranteed because every seam a goal or
+actor name enters through (an explicit `-g`/`-a`, the new-goal positionals) validates it
+first (`require_valid_goal`/`require_valid_actor` in `chimera.worktrees`: one path segment,
+no `@`, git's ref rules), so a traversal like `-g ../../other/worktrees/x` refuses before
+any path or ref is built — and `chat -g` is stripped for managers
+anyway — a decision, not an accident. The refusal is `scoped to <project>; ask the captain`
+(a `UserError`, exit 1): *signpost depth, never privilege* — it states identity and
+escalates, never narrating the prevented operation or a flag that would permit it.
+
+`ch errand`'s *target* positional is the one deliberate exemption — an axis, not a hole: it
+names the project dispatched *into*, never who the session acts as, so it resolves through a
+dedicated helper (`__main__._foreign`) the fence never guards, whose single-caller status a
+test pins (`test_foreign_has_exactly_one_caller`). `-p` keeps its fenced meaning everywhere:
+an inherited `-p` reaching errand is refused, not reinterpreted. The verb's own narrow
+semantics — one-shot, the `Agent.run(readonly=True)` tool wall (a bounded git-flag leak
+accepted; see workspace-layout.md's Errands), the ephemeral worktree and sweep — are the
+containment.
 
 ## Destructive commands preview with --dry
 
@@ -109,6 +186,15 @@ Thread `chimera.dry.Dry` through the pure function and route each mutation throu
 code path and can't drift from it. `--dry` previews *under whatever other flags are given*, so
 it still reports a refusal on unsafe state and `--dry --force` previews a forced teardown.
 Report with `dry.verb('Removed', 'Would remove')`. Read-only commands never take `--dry`.
+
+**Launching commands preview with `--dry` too** (`agent start`/`resume`, `goal start`/`adopt`,
+`review`, `chat`): everything resolves for real — scope, spec cascade, rendered context (the
+file is written and logged; it's the same content-addressed artifact a real launch would use) —
+but every mutation (worktree/branch setup, the harness launch) routes through the same `Dry`,
+so nothing is created and nothing runs. The report names the target, then what would be
+injected: harness/model, prompt, passthrough, and the full context text. Guards *outside* the
+launch (e.g. chat's already-live-by-name refusal) still fire under `--dry`; the harness's own
+in-launch liveness check does not.
 
 ## Testing
 

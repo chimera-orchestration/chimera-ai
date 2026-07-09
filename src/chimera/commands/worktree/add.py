@@ -9,6 +9,8 @@ from chimera.worktrees import (
     HUMAN,
     base_ref,
     fetch_origin_or_offline,
+    require_valid_actor,
+    require_valid_goal,
     worktree_path,
 )
 from chimera.worktrees import branch as goal_branch
@@ -64,6 +66,9 @@ def _add_goal(
     branch, checked out on demand; every other actor gets a worktree at ``<goal>@<actor>`` on its
     branch. Branches and worktrees are created with no upstream tracking.
     """
+    require_valid_goal(goal)
+    for actor in actors:
+        require_valid_actor(actor)
     git = Git(repo)
     _require_commit(git, repo)
     if fetch:

@@ -14,7 +14,7 @@ from chimera.config import (
     load_config,
 )
 from chimera.git import Git
-from chimera.worktrees import SEP, goals
+from chimera.worktrees import SEP, goals, require_valid_goal
 
 
 class CannotIdentifyProjectError(UserError):
@@ -118,11 +118,13 @@ def resolve_project(cwd: Path, explicit: str | None = None) -> Project:
 def resolve_goal(cwd: Path, project: Project, explicit: str | None = None) -> str:
     """The goal to act on: ``explicit`` (``-g``), else the current ``<goal>/<actor>`` branch.
 
+    An explicit name is validated (:func:`~chimera.worktrees.require_valid_goal`) — a ``-g``
+    the naming grammar can't hold (``../…``, a nested ``a/b``) must never reach a path or ref.
     The branch is trusted only when it names a goal that actually exists, so a review or
     feature branch is never mistaken for one. Raises when neither source applies.
     """
     if explicit is not None:
-        return explicit
+        return require_valid_goal(explicit)
     token = _branch_token(cwd)
     if token is not None and token[0] in goals(project.worktrees):
         return token[0]
@@ -163,8 +165,12 @@ def resolve_scope(
     wherever you stand.
 
     A bad explicit ``--project`` always raises ``UnknownProjectError`` (naming a ghost is an
-    error, not a reason to widen), as does genuinely not being in a workspace.
+    error, not a reason to widen), as does genuinely not being in a workspace — and a
+    malformed explicit ``--goal`` raises like the actions do (widening covers inference
+    failures, never a name the grammar can't hold).
     """
+    if goal is not None:
+        require_valid_goal(goal)
     workspace = resolve_workspace(cwd)
     if not infer:
         project_ = resolve_project(cwd, project) if project is not None else None

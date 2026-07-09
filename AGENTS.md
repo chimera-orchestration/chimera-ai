@@ -11,14 +11,17 @@ isn't built yet — the vocabulary stands regardless; what's implemented is the 
 - **Project** — a project managed by Chimera within a workspace
 - **Goal** — a thing that needs doing (e.g. "implement feature X")
 - **Task** — a tracked unit of work, discovered while planning or executing a goal
+- **Errand** — a one-shot, read-only, headless agent dispatched into another project to fetch a report (`ch errand`); its goal (`errand-<id>`) is ephemeral — swept as soon as the report is delivered
 - **Actor** — a participant in a goal: a **human** or an **agent**. Each works on its own **branch**; an agent additionally always works in a **worktree** (a human checks their branch out wherever they like).
 - **Branch** — a git branch named `<goal>/<actor>`
 - **Worktree** — a git worktree named `<goal>@<actor>` (agents only)
-- **Principle** — context an agent must load before beginning a process, task or step
+- **Principle** — context an agent must always load before beginning work (inlined at launch)
 - **Knowledge** — named, versioned context loaded on demand (e.g. "load knowledge for testfixtures")
 - **Reference** — a project used only for tracking knowledge
 - **Service** — a long-running system process managed by Chimera (e.g. a tmux session or docker container); distinct from the workflow concept "Process"
-- **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera; always works in a **worktree**
+- **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera; works in a **worktree** (only the captain works on the workspace itself)
+- **Role** — the function an agent is launched as; a role's directives live in the workspace `roles/{role}/` dir, and each workspace names its own instance of a role (the concept/instance split mirrors workspace/lycia)
+- **Captain** — the role of the workspace-level agent chatted with to direct all work across the workspace; no goal, branch or worktree — it works on the workspace as a whole (lycia's captain is named *pegasus*)
 
 ## Principles
 

@@ -7,7 +7,14 @@ from loguru import logger
 from chimera.commands.worktree.rm import refuse_if_agents_running
 from chimera.config import UserError
 from chimera.git import Git
-from chimera.worktrees import SEP, branch, goal_actors, registered_worktrees, worktree_path
+from chimera.worktrees import (
+    SEP,
+    branch,
+    goal_actors,
+    registered_worktrees,
+    require_valid_goal,
+    worktree_path,
+)
 
 
 @dataclass(frozen=True)
@@ -40,7 +47,7 @@ def rename(
     actors = sorted(goal_actors(git, worktrees_root, old))
     if not actors:
         raise UserError(f'no goal {old!r} to rename')
-    _validate_name(git, old, new)
+    _validate_name(old, new)
     branches = set(git.branches())
     registered = registered_worktrees(git)
     _refuse_collisions(git, worktrees_root, old, new, actors, branches)
@@ -78,15 +85,10 @@ def rename(
     return RenameResult(renames, moved, warnings, _cwd_moved_to(cwd, moved))
 
 
-def _validate_name(git: Git, old: str, new: str) -> None:
+def _validate_name(old: str, new: str) -> None:
     if new == old:
         raise UserError(f'new name {new!r} is the same as the old')
-    if SEP in new:
-        raise UserError(f'{new!r} is not a valid goal name: {SEP!r} separates goal from actor')
-    try:
-        git('check-ref-format', f'refs/heads/{new}/actor')
-    except GitError:
-        raise UserError(f'{new!r} is not a valid goal name') from None
+    require_valid_goal(new)
 
 
 def _refuse_collisions(

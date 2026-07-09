@@ -1,8 +1,8 @@
 from collections.abc import Iterable
-from datetime import datetime
 from pathlib import Path
 
-from chimera.commands.agent import live_sessions
+from chimera.agents import Session
+from chimera.commands.agent import live
 from chimera.dry import Dry
 from chimera.git import Git
 from chimera.worktrees import (
@@ -31,14 +31,14 @@ def remove(
     Every actor in the goal's namespace is swept, not just the default human/agent pair
     (see :func:`goal_actors`) — any stray ``<goal>/<actor>`` branch or ``<goal>@<actor>``
     worktree goes too. Only touches worktrees/branches that actually exist, so re-running —
-    or removing a goal that was never fully created — is a safe no-op. Refuses if a claude
-    agent is live in any of the goal's worktrees, unless force. ``fetch`` (the default)
-    refreshes ``origin`` first so a branch merged upstream is recognised as merged. The
-    deleted branches and the commits they pointed at are logged first (see
-    ``agent-docs/logging.md``), so a force-discarded branch can still be recovered from the
-    log. Under ``dry`` the same discovery and safety checks run but nothing is deleted (so
-    no refs change and no ref line is logged); the return is still what *would* be removed.
-    Returns removed worktrees.
+    or removing a goal that was never fully created — is a safe no-op. Refuses if an agent
+    from any registered harness is live in any of the goal's worktrees, unless force.
+    ``fetch`` (the default) refreshes ``origin`` first so a branch merged upstream is
+    recognised as merged. The deleted branches and the commits they pointed at are logged
+    first (see ``agent-docs/logging.md``), so a force-discarded branch can still be
+    recovered from the log. Under ``dry`` the same discovery and safety checks run but
+    nothing is deleted (so no refs change and no ref line is logged); the return is still
+    what *would* be removed. Returns removed worktrees.
     """
     git = Git(repo)
     registered = registered_worktrees(git)
@@ -90,20 +90,23 @@ def _clear_markers(git: Git, goal: str, dry: Dry) -> None:
 def refuse_if_agents_running(worktrees: Iterable[Path]) -> None:
     blocks: list[str] = []
     for worktree in worktrees:
-        if sessions := live_sessions(worktree):
+        if sessions := live(worktree):
             described = '\n  '.join(_describe(session) for session in sessions)
             blocks.append(f'an agent is live in {worktree}:\n  {described}')
     if blocks:
         raise RuntimeError('\n'.join(blocks) + '\nfind its terminal or kill the pid, then re-run')
 
 
-def _describe(session: dict[str, object]) -> str:
-    fields = [f'pid {session.get("pid", "?")}']
-    fields += [str(value) for key in ('kind', 'status') if (value := session.get(key))]
-    if isinstance(ms := session.get('startedAt'), int | float):
-        fields.append(f'since {datetime.fromtimestamp(ms / 1000):%a %H:%M}')
-    if name := session.get('name'):
-        fields.append(str(name))
+def _describe(session: Session) -> str:
+    fields = [f'pid {session.pid if session.pid is not None else "?"}']
+    if session.kind:
+        fields.append(session.kind)
+    if session.status != '?':  # '?' is Session's absent-status fallback, not information
+        fields.append(session.status)
+    if session.started is not None:
+        fields.append(f'since {session.started:%a %H:%M}')
+    if session.name != session.id:  # the name falls back to the id; echoing it adds nothing
+        fields.append(session.name)
     return '  '.join(fields)
 
 

@@ -1,6 +1,16 @@
-from testfixtures import Replacer, not_there
+from testfixtures import Replacer, ShouldRaise, compare, not_there
 
-from chimera.agent_env import running_under_ai_agent
+from chimera.agent_env import (
+    CrossScopeError,
+    ai_session,
+    fenced_project,
+    refuse_cross_scope,
+    role_env,
+    role_scope,
+    role_scope_for,
+    running_under_ai_agent,
+    session_role,
+)
 
 
 class TestRunningUnderAiAgent:
@@ -11,3 +21,116 @@ class TestRunningUnderAiAgent:
     def test_false_when_unset(self, replace: Replacer) -> None:
         replace.in_environ('CLAUDECODE', not_there)
         assert not running_under_ai_agent()
+
+
+class TestAiSession:
+    def test_true_under_a_harness_marker(self, replace: Replacer) -> None:
+        replace.in_environ('CLAUDECODE', '1')
+        assert ai_session()
+
+    def test_true_under_a_role_stamp_alone(self, replace: Replacer) -> None:
+        # only a chimera launcher stamps roles, and only into AI sessions
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        assert ai_session()
+
+    def test_false_for_a_human(self) -> None:
+        assert not ai_session()  # conftest clears both signals
+
+
+class TestSessionRole:
+    def test_reads_the_role(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        compare(session_role(), expected='manager')
+
+    def test_unset_is_none(self) -> None:
+        assert session_role() is None  # conftest clears the variable
+
+    def test_empty_counts_as_unset(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', '')
+        assert session_role() is None
+
+
+class TestRoleScope:
+    def test_reads_the_scope(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj@g')
+        compare(role_scope(), expected='proj@g')
+
+    def test_unset_is_none(self) -> None:
+        assert role_scope() is None
+
+    def test_empty_counts_as_unset(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE_SCOPE', '')
+        assert role_scope() is None
+
+
+class TestRoleScopeFor:
+    def test_project_only(self) -> None:
+        compare(role_scope_for('proj'), expected='proj')
+
+    def test_project_and_goal(self) -> None:
+        compare(role_scope_for('proj', 'g'), expected='proj@g')
+
+    def test_round_trips_through_fenced_project(self, replace: Replacer) -> None:
+        # the pair shares one grammar: what the builder stamps, the parser recovers
+        replace.in_environ('CHIMERA_ROLE', 'agent')
+        replace.in_environ('CHIMERA_ROLE_SCOPE', role_scope_for('proj', 'g'))
+        compare(fenced_project(), expected='proj')
+
+
+class TestFencedProject:
+    def test_scoped_manager_is_fenced(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
+        compare(fenced_project(), expected='proj')
+
+    def test_scoped_agent_is_fenced_to_its_project(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'agent')
+        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj@g')
+        compare(fenced_project(), expected='proj')
+
+    def test_captain_is_unfenced(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'captain')
+        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')  # even a stray scope never fences
+        assert fenced_project() is None
+
+    def test_no_role_is_unfenced(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
+        assert fenced_project() is None  # conftest clears the role variable
+
+    def test_role_without_scope_is_unfenced(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        assert fenced_project() is None
+
+
+class TestRefuseCrossScope:
+    def test_out_of_scope_refuses(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
+        with ShouldRaise(CrossScopeError('proj')):
+            refuse_cross_scope('other')
+
+    def test_in_scope_passes(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
+        refuse_cross_scope('proj')
+
+    def test_unfenced_passes_anything(self) -> None:
+        refuse_cross_scope('other')  # conftest clears role and scope
+
+    def test_error_signposts_depth_never_privilege(self) -> None:
+        compare(str(CrossScopeError('proj')), expected='scoped to proj; ask the captain')
+
+
+class TestRoleEnv:
+    def test_unscoped_clears_the_scope(self) -> None:
+        # '' rather than omission: the overlay must displace a stale inherited scope
+        compare(
+            role_env('captain'),
+            expected={'CHIMERA_ROLE': 'captain', 'CHIMERA_ROLE_SCOPE': ''},
+        )
+
+    def test_scoped(self) -> None:
+        compare(
+            role_env('agent', 'proj@g'),
+            expected={'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'proj@g'},
+        )

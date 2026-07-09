@@ -1,13 +1,19 @@
+import json
+import os
 import sys
+from pathlib import Path
 from typing import cast
 
 import pytest
-from testfixtures import Replacer, compare, not_there
-from typer._click.core import Command
+from testfixtures import Replacer, ShouldRaise, TempDir, compare, not_there
+from typer._click.core import Command, Context
 from typer.core import TyperGroup
 from typer.main import get_command
 
-from chimera.__main__ import _strip_restricted_options, app, main
+from chimera.__main__ import _strip_restricted_options, _strip_to_role, app, main
+from chimera.agent_env import ROLE_AGENT, ROLE_COMMANDS, ROLE_MANAGER
+from tests.cli import Command as CliCommand
+from tests.cli import action_logs, leaves
 
 
 def _leaf(root: Command, *path: str) -> Command:
@@ -19,6 +25,24 @@ def _leaf(root: Command, *path: str) -> Command:
 
 def _option_names(command: Command) -> set[str]:
     return {opt for p in command.params for opt in p.opts}
+
+
+def _role_tree(role: str) -> TyperGroup:
+    command = get_command(app)
+    _strip_to_role(command, ROLE_COMMANDS[role])
+    return cast(TyperGroup, command)
+
+
+def _argv(replace: Replacer, *argv: str) -> None:
+    replace(target=sys.argv, container=sys, name='argv', replacement=['ch', *argv])
+
+
+def _completion_request(replace: Replacer, line: str = 'ch ') -> None:
+    """A bash TAB against ``line``: Click dispatches completion instead of running a command."""
+    replace.in_environ('_CH_COMPLETE', 'complete_bash')
+    replace.in_environ('COMP_WORDS', line)
+    replace.in_environ('COMP_CWORD', '1')
+    _argv(replace)
 
 
 class TestStripRestrictedOptions:
@@ -52,12 +76,7 @@ class TestMain:
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', '1')
-        replace(
-            target=sys.argv,
-            container=sys,
-            name='argv',
-            replacement=['ch', 'worktree', 'rm', 'somegoal', '--force'],
-        )
+        _argv(replace, 'worktree', 'rm', 'somegoal', '--force')
         with pytest.raises(SystemExit) as excinfo:
             main()
         compare(excinfo.value.code, expected=2)
@@ -69,14 +88,244 @@ class TestMain:
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', not_there)
-        replace(
-            target=sys.argv,
-            container=sys,
-            name='argv',
-            replacement=['ch', 'worktree', 'rm', '--help'],
-        )
+        _argv(replace, 'worktree', 'rm', '--help')
         with pytest.raises(SystemExit) as excinfo:
             main()
         compare(excinfo.value.code, expected=0)
         # same styling caveat as above — assert on the help text, not the flag itself.
         assert 'Skip the live-agent check' in capsys.readouterr().out
+
+
+class TestStripToRole:
+    def test_manager_tree_is_the_within_project_lifecycle(self) -> None:
+        tree = _role_tree(ROLE_MANAGER)
+        # chat/init/doctor gone; project and worktree emptied by the prune, so gone whole
+        compare(
+            set(tree.commands),
+            expected={'help', 'prime', 'ls', 'review', 'errand', 'goal', 'agent'},
+        )
+        goal = cast(TyperGroup, _leaf(tree, 'goal'))
+        compare(set(goal.commands), expected={'start', 'adopt', 'sync', 'finish', 'rename', 'ls'})
+        compare(
+            set(cast(TyperGroup, _leaf(tree, 'agent')).commands), expected={'start', 'resume', 'ls'}
+        )
+
+    def test_agent_tree_is_exactly_help_prime_and_errand(self) -> None:
+        compare(set(_role_tree(ROLE_AGENT).commands), expected={'help', 'prime', 'errand'})
+
+    def test_synonyms_survive_iff_their_canonical_does(self) -> None:
+        manager = _role_tree(ROLE_MANAGER)
+        goal = cast(TyperGroup, _leaf(manager, 'goal'))
+        # goal start survives for a manager, so its synonym still dispatches…
+        assert goal.get_command(Context(goal, info_name='goal'), 'new') is not None
+        agent_tree = _role_tree(ROLE_AGENT)
+        # …while the agent's stripped `ls` takes root-level `list` down with it
+        assert agent_tree.get_command(Context(agent_tree, info_name='ch'), 'list') is None
+
+    def test_every_role_command_names_a_live_leaf(self) -> None:
+        # a stale allowlist entry (a renamed/retired command) would silently allow nothing
+        live = {path for path, _ in leaves(get_command(app))}
+        for role, allowed in ROLE_COMMANDS.items():
+            compare(allowed - live, expected=set(), prefix=role)
+
+    def test_role_strip_composes_with_the_option_strip(self) -> None:
+        command = get_command(app)
+        _strip_restricted_options(command)
+        _strip_to_role(command, ROLE_COMMANDS[ROLE_MANAGER])
+        finish = _leaf(command, 'goal', 'finish')  # present for a manager…
+        assert '--force' not in _option_names(finish)  # …with the restricted option gone
+
+
+def _fenced_manager(tmpdir: TempDir, replace: Replacer) -> Path:
+    """A workspace with two projects, the session fenced to 'proj' as its manager."""
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    for name in ('proj', 'other'):
+        project = ws / name
+        (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+        tmpdir.dump(f'lycia/{name}/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_ROLE', ROLE_MANAGER)
+    replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
+    os.chdir(ws / 'proj')
+    return ws
+
+
+class TestScopeFence:
+    def test_lister_crosses_the_fence(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        _fenced_manager(tmpdir, replace)
+        # cross-project listing is knowledge, not capability — never fenced
+        command.run('goal', 'ls', '-p', 'other').check(
+            output='g',
+            logging=action_logs(
+                'goal ls', 'chimera.commands.goal.ls.goals_in_scope', {'project': 'other'}
+            ),
+        )
+
+    def test_action_with_explicit_project_refuses(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        _fenced_manager(tmpdir, replace)
+        command.run('worktree', 'ls', '-p', 'other').check(
+            output='Error: scoped to proj; ask the captain',
+            return_code=1,
+            logging=action_logs(
+                'worktree ls',
+                'chimera.commands.worktree.ls.ls',
+                {'project': 'other'},
+                error='CrossScopeError: scoped to proj; ask the captain',
+            ),
+        )
+
+    def test_action_in_scope_proceeds(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        _fenced_manager(tmpdir, replace)
+        command.run('worktree', 'ls').check(
+            output=str(Path.cwd() / 'worktrees' / 'g@agent'),
+            logging=action_logs(
+                'worktree ls', 'chimera.commands.worktree.ls.ls', {'project': None}
+            ),
+        )
+
+    def test_goal_traversal_cannot_escape_the_fence(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        # the fence checks the resolved *project*, so a -g that path-escaped the project's
+        # worktrees dir would slip past it — name validation refuses before any path is built
+        _fenced_manager(tmpdir, replace)
+        bad = '../../other/worktrees/g'
+        message = (
+            f'{bad!r} is not a valid goal name: no path separators — '
+            "goal names are single path segments, like 'feature-x' or 'pr-123'"
+        )
+        command.run('agent', 'start', '-g', bad, '--dry').check(
+            output=f'Error: {message}',
+            return_code=1,
+            logging=action_logs(
+                'agent start',
+                'chimera.commands.agent.agent',
+                {
+                    'prompt': None,
+                    'goal': bad,
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': True,
+                },
+                error=f'UserError: {message}',
+            ),
+        )
+
+    def test_cwd_inferred_cross_scope_refuses(
+        self, tmpdir: TempDir, replace: Replacer, command: CliCommand
+    ) -> None:
+        # the fence checks the *resolved* project: standing in another project's dir
+        # refuses exactly like an explicit -p
+        ws = _fenced_manager(tmpdir, replace)
+        os.chdir(ws / 'other')
+        command.run('worktree', 'ls').check(
+            output='Error: scoped to proj; ask the captain',
+            return_code=1,
+            logging=action_logs(
+                'worktree ls',
+                'chimera.commands.worktree.ls.ls',
+                {'project': None},
+                error='CrossScopeError: scoped to proj; ask the captain',
+            ),
+        )
+
+
+class TestMainRole:
+    def test_manager_cannot_reach_project_add(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        _argv(replace, 'project', 'add', 'https://example.com/r.git')
+        with ShouldRaise(SystemExit(2)):
+            main()
+        assert 'No such command' in capsys.readouterr().err
+
+    def test_agent_help_lists_only_allowed_leaves(
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'agent')
+        _argv(replace, 'help', '--json')
+        with ShouldRaise(SystemExit(0)):
+            main()
+        entries = json.loads(capsys.readouterr().out)
+        compare({entry['path'] for entry in entries}, expected=ROLE_COMMANDS[ROLE_AGENT])
+
+    def test_unknown_role_fails_hard_before_any_command_parses(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'bogus')
+        _argv(replace, 'help')
+        with ShouldRaise(SystemExit(1)):
+            main()
+        compare(
+            capsys.readouterr().err,
+            expected="Error: unknown CHIMERA_ROLE 'bogus' (known: captain, manager, agent)\n",
+        )
+
+    def test_unknown_role_completes_nothing_silently(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # a stale role stamp must not break every TAB — fail closed, never loud
+        replace.in_environ('CHIMERA_ROLE', 'bogus')
+        _completion_request(replace)
+        with ShouldRaise(SystemExit(0)):
+            main()
+        captured = capsys.readouterr()
+        compare(captured.out, expected='')
+        compare(captured.err, expected='')
+
+    def test_listed_role_completes_within_its_stripped_tree(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CHIMERA_ROLE', ROLE_MANAGER)
+        _completion_request(replace)
+        with ShouldRaise(SystemExit(0)):
+            main()
+        compare(
+            set(capsys.readouterr().out.splitlines()),
+            # the manager's pruned root, plus ls's surviving synonym — nothing else
+            expected={'help', 'prime', 'ls', 'list', 'review', 'errand', 'goal', 'agent'},
+        )
+
+    def test_captain_keeps_the_full_tree_with_options_stripped(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CLAUDECODE', '1')
+        replace.in_environ('CHIMERA_ROLE', 'captain')
+        _argv(replace, 'worktree', 'rm', 'somegoal', '--force')
+        with ShouldRaise(SystemExit(2)):
+            main()
+        # the command itself survived (only a role in ROLE_COMMANDS is pruned) — the
+        # error is about the agent-restricted option, which still gets stripped
+        assert 'No such option' in capsys.readouterr().err
+
+    def test_manager_command_present_with_restricted_option_stripped(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CLAUDECODE', '1')
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        _argv(replace, 'goal', 'finish', 'somegoal', '--force')
+        with ShouldRaise(SystemExit(2)):
+            main()
+        assert 'No such option' in capsys.readouterr().err
+
+    def test_role_stamp_alone_strips_restricted_options(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # a future non-claude harness sets no CLAUDECODE (conftest clears it) — the role
+        # stamp alone must still fence the options, never hand --force back to the session
+        replace.in_environ('CHIMERA_ROLE', 'manager')
+        _argv(replace, 'goal', 'finish', 'somegoal', '--force')
+        with ShouldRaise(SystemExit(2)):
+            main()
+        assert 'No such option' in capsys.readouterr().err

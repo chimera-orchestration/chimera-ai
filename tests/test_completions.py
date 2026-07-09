@@ -8,7 +8,7 @@ from typer.main import get_command
 
 from chimera.__main__ import app
 from chimera.commands.doctor import CHECKS
-from chimera.completions import complete_actor, complete_check
+from chimera.completions import complete_harness, complete_actor, complete_check
 
 completion_init()
 
@@ -118,6 +118,11 @@ def test_check_option_value() -> None:
         _complete(['doctor', '-c'], 'worktree-'),
         expected=['worktree-separator', 'worktree-branch'],
     )
+
+
+def test_complete_harness_directly() -> None:
+    compare(complete_harness(''), expected=['claude'])
+    compare(complete_harness('co'), expected=[])
 
 
 def test_complete_check_directly() -> None:
