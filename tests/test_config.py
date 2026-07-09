@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import ValidationError
 from testfixtures import ShouldRaise, TempDir, compare
 
 from chimera.config import (
@@ -57,6 +58,12 @@ def test_load_config_context_retention(tmpdir: TempDir) -> None:
         load_config(tmpdir.path / 'ws'),
         expected=WorkspaceConfig(kind='workspace', context_retention_days=3),
     )
+
+
+def test_load_config_context_retention_rejects_negative(tmpdir: TempDir) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'context_retention_days': -1})
+    with ShouldRaise(ValidationError):
+        load_config(tmpdir.path / 'ws')
 
 
 def test_workspace_config_parses_the_root(workspace: Path) -> None:

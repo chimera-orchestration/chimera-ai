@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import time
 from datetime import timedelta
+from pathlib import Path
 
 import yaml
 from giterator.testing import Repo
@@ -1477,7 +1478,7 @@ def _git_ws(tmpdir: TempDir) -> Repo:
     return repo
 
 
-def _context_render(ws, name: str, *, age: timedelta | None = None):
+def _context_render(ws: Path, name: str, *, age: timedelta | None = None) -> Path:
     """A rendered-context artifact under ws's logs, optionally backdated by age."""
     path = ws / 'logs' / 'context' / f'{name}.md'
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1488,7 +1489,7 @@ def _context_render(ws, name: str, *, age: timedelta | None = None):
     return path
 
 
-def _stale_context(path, days: int = CONTEXT_RETENTION_DAYS) -> str:
+def _stale_context(path: Path, days: int = CONTEXT_RETENTION_DAYS) -> str:
     return f'stale context render {path} — unused for over {days} days'
 
 
@@ -1499,6 +1500,7 @@ class TestStaleContext:
     def test_fresh_render_is_silent(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
         _context_render(ws, 'captain-ff8aa221')
+        (ws / 'logs' / 'context' / 'not-a-render.md').mkdir()  # a dir is never a candidate
         compare(_run(StaleContextCheck(), ws), expected=[])
 
     def test_stale_reported_without_fix(self, tmpdir: TempDir) -> None:
@@ -1550,6 +1552,20 @@ class TestStaleContext:
         ws = _ws(tmpdir)
         tmpdir.dump(ws / 'config.yaml', {'kind': 'workspace', 'context_retention_days': 'soon'})
         _context_render(ws, 'captain-ff8aa221', age=timedelta(days=CONTEXT_RETENTION_DAYS - 1))
+        stale = _context_render(
+            ws, 'captain-cf93215f', age=timedelta(days=CONTEXT_RETENTION_DAYS + 1)
+        )
+        compare(  # the default window still applies: inside it silent, beyond it stale
+            _run(StaleContextCheck(), ws),
+            expected=[
+                Finding('stale-context', _stale_context(stale), resolved=False, fixable=True)
+            ],
+        )
+
+    def test_negative_window_uses_the_default(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump(ws / 'config.yaml', {'kind': 'workspace', 'context_retention_days': -1})
+        _context_render(ws, 'captain-ff8aa221')  # a future cutoff would sweep even this
         compare(_run(StaleContextCheck(), ws), expected=[])
 
 

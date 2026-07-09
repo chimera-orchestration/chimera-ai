@@ -89,9 +89,10 @@ def materialize(workspace: Path, name: str, rendered: Rendered) -> Path | None:
     with identical context lands on the same file — rewritten in place, so its mtime
     is always the last launch that used it (doctor's stale-context retention keys off
     this). The log line binds the path, the full sha256 and the sources map (each
-    glob searched → the files it matched) — the recovery record of exactly what a
-    session was launched with, and why a directive did or didn't make it in. ``None``
-    (and no file, no log) when there is nothing to inject.
+    glob searched → the files it matched) — proof of exactly what a session was
+    launched with, and why a directive did or didn't make it in, outliving the file
+    itself once retention prunes it. ``None`` (and no file, no log) when there is
+    nothing to inject.
     """
     if not rendered.text:
         return None

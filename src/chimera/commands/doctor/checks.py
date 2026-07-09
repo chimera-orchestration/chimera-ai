@@ -751,9 +751,9 @@ class StaleContextCheck:
     ``context: rendered`` log line (path + sha256) survives as proof of what ran.
 
     The window is the workspace config.yaml's ``context_retention_days``, read raw so a
-    legacy config doctor hasn't repaired yet doesn't block the check; a missing or
-    non-integer value uses the default (an invalid one already fails validation loudly
-    on every other command, not doctor's problem).
+    legacy config doctor hasn't repaired yet doesn't block the check; a missing,
+    non-integer or negative value uses the default (an invalid one already fails
+    validation loudly on every other command, not doctor's problem).
     """
 
     name = 'stale-context'
@@ -762,12 +762,11 @@ class StaleContextCheck:
         directory = context_dir(workspace)
         if not directory.is_dir():
             return
-        days = (read_raw(workspace) or {}).get('context_retention_days')
-        if not isinstance(days, int):
-            days = CONTEXT_RETENTION_DAYS
+        raw = (read_raw(workspace) or {}).get('context_retention_days')
+        days = int(raw) if isinstance(raw, int) and raw >= 0 else CONTEXT_RETENTION_DAYS
         cutoff = time.time() - timedelta(days=days).total_seconds()
         for path in sorted(directory.glob('*.md')):
-            if path.stat().st_mtime >= cutoff:
+            if not path.is_file() or path.stat().st_mtime >= cutoff:
                 continue
             message = f'stale context render {path} — unused for over {days} days'
             fixing = fix and not exclude.matches(self.name, message)

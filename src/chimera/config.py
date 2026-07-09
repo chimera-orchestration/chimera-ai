@@ -41,7 +41,7 @@ class WorkspaceConfig(BaseModel):
     kind: Literal['workspace']
     agent: AgentConfig = AgentConfig()
     captain: Annotated[CaptainConfig, BeforeValidator(_name_shorthand)] = CaptainConfig()
-    context_retention_days: int = CONTEXT_RETENTION_DAYS
+    context_retention_days: Annotated[int, Field(ge=0)] = CONTEXT_RETENTION_DAYS
 
 
 class ProjectConfig(BaseModel):
