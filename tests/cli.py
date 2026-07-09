@@ -13,7 +13,8 @@ the *annotation*: a bare ``command: testfixtures.Command`` resolves to the stock
 makes the dict-typed ``check`` the one ty sees — with no per-test annotation churn.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
 from testfixtures import Command as _Command
@@ -21,7 +22,10 @@ from testfixtures import LogCapture, Replacer
 from testfixtures.command import AbstractRun, CheckResult
 from testfixtures.loguru import LoguruSource
 from testfixtures.mock import Mock, call
+from typer._click.core import Command as ClickCommand
+from typer.core import TyperGroup
 
+from chimera.agents.claude import Claude
 from chimera.logging import configure
 
 if TYPE_CHECKING:
@@ -67,6 +71,37 @@ def action_logs(
         },
         end,
     ]
+
+
+def leaves(command: ClickCommand, path: str = '') -> Iterator[tuple[str, ClickCommand]]:
+    """Every leaf of a Click tree as ``(canonical path, command)`` — the one notion of
+    'leaf' shared by the doc pins (``test_docs``) and the role-allowlist pin
+    (``test_main``), so both validate the same tree walk."""
+    if isinstance(command, TyperGroup):
+        for name, sub in command.commands.items():
+            yield from leaves(sub, f'{path}{name} ')
+    else:
+        yield path.strip(), command
+
+
+def capture_env(replace: Replacer) -> list[object]:
+    """The env overlay each launch hands the adapter (start and resume alike)."""
+    envs: list[object] = []
+
+    def launch(
+        self: Claude,
+        cwd: Path,
+        name: str,
+        prompt: str | None = None,
+        extra: Sequence[str] = (),
+        dangerous: bool = False,
+        **kw: object,
+    ) -> None:
+        envs.append(kw.get('env'))
+
+    replace.on_class(Claude.start, launch)
+    replace.on_class(Claude.resume, launch)
+    return envs
 
 
 def general_capture() -> LogCapture:

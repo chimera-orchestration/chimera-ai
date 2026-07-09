@@ -1,7 +1,6 @@
 import json
 import os
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -14,7 +13,7 @@ from typer.main import get_command
 from chimera.__main__ import _strip_restricted_options, _strip_to_role, app, main
 from chimera.agent_env import ROLE_AGENT, ROLE_COMMANDS, ROLE_MANAGER
 from tests.cli import Command as CliCommand
-from tests.cli import action_logs
+from tests.cli import action_logs, leaves
 
 
 def _leaf(root: Command, *path: str) -> Command:
@@ -26,15 +25,6 @@ def _leaf(root: Command, *path: str) -> Command:
 
 def _option_names(command: Command) -> set[str]:
     return {opt for p in command.params for opt in p.opts}
-
-
-def _leaf_paths(command: Command, path: str = '') -> Iterator[str]:
-    subs = cast('dict[str, Command] | None', getattr(command, 'commands', None))
-    if subs is None:
-        yield path.strip()
-    else:
-        for name, sub in subs.items():
-            yield from _leaf_paths(sub, f'{path}{name} ')
 
 
 def _role_tree(role: str) -> TyperGroup:
@@ -123,9 +113,9 @@ class TestStripToRole:
 
     def test_every_role_command_names_a_live_leaf(self) -> None:
         # a stale allowlist entry (a renamed/retired command) would silently allow nothing
-        leaves = set(_leaf_paths(get_command(app)))
+        live = {path for path, _ in leaves(get_command(app))}
         for role, allowed in ROLE_COMMANDS.items():
-            compare(allowed - leaves, expected=set(), prefix=role)
+            compare(allowed - live, expected=set(), prefix=role)
 
     def test_role_strip_composes_with_the_option_strip(self) -> None:
         command = get_command(app)
@@ -214,9 +204,8 @@ class TestMainRole:
     ) -> None:
         replace.in_environ('CHIMERA_ROLE', 'manager')
         _argv(replace, 'project', 'add', 'https://example.com/r.git')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(2)):
             main()
-        compare(excinfo.value.code, expected=2)
         assert 'No such command' in capsys.readouterr().err
 
     def test_agent_help_lists_only_allowed_leaves(
@@ -224,9 +213,8 @@ class TestMainRole:
     ) -> None:
         replace.in_environ('CHIMERA_ROLE', 'agent')
         _argv(replace, 'help', '--json')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(0)):
             main()
-        compare(excinfo.value.code, expected=0)
         entries = json.loads(capsys.readouterr().out)
         compare({entry['path'] for entry in entries}, expected=ROLE_COMMANDS[ROLE_AGENT])
 
@@ -235,9 +223,8 @@ class TestMainRole:
     ) -> None:
         replace.in_environ('CHIMERA_ROLE', 'bogus')
         _argv(replace, 'help')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(1)):
             main()
-        compare(excinfo.value.code, expected=1)
         compare(
             capsys.readouterr().err,
             expected="Error: unknown CHIMERA_ROLE 'bogus' (known: captain, manager, agent)\n",
@@ -249,9 +236,8 @@ class TestMainRole:
         replace.in_environ('CLAUDECODE', '1')
         replace.in_environ('CHIMERA_ROLE', 'captain')
         _argv(replace, 'worktree', 'rm', 'somegoal', '--force')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(2)):
             main()
-        compare(excinfo.value.code, expected=2)
         # the command itself survived (only a role in ROLE_COMMANDS is pruned) — the
         # error is about the agent-restricted option, which still gets stripped
         assert 'No such option' in capsys.readouterr().err
@@ -262,9 +248,8 @@ class TestMainRole:
         replace.in_environ('CLAUDECODE', '1')
         replace.in_environ('CHIMERA_ROLE', 'manager')
         _argv(replace, 'goal', 'finish', 'somegoal', '--force')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(2)):
             main()
-        compare(excinfo.value.code, expected=2)
         assert 'No such option' in capsys.readouterr().err
 
     def test_role_stamp_alone_strips_restricted_options(

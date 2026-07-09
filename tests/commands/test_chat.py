@@ -1,7 +1,7 @@
 import os
 import subprocess
 from hashlib import sha256
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from pathlib import Path
 
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
@@ -13,7 +13,7 @@ from chimera.commands.chat import ChatAlreadyLiveError, GoalHasAgentError, chat,
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
 from chimera.worktrees import SEP
-from tests.cli import Command, action_logs
+from tests.cli import Command, action_logs, capture_env
 
 
 def _project_obj(directory: Path) -> Project:
@@ -33,26 +33,6 @@ def _stub(replace: Replacer, live: Iterable[Session] = ()) -> list[object]:
     replace.on_class(Claude.live, lambda self, cwd=None: list(live))
     replace.in_module(subprocess.run, fake_run)
     return calls
-
-
-def _capture_env(replace: Replacer) -> list[object]:
-    """The env overlay each launch hands the adapter (start and resume alike)."""
-    envs: list[object] = []
-
-    def launch(
-        self: Claude,
-        cwd: Path,
-        name: str,
-        prompt: str | None = None,
-        extra: Sequence[str] = (),
-        dangerous: bool = False,
-        **kw: object,
-    ) -> None:
-        envs.append(kw.get('env'))
-
-    replace.on_class(Claude.start, launch)
-    replace.on_class(Claude.resume, launch)
-    return envs
 
 
 class TestChatTarget:
@@ -468,7 +448,7 @@ def test_chat_cli_dry_project_scope_leads_with_the_manager_role(
 def test_chat_env_overlay_reaches_the_adapter(tmpdir: TempDir, replace: Replacer) -> None:
     ws = tmpdir.makedir('lycia')
     _stub(replace)  # keeps the by-name guard inert
-    envs = _capture_env(replace)
+    envs = capture_env(replace)
     chat(ws, 'pegasus', env={'CHIMERA_ROLE': 'captain'})
     chat(ws, 'pegasus', env={'CHIMERA_ROLE': 'captain'}, resume=True)
     compare(envs, expected=[{'CHIMERA_ROLE': 'captain'}, {'CHIMERA_ROLE': 'captain'}])
@@ -479,7 +459,7 @@ def test_chat_cli_stamps_the_captain_role(
 ) -> None:
     _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
     _stub(replace)
-    envs = _capture_env(replace)
+    envs = capture_env(replace)
     command.run('chat')
     # no scope: the captain is unfenced — stamped '' so nothing inherited can fence it
     compare(envs, expected=[{'CHIMERA_ROLE': 'captain', 'CHIMERA_ROLE_SCOPE': ''}])
@@ -494,6 +474,6 @@ def test_chat_cli_stamps_the_manager_role_fenced_to_the_project(
     tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
     os.chdir(project)
     _stub(replace)
-    envs = _capture_env(replace)
+    envs = capture_env(replace)
     command.run('chat')
     compare(envs, expected=[{'CHIMERA_ROLE': 'manager', 'CHIMERA_ROLE_SCOPE': 'proj'}])

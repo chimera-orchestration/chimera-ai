@@ -1,7 +1,7 @@
 import os
 import subprocess
 from hashlib import sha256
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable
 from pathlib import Path
 
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
@@ -23,7 +23,7 @@ from chimera.commands.agent import (
 )
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
-from tests.cli import Command, action_logs
+from tests.cli import Command, action_logs, capture_env
 
 
 def _project_obj(directory: Path) -> Project:
@@ -42,26 +42,6 @@ def _stub(replace: Replacer, sessions: Iterable[Session] = ()) -> list[object]:
         lambda cmd, cwd=None, check=False, env=None: calls.append((cmd, cwd, check)),
     )
     return calls
-
-
-def _capture_env(replace: Replacer) -> list[object]:
-    """The env overlay each launch hands the adapter (start and resume alike)."""
-    envs: list[object] = []
-
-    def launch(
-        self: Claude,
-        cwd: Path,
-        name: str,
-        prompt: str | None = None,
-        extra: Sequence[str] = (),
-        dangerous: bool = False,
-        **kw: object,
-    ) -> None:
-        envs.append(kw.get('env'))
-
-    replace.on_class(Claude.start, launch)
-    replace.on_class(Claude.resume, launch)
-    return envs
 
 
 def test_agent_runs_claude_in_the_foreground_by_default(tmpdir: TempDir, replace: Replacer) -> None:
@@ -1090,14 +1070,14 @@ def test_agent_resume_cli_dry_without_context(
 
 def test_agent_env_overlay_reaches_the_adapter(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
-    envs = _capture_env(replace)
+    envs = capture_env(replace)
     agent(worktree, 'n', env={'CHIMERA_ROLE': 'agent'})
     resume(worktree, 'n', env={'CHIMERA_ROLE': 'agent'})
     compare(envs, expected=[{'CHIMERA_ROLE': 'agent'}, {'CHIMERA_ROLE': 'agent'}])
 
 
 def test_agent_env_defaults_to_empty(tmpdir: TempDir, replace: Replacer) -> None:
-    envs = _capture_env(replace)
+    envs = capture_env(replace)
     agent(tmpdir.makedir('wt'), 'n')
     compare(envs, expected=[{}])
 
@@ -1106,7 +1086,7 @@ def test_agent_start_cli_stamps_the_agent_role(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     _project_with_worktree(tmpdir)
-    envs = _capture_env(replace)
+    envs = capture_env(replace)
     command.run('agent', 'start', '-g', 'g')
     compare(envs, expected=[{'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'myproject@g'}])
 
@@ -1115,6 +1095,6 @@ def test_agent_resume_cli_stamps_the_agent_role(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     _project_with_worktree(tmpdir)
-    envs = _capture_env(replace)
+    envs = capture_env(replace)
     command.run('agent', 'resume', '-g', 'g')
     compare(envs, expected=[{'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'myproject@g'}])
