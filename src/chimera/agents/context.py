@@ -43,8 +43,10 @@ def render(workspace: Path | None, project: Project | None) -> str:
 def role_context(workspace: Path, project: Project | None, role: str, intro: str) -> str:
     """The role section of a launch context: who the session is, then the role's directives.
 
-    The caller owns the identity sentence — ``intro`` states affirmatively what the
-    session *is* (never what it must not do). This function owns the ``# Role:`` header
+    The caller owns ``intro`` — an affirmative statement of what the session *is*
+    (never what it must not do): the goal launchers pass a single identity sentence,
+    ``ch chat`` the role's whole prime, so a captain/manager starts already knowing
+    the golden path. This function owns the ``# Role:`` header
     and the directives, inlined whole like principles (a role must know itself before
     anything else, so this section leads the render) and layered like them too: the
     workspace's ``roles/<role>/*.md`` first (the generic layer, reaching every project's

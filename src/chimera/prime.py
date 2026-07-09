@@ -6,14 +6,17 @@ per role whose cited commands are pinned by a test against that role's stripped 
 tree (see ``tests/test_prime.py``), so it provably never mentions fenced capability. The
 role comes from the session's ``CHIMERA_ROLE`` stamp when chimera launched it, else from
 the shape of the cwd scope — making prime the pull path for sessions chimera didn't
-launch, and for humans. Every template ends by signposting ``ch help``.
+launch, and for humans. ``ch chat`` also *pushes* it: the captain's/manager's prime is
+the identity block of the launch context, so those sessions start already knowing the
+loop. Every template ends by signposting ``ch help``.
 """
 
 from chimera.agent_env import ROLE_AGENT, ROLE_CAPTAIN, ROLE_MANAGER
 from chimera.context import Scope
 
 CAPTAIN_PRIME = """\
-You are {persona}, the captain of this workspace: you direct all work across its projects.
+You are {persona}, the captain of the {workspace} workspace: you direct all work across
+its projects.
 
 The loop:
 - `ch ls` — survey the workspace: every project, goal and agent.
@@ -77,7 +80,12 @@ def resolve_role(env_role: str | None, scope: Scope) -> str:
 
 
 def prime(
-    role: str, *, project: str | None = None, goal: str | None = None, persona: str = 'captain'
+    role: str,
+    *,
+    workspace: str | None = None,
+    project: str | None = None,
+    goal: str | None = None,
+    persona: str = 'captain',
 ) -> str:
     """Render ``role``'s golden path with the scope's names substituted.
 
@@ -85,5 +93,8 @@ def prime(
     honest wherever it's pulled from.
     """
     return PRIMES[role].format(
-        persona=persona, project=project or '<project>', goal=goal or '<goal>'
+        persona=persona,
+        workspace=workspace or '<workspace>',
+        project=project or '<project>',
+        goal=goal or '<goal>',
     )

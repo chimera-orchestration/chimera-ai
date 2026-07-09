@@ -144,10 +144,13 @@ in); its `--` passthrough is still fenced by `refuse_restricted`.
 
 The same launching commands inject a rendered launch context (`chimera.agents.context`).
 A `# Role:` section leads *every* chimera-launched session's context: an **affirmative**
-identity line stating what the session is, never what it must not do — the captain's
-`You are <persona>, the captain of the <workspace> workspace.`, a manager's `You are the
-manager of the <project> project.`, an agent's `You are the agent for goal <goal> on
-<project>; this worktree and branch are your entire workspace.` — followed by the role's
+identity block stating what the session is, never what it must not do. For `ch chat` the
+block is the role's whole prime (`chimera/prime.py`) — identity plus the golden-path loop,
+so a captain or manager starts already knowing `ch` and its tools instead of pulling
+`ch prime` itself; the goal launchers inject a single identity sentence (`You are the agent
+for goal <goal> on <project>; this worktree and branch are your entire workspace.` — the
+agent prime's talk of committing would contradict e.g. errand's read-only wall, so it stays
+pull-only there). The block is followed by the role's
 `roles/<role>/*.md` directives, inlined whole and layered like principles (`role_context`):
 the workspace's first (the generic layer, every project's managers/agents), then the pinned
 project's (its specific persona). A scope with no project — the captain — has only the
@@ -169,7 +172,8 @@ renders, so every workspace launch injects context.
 
 `ch prime` is the *pull* counterpart of this pushed context: run anywhere, it prints the
 scope's role-shaped golden path (the role from `CHIMERA_ROLE` when the session was launched
-by chimera, else inferred from cwd) — see `agent-docs/commands.md`, *Self-documentation*.
+by chimera, else inferred from cwd) — the same text `ch chat` pushes — see
+`agent-docs/commands.md`, *Self-documentation*.
 
 The `-p/-g/-a` flags may appear at any level of a project-scoped command — before the group,
 between group and subcommand, or after it — so `ch -p chimera goal ls`, `ch goal -p chimera ls`

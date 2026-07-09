@@ -87,7 +87,9 @@ command to a live leaf of that role's **stripped** tree (the captain's against t
 tree), so prime provably never mentions fenced capability. The role is the session's
 `CHIMERA_ROLE` stamp when set, else inferred from cwd (goal worktree → agent, project dir →
 manager, bare workspace → captain) — the pull path for sessions chimera didn't launch, and
-for humans. Every template ends by signposting `ch help`.
+for humans. `ch chat` also *pushes* the captain's/manager's prime as the identity block of
+its launch context (see `agent-docs/workspace-layout.md`, *Launch context*), so those
+sessions never have to pull it. Every template ends by signposting `ch help`.
 
 **Terse-default `-v` hint** (the *Terse defaults signpost their depth* principle). A view that
 hides detail behind `-v` (`ch help`, `ch doctor`, `ch agent ls`) must end with a one-line hint
