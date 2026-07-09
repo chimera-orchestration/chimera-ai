@@ -7,7 +7,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
   .gitignore                    # ignores: */repo/ */worktrees/
   config.yaml                   # `kind: workspace` — marks the workspace root
   processes/                    # workspace-wide process definitions
-  roles/                        # role directives: roles/{role}/*.md (e.g. roles/captain/)
+  roles/                        # workspace-level role directives: roles/{role}/*.md (e.g. roles/captain/)
   principles/                   # workspace-wide principles
   knowledge/                    # workspace-wide extracted knowledge (plain markdown)
   {project}/
@@ -16,6 +16,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
     prompts/                    # pre-computed agent context for this project (tracked)
     principles/                 # project-specific principles (tracked)
     processes/                  # project-specific processes (tracked)
+    roles/                      # project-level role directives, layered after the workspace's (tracked)
     repo/                       # gitignored — bare clone managed by Chimera (ch project add only)
     worktrees/                  # gitignored — one worktree per goal (agent only)
       {goal}@agent/             # git worktree on branch {goal}/agent
@@ -146,9 +147,12 @@ A `# Role:` section leads *every* chimera-launched session's context: an **affir
 identity line stating what the session is, never what it must not do — the captain's
 `You are <persona>, the captain of the <workspace> workspace.`, a manager's `You are the
 manager of the <project> project.`, an agent's `You are the agent for goal <goal> on
-<project>; this worktree and branch are your entire workspace.` — followed by the workspace's
-`roles/<role>/*.md` directives, inlined whole (`role_context`; an absent dir still
-introduces). The rest follows the Principle/Knowledge split: workspace + project
+<project>; this worktree and branch are your entire workspace.` — followed by the role's
+`roles/<role>/*.md` directives, inlined whole and layered like principles (`role_context`):
+the workspace's first (the generic layer, every project's managers/agents), then the pinned
+project's (its specific persona). A scope with no project — the captain — has only the
+workspace layer; an absent dir on either level still introduces. The rest follows the
+Principle/Knowledge split: workspace + project
 `principles/*.md` inline whole (always-on, small), while `knowledge/*.md` lands as an *index*
 of trigger lines (`- topic: <abs path>`) the agent reads on demand with its own tools — a
 pinned project indexes only its own knowledge, an unpinned scope indexes every project's,
@@ -398,7 +402,7 @@ Refuses if the repo has no commits (nothing to branch from) — including bare r
 
 ## What the workspace's git tracks vs ignores
 
-**Tracked:** `config.yaml`, `knowledge/`, `prompts/`, `principles/`, `processes/`
+**Tracked:** `config.yaml`, `knowledge/`, `prompts/`, `principles/`, `processes/`, `roles/`
 
 **Gitignored:** `*/repo/` (live clones), `*/worktrees/` (git worktrees with nested `.git` files)
 

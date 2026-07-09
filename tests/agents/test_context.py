@@ -137,7 +137,7 @@ def test_role_context_inlines_directives_sorted(tmpdir: TempDir) -> None:
     tmpdir.write(ws / 'roles' / 'captain' / 'b.md', 'Never push to main.\n')
     tmpdir.write(ws / 'roles' / 'captain' / 'a.md', 'Direct the work.\n')
     compare(
-        role_context(ws, 'captain', 'You are pegasus, the captain of the lycia workspace.'),
+        role_context(ws, None, 'captain', 'You are pegasus, the captain of the lycia workspace.'),
         expected='# Role: captain\n\n'
         'You are pegasus, the captain of the lycia workspace.\n\n'
         'Direct the work.\n\nNever push to main.',
@@ -147,6 +147,41 @@ def test_role_context_inlines_directives_sorted(tmpdir: TempDir) -> None:
 def test_role_context_without_directives_still_introduces(tmpdir: TempDir) -> None:
     ws = tmpdir.makedir('lycia')
     compare(
-        role_context(ws, 'manager', 'You are the manager of the proj project.'),
+        role_context(ws, None, 'manager', 'You are the manager of the proj project.'),
         expected='# Role: manager\n\nYou are the manager of the proj project.',
+    )
+
+
+def test_role_context_layers_workspace_before_project(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    project = _project(tmpdir, ws)
+    # sorts first within its layer, but the workspace layer still leads
+    tmpdir.write(project.dir / 'roles' / 'manager' / 'a.md', 'Watch the datacenter feeds.\n')
+    tmpdir.write(ws / 'roles' / 'manager' / 'z.md', 'Keep goals moving.\n')
+    compare(
+        role_context(ws, project, 'manager', 'You are the manager of the proj project.'),
+        expected='# Role: manager\n\n'
+        'You are the manager of the proj project.\n\n'
+        'Keep goals moving.\n\nWatch the datacenter feeds.',
+    )
+
+
+def test_role_context_project_without_roles_dir(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    tmpdir.write(ws / 'roles' / 'agent' / 'a.md', 'Verify before done.\n')
+    compare(
+        role_context(ws, _project(tmpdir, ws), 'agent', 'You are the agent for goal g on proj.'),
+        expected='# Role: agent\n\nYou are the agent for goal g on proj.\n\nVerify before done.',
+    )
+
+
+def test_role_context_workspace_without_roles_dir(tmpdir: TempDir) -> None:
+    ws = tmpdir.makedir('lycia')
+    project = _project(tmpdir, ws)
+    tmpdir.write(project.dir / 'roles' / 'manager' / 'a.md', 'Watch the datacenter feeds.\n')
+    compare(
+        role_context(ws, project, 'manager', 'You are the manager of the proj project.'),
+        expected='# Role: manager\n\n'
+        'You are the manager of the proj project.\n\n'
+        'Watch the datacenter feeds.',
     )

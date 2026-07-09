@@ -234,6 +234,52 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
     compare(calls, expected=[(claude_cmd, project, True)])
 
 
+def test_chat_cli_manager_layers_project_role_directives(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
+    tmpdir.write(ws / 'roles' / 'manager' / 'all.md', 'Keep goals moving.\n')
+    project = ws / 'proj'
+    tmpdir.write(project / 'roles' / 'manager' / 'own.md', 'Watch the datacenter feeds.\n')
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    os.chdir(project)
+    _stub(replace)
+    # workspace directives (every manager) lead, the project's own persona follows
+    text = f'{MANAGER_TEXT}\n\nKeep goals moving.\n\nWatch the datacenter feeds.'
+    digest = sha256(text.encode()).hexdigest()
+    context = ws / 'logs' / 'context' / f'proj@manager-{digest[:8]}.md'
+    command.run('chat').check(
+        output=f'Launched chat proj@manager in {Path.cwd()}',
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'chat',
+                'phase': 'start',
+                'function': 'chimera.commands.chat.chat',
+                'params': {
+                    'prompt': None,
+                    'resume': False,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': False,
+                    'project': None,
+                    'goal': None,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@manager',
+                'path': str(context),
+                'sha256': digest,
+                'message': 'context: rendered',
+            },
+            {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
+        ],
+    )
+    compare(context.read_text(), expected=text)
+
+
 def test_chat_cli_goal_scope_refuses(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _workspace(tmpdir, replace, {'kind': 'workspace'})
     project = ws / 'proj'
