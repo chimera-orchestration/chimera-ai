@@ -12,6 +12,7 @@ import chimera.commands.errand as errand_mod
 from chimera.agents.claude import Claude
 from chimera.agents.registry import AgentSpec
 from chimera.commands.errand import GUARDRAIL, ErrandResult, _fresh_goal, errand
+from chimera.commands.worktree.rm import remove
 from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.git import Git
@@ -246,6 +247,30 @@ class TestErrand:
             errand(git_repo.path, tmpdir / 'wt', 'proj', 'q')
         tmpdir.compare(path='wt', expected=())
         compare(Git(git_repo.path).branches(), expected=['main'])
+
+    def test_run_failure_sweep_failure_never_displaces_the_run_error(
+        self, tmpdir: TempDir, git_repo: Repo, replace: Replacer
+    ) -> None:
+        _stub_run(replace, raises=RuntimeError('claude exploded'))
+
+        def broken_remove(*args: object, **kw: object) -> None:
+            raise OSError('rmtree died')  # not the refusal type _finish handles
+
+        replace.in_module(remove, broken_remove, module=errand_mod)
+        with general_capture() as log:
+            with ShouldRaise(RuntimeError('claude exploded')):
+                errand(git_repo.path, tmpdir / 'wt', 'proj', 'q')
+        [worktree] = (tmpdir / 'wt').iterdir()  # the failed sweep left the goal standing
+        goal = worktree.name.removesuffix('@agent')
+        log.check_present(
+            {
+                'level': 'WARNING',
+                'message': 'errand: cleanup failed',
+                'goal': goal,
+                'worktree': str(worktree),
+                'error': 'rmtree died',
+            }
+        )
 
     def test_run_failure_with_keep_leaves_the_goal(
         self, tmpdir: TempDir, git_repo: Repo, replace: Replacer

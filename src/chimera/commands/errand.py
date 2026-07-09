@@ -75,7 +75,8 @@ def errand(
     Unless ``keep``, the goal is then swept through ``worktree rm``'s safety checks:
     a clean, trivially merged errand vanishes; a refusal (work left behind) is warned
     about and reported via ``cleaned=False``, never an errand failure — the report
-    was already delivered. A failed run still attempts the sweep, then re-raises.
+    was already delivered. A failed run still attempts the sweep, then re-raises —
+    a sweep that itself fails is logged (WARNING) and never displaces the run's error.
     A ``target`` with no repo checkout (a reference project) refuses up front.
     Every mutation routes through ``dry``, so a dry run resolves everything —
     including the goal id — but creates, runs and removes nothing.
@@ -111,9 +112,16 @@ def errand(
         dry(_run)
     except Exception:
         # the report is lost but the goal needn't be leaked: best-effort teardown,
-        # with the run's own failure staying the error that propagates
+        # with the run's own failure staying the error that propagates — so anything
+        # the sweep itself hits (beyond the refusal _finish already handles) is
+        # logged and suppressed here, never allowed to displace that error
         if not keep:
-            _finish(repo, worktrees_root, goal, dry)
+            try:
+                _finish(repo, worktrees_root, goal, dry)
+            except Exception as sweep_error:
+                logger.bind(goal=goal, worktree=str(worktree), error=str(sweep_error)).warning(
+                    'errand: cleanup failed'
+                )
         raise
     if out is not None:
         dry(_write, name, out, report)

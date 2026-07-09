@@ -131,7 +131,8 @@ binds the session id, the pointer back to the transcript. The goal is then swept
 left work behind is reported and left standing — never an errand failure, the report was
 already delivered — and `--keep` opts out of the sweep deliberately. Either way the leftover
 is an ordinary goal: `ch goal finish <goal> -p <target>` cleans it up. A failed run still
-attempts the sweep, then exits non-zero. `--dry` resolves everything for real — target,
+attempts the sweep, then exits non-zero — a sweep failure is logged (WARNING), never
+displacing the run's own error. `--dry` resolves everything for real — target,
 generated goal id, rendered context — and runs/writes/removes nothing. Alone among the
 launchers, `errand` carries no `--dangerous` (nothing interactive to make bypass reachable
 in); its `--` passthrough is still fenced by `refuse_restricted`.
