@@ -21,6 +21,21 @@ ALLOW_BYPASS = '--allow-dangerously-skip-permissions'
 # and refuse both outright when chimera itself is driven by an AI agent (Agent.restricted)
 _BYPASS_FLAGS = frozenset({ALLOW_BYPASS, '--dangerously-skip-permissions'})
 
+# Agent.run's readonly capability hint in claude's own permission grammar: file inspection
+# plus read-only git archaeology, nothing else — writes stay structurally impossible.
+# Deliberately conservative: a tool not listed is simply unavailable to the run.
+READONLY_TOOLS = (
+    'Read',
+    'Grep',
+    'Glob',
+    'Bash(git log:*)',
+    'Bash(git show:*)',
+    'Bash(git grep:*)',
+    'Bash(git diff:*)',
+    'Bash(git blame:*)',
+    'Bash(git status:*)',
+)
+
 
 class Claude(Agent):
     """The claude-code harness (the ``claude`` CLI).
@@ -85,6 +100,53 @@ class Claude(Agent):
         """
         args = _session_args(['--resume', name], prompt, extra, dangerous, model, context)
         return self._launch(cwd, args, exclusive, env)
+
+    def run(
+        self,
+        cwd: Path,
+        name: str,
+        prompt: str,
+        extra: Sequence[str] = (),
+        *,
+        model: str | None = None,
+        context: Path | None = None,
+        env: Mapping[str, str] = {},
+        readonly: bool = True,
+        timeout: float | None = None,
+    ) -> str:
+        """Run a one-shot headless claude session in ``cwd``; return its result text.
+
+        ``claude -p --output-format json`` with the same model/context lead as a live
+        session (``--append-system-prompt-file`` works in print mode too — verified
+        against the live CLI). ``readonly`` maps to an ``--allowedTools`` wall of
+        :data:`READONLY_TOOLS`. The JSON envelope's ``result`` is returned, its
+        session id / cost / duration landing on an ``errand: run`` log line — the
+        pointer back to the run's transcript. An envelope that doesn't parse degrades
+        to raw stdout (logged) rather than failing a run that already happened; a
+        non-zero exit raises, as does an exceeded ``timeout``.
+        """
+        result = subprocess.run(
+            ['claude', *_print_args(extra, model, context, readonly), *extra, prompt],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=timeout,
+            env={**os.environ, **env} if env else None,
+        )
+        try:
+            envelope = json.loads(result.stdout)
+            text = str(envelope['result'])
+        except (json.JSONDecodeError, TypeError, KeyError):
+            logger.bind(session=name).warning('errand: run envelope did not parse, raw stdout')
+            return result.stdout
+        logger.bind(
+            session=name,
+            session_id=envelope.get('session_id'),
+            cost_usd=envelope.get('total_cost_usd'),
+            duration_ms=envelope.get('duration_ms'),
+        ).info('errand: run')
+        return text
 
     def sessions(self) -> list[Session]:
         """Every checked claude session, enriched with a one-line summary.
@@ -199,6 +261,24 @@ def session_summary(cwd: str, name: str, projects: Path | None = None) -> str | 
     return next((latest[f] for f in TITLES.values() if f in latest and latest[f] != name), None)
 
 
+def _lead_args(extra: Sequence[str], model: str | None, context: Path | None) -> list[str]:
+    """The ``--model``/``--append-system-prompt-file`` lead shared by session and print argv.
+
+    ``model`` rides as ``--model`` — unless ``extra`` already carries one, in either
+    spelling, so an explicit ``-- --model X`` or ``-- --model=X`` passthrough always
+    beats the resolved spec. ``context`` rides as ``--append-system-prompt-file``,
+    injecting the rendered launch context before turn 1 with the repo left untouched.
+    """
+    lead: list[str] = []
+    if model is not None and not any(
+        arg == '--model' or arg.startswith('--model=') for arg in extra
+    ):
+        lead += ['--model', model]
+    if context is not None:
+        lead += ['--append-system-prompt-file', str(context)]
+    return lead
+
+
 def _session_args(
     lead: list[str],
     prompt: str | None,
@@ -209,11 +289,7 @@ def _session_args(
 ) -> list[str]:
     """The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, then prompt.
 
-    ``model`` rides as ``--model`` on the lead — unless ``extra`` already carries one, in
-    either spelling, so an explicit ``-- --model X`` or ``-- --model=X`` passthrough
-    always beats the resolved spec. ``context``
-    rides as ``--append-system-prompt-file``, injecting the rendered launch context
-    before turn 1 with the repo left untouched.
+    The model/context lead is :func:`_lead_args`.
 
     With ``dangerous`` the session also gets ``--allow-dangerously-skip-permissions`` (unless
     ``extra`` already asks for bypass) so bypass-permissions mode is reachable with shift-tab.
@@ -223,13 +299,23 @@ def _session_args(
     availability is decided at *its* launch, so the flag has to ride the background launch too.
     The flag only enables the mode; the autonomous run keeps its resolved mode.
     """
-    if model is not None and not any(
-        arg == '--model' or arg.startswith('--model=') for arg in extra
-    ):
-        lead = [*lead, '--model', model]
-    if context is not None:
-        lead = [*lead, '--append-system-prompt-file', str(context)]
+    lead = [*lead, *_lead_args(extra, model, context)]
     allow = (ALLOW_BYPASS,) if dangerous and not _BYPASS_FLAGS.intersection(extra) else ()
     if prompt is not None:
         return ['--bg', *lead, *extra, *allow, prompt]
     return [*lead, *extra, *allow]
+
+
+def _print_args(
+    extra: Sequence[str], model: str | None, context: Path | None, readonly: bool
+) -> list[str]:
+    """The print-mode argv lead for :meth:`Claude.run`: no ``--bg``, no ``--name``.
+
+    ``readonly`` becomes a single ``--allowedTools=…`` token — the ``=`` form, because
+    claude parses the option as variadic and the two-token spelling would swallow the
+    trailing prompt positional (verified against the live CLI).
+    """
+    args = ['-p', '--output-format', 'json', *_lead_args(extra, model, context)]
+    if readonly:
+        args.append(f'--allowedTools={",".join(READONLY_TOOLS)}')
+    return args

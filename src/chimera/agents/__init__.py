@@ -118,6 +118,32 @@ class Agent(ABC):
         ...
 
     @abstractmethod
+    def run(
+        self,
+        cwd: Path,
+        name: str,
+        prompt: str,
+        extra: Sequence[str] = (),
+        *,
+        model: str | None = None,
+        context: Path | None = None,
+        env: Mapping[str, str] = {},
+        readonly: bool = True,
+        timeout: float | None = None,
+    ) -> str:
+        """Run a one-shot headless session in ``cwd``; block and return its result text.
+
+        The synchronous sibling of :meth:`start`: nothing to attach to and nothing left
+        behind — the call returns when the run does. ``readonly`` (the default) is a
+        harness-agnostic capability hint — read-only research tools, including VCS
+        archaeology — that each adapter maps to its own native permission wall; no
+        harness flag spellings appear at this level. ``name`` labels the run in logs (a
+        headless run may have no session object to carry it). ``timeout`` is in seconds;
+        ``None`` blocks until the run finishes.
+        """
+        ...
+
+    @abstractmethod
     def sessions(self) -> list[Session]:
         """Every :meth:`checked` session this harness reports, enriched for listing.
 

@@ -4,11 +4,17 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from testfixtures import Replacer, TempDir, compare
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 
 from chimera.agent_env import ROLE_CAPTAIN, role_env
 from chimera.agents import Session
-from chimera.agents.claude import Claude, _session_args, session_summary
+from chimera.agents.claude import (
+    READONLY_TOOLS,
+    Claude,
+    _print_args,
+    _session_args,
+    session_summary,
+)
 
 
 def _registry(replace: Replacer, payload: str) -> dict[str, object]:
@@ -193,6 +199,149 @@ def test_launch_without_overlay_inherits_the_environment(
     captured = _launched(replace)
     Claude().resume(tmpdir.makedir('wt'), 'n', exclusive=False)
     assert captured['env'] is None  # subprocess inherits the parent environment wholesale
+
+
+_ENVELOPE = (
+    '{"type": "result", "result": "the report", "session_id": "abc-123",'
+    ' "total_cost_usd": 0.014, "duration_ms": 1969}'
+)
+
+_READONLY = f'--allowedTools={",".join(READONLY_TOOLS)}'
+
+
+def _printed(
+    replace: Replacer, stdout: str = _ENVELOPE, raises: Exception | None = None
+) -> dict[str, object]:
+    """Stub the print-mode subprocess, capturing the argv, cwd, timeout and env."""
+    captured: dict[str, object] = {}
+
+    def fake_run(
+        cmd: list[str],
+        cwd: Path | None = None,
+        capture_output: bool = False,
+        text: bool = False,
+        check: bool = False,
+        timeout: float | None = None,
+        env: dict[str, str] | None = None,
+    ) -> SimpleNamespace:
+        captured.update(cmd=cmd, cwd=cwd, timeout=timeout, env=env)
+        if raises is not None:
+            raise raises
+        return SimpleNamespace(stdout=stdout, returncode=0)
+
+    replace.in_module(subprocess.run, fake_run)
+    return captured
+
+
+class TestRun:
+    def test_readonly_argv_result_and_log(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        worktree = tmpdir.makedir('wt')
+        captured = _printed(replace)
+        compare(
+            Claude().run(worktree, 'proj@errand-abc123@agent', 'report on X'), expected='the report'
+        )
+        compare(
+            captured['cmd'],
+            expected=['claude', '-p', '--output-format', 'json', _READONLY, 'report on X'],
+        )
+        compare(captured['cwd'], expected=worktree)
+        assert captured['env'] is None  # no overlay: the parent environment, wholesale
+        full_logs.check(
+            {
+                'level': 'INFO',
+                'message': 'errand: run',
+                'session': 'proj@errand-abc123@agent',
+                'session_id': 'abc-123',
+                'cost_usd': 0.014,
+                'duration_ms': 1969,
+            }
+        )
+
+    def test_writable_run_carries_no_tool_wall(self, tmpdir: TempDir, replace: Replacer) -> None:
+        captured = _printed(replace)
+        Claude().run(tmpdir.makedir('wt'), 'n', 'p', readonly=False)
+        compare(captured['cmd'], expected=['claude', '-p', '--output-format', 'json', 'p'])
+
+    def test_model_and_context_lead_matches_a_live_session(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        captured = _printed(replace)
+        ctx = tmpdir / 'ctx.md'
+        Claude().run(tmpdir.makedir('wt'), 'n', 'p', model='opus', context=ctx)
+        compare(
+            captured['cmd'],
+            expected=[
+                'claude',
+                '-p',
+                '--output-format',
+                'json',
+                '--model',
+                'opus',
+                '--append-system-prompt-file',
+                str(ctx),
+                _READONLY,
+                'p',
+            ],
+        )
+
+    def test_extra_model_beats_the_spec_model(self, tmpdir: TempDir, replace: Replacer) -> None:
+        captured = _printed(replace)
+        Claude().run(tmpdir.makedir('wt'), 'n', 'p', ['--model=sonnet'], model='opus')
+        compare(
+            captured['cmd'],
+            expected=['claude', '-p', '--output-format', 'json', _READONLY, '--model=sonnet', 'p'],
+        )
+
+    def test_env_overlay_wins_over_the_parent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_ROLE', 'captain')
+        captured = _printed(replace)
+        Claude().run(tmpdir.makedir('wt'), 'n', 'p', env={'CHIMERA_ROLE': 'agent'})
+        compare(captured['env'], expected={**os.environ, 'CHIMERA_ROLE': 'agent'})
+
+    def test_timeout_is_passed_and_raises_through(self, tmpdir: TempDir, replace: Replacer) -> None:
+        captured = _printed(replace, raises=subprocess.TimeoutExpired(['claude'], 5))
+        with ShouldRaise(subprocess.TimeoutExpired):
+            Claude().run(tmpdir.makedir('wt'), 'n', 'p', timeout=5)
+        compare(captured['timeout'], expected=5)
+
+    def test_nonzero_exit_raises(self, tmpdir: TempDir, replace: Replacer) -> None:
+        _printed(replace, raises=subprocess.CalledProcessError(1, ['claude']))
+        with ShouldRaise(subprocess.CalledProcessError):
+            Claude().run(tmpdir.makedir('wt'), 'n', 'p')
+
+    def test_unparseable_envelope_degrades_to_raw_stdout(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        _printed(replace, stdout='not json at all')
+        compare(Claude().run(tmpdir.makedir('wt'), 'n', 'p'), expected='not json at all')
+        full_logs.check(
+            {
+                'level': 'WARNING',
+                'message': 'errand: run envelope did not parse, raw stdout',
+                'session': 'n',
+            }
+        )
+
+    def test_envelope_without_a_result_field_degrades_too(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        _printed(replace, stdout='{"type": "result"}')
+        compare(Claude().run(tmpdir.makedir('wt'), 'n', 'p'), expected='{"type": "result"}')
+        full_logs.check(
+            {
+                'level': 'WARNING',
+                'message': 'errand: run envelope did not parse, raw stdout',
+                'session': 'n',
+            }
+        )
+
+
+def test_print_args_defaults() -> None:
+    compare(
+        _print_args((), None, None, True), expected=['-p', '--output-format', 'json', _READONLY]
+    )
 
 
 def test_session_args_passthrough_model_beats_spec_model() -> None:
