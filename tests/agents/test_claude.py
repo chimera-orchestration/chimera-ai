@@ -306,10 +306,38 @@ class TestRun:
             Claude().run(tmpdir.makedir('wt'), 'n', 'p', timeout=5)
         compare(captured['timeout'], expected=5)
 
-    def test_nonzero_exit_raises(self, tmpdir: TempDir, replace: Replacer) -> None:
-        _printed(replace, raises=subprocess.CalledProcessError(1, ['claude']))
-        with ShouldRaise(subprocess.CalledProcessError):
+    def test_nonzero_exit_logs_stderr_then_raises(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        error = subprocess.CalledProcessError(2, ['claude'], stderr='Invalid API key\n')
+        _printed(replace, raises=error)
+        worktree = tmpdir.makedir('wt')
+        with ShouldRaise(error):
+            Claude().run(worktree, 'n', 'p')
+        # the exception's own text omits stderr, so this line is the only record of it
+        full_logs.check(
+            {
+                'level': 'ERROR',
+                'message': 'errand: run failed',
+                'session': 'n',
+                'cwd': str(worktree),
+                'returncode': 2,
+                'stderr': 'Invalid API key',
+            }
+        )
+
+    def test_failure_stderr_is_trimmed_to_its_tail(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        error = subprocess.CalledProcessError(1, ['claude'], stderr='x' * 5000 + ' the cause')
+        _printed(replace, raises=error)
+        with ShouldRaise(error):
             Claude().run(tmpdir.makedir('wt'), 'n', 'p')
+        [entry] = full_logs.actual()
+        stderr = entry['stderr']
+        assert isinstance(stderr, str)
+        compare(len(stderr), expected=4000)
+        assert stderr.endswith(' the cause')
 
     def test_unparseable_envelope_degrades_to_raw_stdout(
         self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture

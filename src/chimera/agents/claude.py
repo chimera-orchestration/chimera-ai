@@ -127,17 +127,28 @@ class Claude(Agent):
         session id / cost / duration landing on an ``errand: run`` log line — the
         pointer back to the run's transcript. An envelope that doesn't parse degrades
         to raw stdout (logged) rather than failing a run that already happened; a
-        non-zero exit raises, as does an exceeded ``timeout``.
+        non-zero exit raises — its captured stderr landing on an ``errand: run
+        failed`` ERROR line first, since ``CalledProcessError``'s own text omits it —
+        as does an exceeded ``timeout``.
         """
-        result = subprocess.run(
-            ['claude', *_print_args(extra, model, context, readonly), *extra, prompt],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=timeout,
-            env={**os.environ, **env} if env else None,
-        )
+        try:
+            result = subprocess.run(
+                ['claude', *_print_args(extra, model, context, readonly), *extra, prompt],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=timeout,
+                env={**os.environ, **env} if env else None,
+            )
+        except subprocess.CalledProcessError as error:
+            logger.bind(
+                session=name,
+                cwd=str(cwd),
+                returncode=error.returncode,
+                stderr=_tail(error.stderr),
+            ).error('errand: run failed')
+            raise
         try:
             envelope = json.loads(result.stdout)
             text = str(envelope['result'])
@@ -208,6 +219,11 @@ class Claude(Agent):
         return subprocess.run(
             ['claude', *args], cwd=cwd, check=True, env={**os.environ, **env} if env else None
         )
+
+
+def _tail(stderr: str | None, limit: int = 4000) -> str:
+    """The end of a captured stderr — where the error usually lands — trimmed for the log."""
+    return (stderr or '').strip()[-limit:]
 
 
 def _parse(raw: dict[str, object]) -> Session:
