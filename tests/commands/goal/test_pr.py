@@ -213,6 +213,53 @@ def test_existing_pr_is_reported_not_duplicated(
     compare(_full(origin, 'g'), expected=_full(git_repo.path, 'g/agent'))  # push still updates
 
 
+def test_existing_pr_skips_the_model(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    _published(tmpdir, git_repo)
+    agent = Repo(tmpdir / 'worktrees' / 'g@agent')
+    agent.commit_content('one')
+    agent.commit_content('two')
+    calls = _outside(replace, open_prs='[{"url": "https://github.com/o/r/pull/3"}]')
+    result = _pr(tmpdir, git_repo.path)
+    compare(result.url, expected='https://github.com/o/r/pull/3')
+    compare((result.title, result.body), expected=('', ''))  # the PR already carries its own
+    assert not any(args[0] == 'claude' for args, _ in calls)
+
+
+def _claude_calls(calls: list[tuple[list[str], str | None]]) -> int:
+    return sum(1 for args, _ in calls if args[0] == 'claude')
+
+
+def test_dry_previews_exactly_what_the_real_run_ships(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    agent = Repo(tmpdir / 'worktrees' / 'g@agent')
+    agent.commit_content('one')
+    agent.commit_content('two')
+    calls = _outside(replace, title='Compressed why\n\nBecause.\n')
+    previewed = _pr(tmpdir, git_repo.path, dry=Dry(True))
+    result = _pr(tmpdir, git_repo.path)
+    compare(_claude_calls(calls), expected=1)  # the real run reused the preview's composition
+    compare((result.title, result.body), expected=(previewed.title, previewed.body))
+    created = _created_with(calls)
+    assert created is not None
+    compare(created[created.index('--title') + 1], expected=previewed.title)
+
+
+def test_changed_commits_recompose_the_description(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    agent = Repo(tmpdir / 'worktrees' / 'g@agent')
+    agent.commit_content('one')
+    agent.commit_content('two')
+    calls = _outside(replace)
+    _pr(tmpdir, git_repo.path, dry=Dry(True))
+    agent.commit_content('three')  # the previewed description no longer covers the branch
+    _pr(tmpdir, git_repo.path, dry=Dry(True))
+    compare(_claude_calls(calls), expected=2)
+
+
 def test_dry_resolves_everything_but_pushes_and_opens_nothing(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:

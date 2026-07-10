@@ -1,6 +1,7 @@
 import json
 import subprocess
 from dataclasses import dataclass
+from hashlib import sha256
 from importlib.resources import files
 from pathlib import Path
 from string import Template
@@ -31,7 +32,7 @@ class PrResult:
     remote_branch: str  # the branch name on origin (the goal name)
     base: str  # the branch the PR targets
     sha: str  # the pushed tip (short)
-    title: str
+    title: str  # with body, '' when composing was skipped: an open PR already has its own
     body: str
     url: str | None  # the PR's URL; None only under dry when none is open yet
     created: bool  # False when a PR for the branch was already open (push still updates it)
@@ -55,17 +56,21 @@ def pr(
     source's tip to ``origin`` as branch ``<goal>`` (the actor suffix is local plumbing;
     the goal is the publication) and opens a PR against ``into`` (default: the repo's
     default branch) via ``gh``. The base must already be on origin — the PR targets
-    origin's branch, so a local-only base refuses before anything is pushed. Nothing is deleted or stopped — the goal keeps working
-    until the PR lands, after which ``goal merge`` (or ``goal finish``, once a fetch
-    shows the work contained) cleans up as usual.
+    origin's branch, so a local-only base refuses before anything is pushed. Nothing is
+    deleted or stopped — the goal keeps working until the PR lands, after which
+    ``goal merge`` (or ``goal finish``, once a fetch shows the work contained) cleans up
+    as usual.
 
     Title and body: a single-commit branch reuses its subject and body verbatim — the
     same content GitHub itself would prefill from the commit, computed here so ``dry``
     can preview it. A multi-commit branch's description is *written*, by a model working
     from the project's own PR prompt (:func:`_compose` — ``prompts/pr.md`` when present,
     else the packaged default asking for a succinct why with any referenced tickets and
-    issues linked, never a diff or commit-list restatement). A model failure refuses
-    outright rather than shipping a placeholder — the PR is the deliverable.
+    issues linked, never a diff or commit-list restatement) — but only when no PR is
+    already open (its description stands; the push alone updates it) — and the answer is
+    cached and reused while the prompt is unchanged, so a ``--dry`` preview is exactly
+    what the later run ships (see :func:`_compose`). A model failure refuses outright
+    rather than shipping a placeholder — the PR is the deliverable.
 
     Idempotent: a re-run pushes the branch again (a no-op when unchanged; git refuses a
     non-fast-forward, e.g. after a rebase — resolve that by hand) and, finding the PR
@@ -103,11 +108,15 @@ def pr(
     commits = _commits(git, compared, source)
     if not commits:
         raise UserError(f'{source} has no commits beyond {compared} — nothing to propose')
+    existing = _existing(repo, goal)
     if len(commits) == 1:
         title, body = commits[0]  # what github itself would prefill from the lone commit
+    elif existing is None:
+        title, body = _compose(
+            _description_cache(git, goal), prompts_dir, project, goal, base, source, commits
+        )
     else:
-        title, body = _compose(prompts_dir, project, goal, base, source, commits)
-    existing = _existing(repo, goal)
+        title, body = '', ''  # the open PR already carries its description; nothing to write
     with git.ref_log('goal pr: refs', f'origin/{goal}', goal=goal, source=source):
         dry(git, 'push', 'origin', f'{source}:refs/heads/{goal}')
     if existing is not None:
@@ -133,7 +142,15 @@ def _commits(git: Git, compared: str, source: str) -> list[tuple[str, str]]:
     return pairs
 
 
+def _description_cache(git: Git, goal: str) -> Path:
+    """Where :func:`_compose` caches the goal's written description, in the shared git dir
+    beside ``goal sync``'s append markers; ``goal finish`` sweeps both."""
+    common = Path(git('rev-parse', '--path-format=absolute', '--git-common-dir').strip())
+    return common / 'chimera' / 'pr' / goal
+
+
 def _compose(
+    cache: Path,
     prompts_dir: Path,
     project: str,
     goal: str,
@@ -152,6 +169,13 @@ def _compose(
     first). The model's first output line is the title, the rest the body. Any failure —
     no model, non-zero exit, empty answer — refuses with the ``gh pr create`` line to run
     by hand: a placeholder description is worse than a human moment.
+
+    The answer is cached at ``cache``, keyed by a hash of the exact prompt, and reused
+    while that prompt is unchanged — so the title and body a ``--dry`` previewed are
+    byte-for-byte what the later real run ships, never a fresh model run's different
+    words. Any change to the commits, template or targets misses the key and recomposes;
+    each way lands a ``goal pr: description`` line binding the path, key and whether it
+    was reused.
     """
     override = prompts_dir / 'pr.md'
     text = override.read_text() if override.exists() else _default_template()
@@ -159,6 +183,12 @@ def _compose(
     prompt = Template(text).safe_substitute(
         PROJECT=project, GOAL=goal, BASE=base, SOURCE=source, COMMITS=log_text
     )
+    key = sha256(prompt.encode()).hexdigest()
+    if cache.is_file():
+        stored, _, cached = cache.read_text().partition('\n')
+        if stored == key:
+            logger.bind(path=str(cache), sha256=key, reused=True).info('goal pr: description')
+            return _title_and_body(cached)
     by_hand = f'write it yourself: gh pr create --head {goal} --base {base}'
     try:
         result = subprocess.run(
@@ -173,9 +203,19 @@ def _compose(
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or '').strip() or str(error)
         raise UserError(f'could not write the PR description ({detail}) — {by_hand}') from None
-    title, _, body = result.stdout.strip().partition('\n')
-    if not title.strip():
+    output = result.stdout.strip()
+    title, body = _title_and_body(output)
+    if not title:
         raise UserError(f'the PR description model answered nothing — {by_hand}')
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(f'{key}\n{output}')
+    logger.bind(path=str(cache), sha256=key, reused=False).info('goal pr: description')
+    return title, body
+
+
+def _title_and_body(output: str) -> tuple[str, str]:
+    """Split a composed description: first line is the title, the rest the body."""
+    title, _, body = output.partition('\n')
     return title.strip(), body.strip()
 
 

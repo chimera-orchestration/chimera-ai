@@ -445,11 +445,16 @@ the default asks for a succinct *why* with any referenced tickets/issues/threads
 forbids restating the diff or commit list. Template holes: `$PROJECT $GOAL $BASE $SOURCE
 $COMMITS` (the full messages, oldest first); first output line is the title, the rest the
 body. A model failure or empty answer refuses with the `gh pr create` line to run by hand —
-never a placeholder description. Idempotent: a re-run re-pushes (git refuses a
-non-fast-forward, e.g. after a rebase — resolve by hand) and reports an already-open PR
-instead of duplicating it. The pushed remote-tracking ref rides `goal pr:
-refs`; the PR lands `goal pr: opened`/`goal pr: existing`. `--dry` resolves everything —
-source, commits, title, body — and pushes and opens nothing.
+never a placeholder description. The written description is cached in the repo's shared git
+dir keyed by the exact prompt and reused while that's unchanged — the title/body a `--dry`
+previewed are byte-for-byte what the later run ships, never a fresh model run's different
+words (`goal pr: description` logs the path, key and whether it was reused; `goal finish`
+sweeps the cache with the goal's other transient markers). Idempotent: a re-run re-pushes
+(git refuses a non-fast-forward, e.g. after a rebase — resolve by hand) and reports an
+already-open PR instead of duplicating it — found *before* any composing, so no model run is
+spent on a description the open PR already carries. The pushed remote-tracking ref rides
+`goal pr: refs`; the PR lands `goal pr: opened`/`goal pr: existing`. `--dry` resolves
+everything — source, commits, title, body — and pushes and opens nothing.
 
 `ch agent stop [-g <goal>] [-a <actor>]` stops the live agent session in a goal's worktree:
 SIGTERM to its pid, waiting (10s) for it to exit — never SIGKILL; a session that won't die,
