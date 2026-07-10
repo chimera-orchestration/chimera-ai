@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 from giterator import Git
-from giterator.testing import Repo
+from giterator.testing import DEFAULT_USER, Repo
 from testfixtures import LogCapture, Replacer, TempDir, not_there
 
 from chimera.__main__ import app
@@ -52,6 +52,11 @@ def bare_repo(tmpdir: TempDir) -> Path:
     source.commit_content('seed')
     repo = tmpdir / 'proj' / 'repo'
     Git(tmpdir.path)('init', '--bare', '-b', 'main', str(repo))
+    bare = Git(repo)
+    # worktrees share this config: commits made in them must not depend on the machine's
+    # git identity, just as Repo.make ensures for the repos it creates
+    bare('config', 'user.name', DEFAULT_USER.name)
+    bare('config', 'user.email', DEFAULT_USER.email)
     source('push', str(repo), 'main')
     return repo
 
