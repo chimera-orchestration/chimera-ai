@@ -41,7 +41,8 @@ field of every record (params, git before/after maps, full tracebacks).
 
 Every git subprocess runs through `chimera.git.Git` (never `giterator.Git` directly), whose
 `__call__` lands a DEBUG line *before* the command runs — so a hung fetch is on record while it
-hangs (`ch logtail` to watch live). The message is the exact command
+hangs (`tail -f logs/chimera.jsonl` to watch live — the raw form deliberately, since agents
+don't get `ch logtail`). The message is the exact command
 (`git fetch --prune origin`), the working directory rides `git_cwd`. The trace goes only to the
 log file, never the console (and is suppressed during shell completion, where the file sink
 isn't configured). `chimera.git` also injects network timeouts (`GIT_SSH_COMMAND`
