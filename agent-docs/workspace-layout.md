@@ -430,7 +430,10 @@ choice lands `goal merge: source`; the base move `goal merge: refs`.
 `ch goal pr <goal> [--into <branch>] [--draft]` is `goal merge`'s remote-review sibling: the
 same source selection, but the source's tip is pushed to `origin` as branch `<goal>` (the
 actor suffix is local plumbing; the goal name is the publication) and a PR opened via `gh`
-against `--into` (default: the repo's default branch). Nothing local is deleted or stopped —
+against `--into` (default: the repo's default branch). The base must already be on origin —
+the PR targets origin's branch, and the goal's commits are counted against origin's view of
+it — so a local-only base refuses (push it first) rather than failing server-side after the
+push. Nothing local is deleted or stopped —
 the goal keeps working until the PR lands, after which `goal merge` (or `goal finish`) cleans
 up as usual. Title and body: a single-commit branch reuses its subject and body verbatim —
 the same content GitHub itself prefills from a lone commit, computed locally so `--dry` can

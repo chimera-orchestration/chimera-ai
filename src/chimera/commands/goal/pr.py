@@ -54,7 +54,8 @@ def pr(
     refuse, pointing at ``goal sync``), but instead of landing locally it pushes the
     source's tip to ``origin`` as branch ``<goal>`` (the actor suffix is local plumbing;
     the goal is the publication) and opens a PR against ``into`` (default: the repo's
-    default branch) via ``gh``. Nothing is deleted or stopped — the goal keeps working
+    default branch) via ``gh``. The base must already be on origin — the PR targets
+    origin's branch, so a local-only base refuses before anything is pushed. Nothing is deleted or stopped — the goal keeps working
     until the PR lands, after which ``goal merge`` (or ``goal finish``, once a fetch
     shows the work contained) cleans up as usual.
 
@@ -87,15 +88,18 @@ def pr(
     if base.startswith(f'{goal}/'):
         raise UserError(f"{base} is one of {goal}'s own branches — name a base like main")
     source = source_branch(git, goal, actors, command='goal pr', or_force=False)
-    # base must be a branch *name* (local or origin's), not a remote-tracking spelling:
-    # a bare ref_exists would let `origin/main` DWIM its way through here and only fail
-    # server-side in `gh pr create --base origin/main` — after the push
-    if git.ref_exists(f'refs/remotes/origin/{base}'):
-        compared = f'origin/{base}'
-    elif git.ref_exists(f'refs/heads/{base}'):
-        compared = base
-    else:
+    # the base must already be on origin — gh resolves it server-side, so anything else
+    # (a local-only branch, or a remote-tracking `origin/main` spelling DWIM would let
+    # through) could only fail in `gh pr create`, after the push; commits are compared
+    # against origin's view of it, since a local base's own unpushed commits aren't ours
+    if not git.ref_exists(f'refs/remotes/origin/{base}'):
+        if git.ref_exists(f'refs/heads/{base}'):
+            raise UserError(
+                f'{base} exists locally but not on origin, where the PR needs it — '
+                f'git push origin {base}, then re-run'
+            )
         raise UserError(f'no branch {base} to propose against')
+    compared = f'origin/{base}'
     commits = _commits(git, compared, source)
     if not commits:
         raise UserError(f'{source} has no commits beyond {compared} — nothing to propose')

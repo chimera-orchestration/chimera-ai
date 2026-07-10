@@ -248,17 +248,34 @@ def test_draft_rides_the_create(tmpdir: TempDir, git_repo: Repo, replace: Replac
     assert created is not None and '--draft' in created
 
 
-def test_into_proposes_against_a_local_only_base(
+def test_into_proposes_against_the_named_base(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
     _published(tmpdir, git_repo)
-    Git(git_repo.path)('branch', 'release', 'main')  # exists locally, never pushed
+    Git(git_repo.path)('branch', 'release', 'main')
+    git_repo('push', '-q', 'origin', 'release')  # the PR targets origin's branch
     Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
     calls = _outside(replace)
     result = _pr(tmpdir, git_repo.path, into='release')
     compare(result.base, expected='release')
     created = _created_with(calls)
     assert created is not None and created[created.index('--base') + 1] == 'release'
+
+
+def test_refuses_a_base_missing_from_origin(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    Git(git_repo.path)('branch', 'release', 'main')  # exists locally, never pushed
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    _outside(replace)
+    with ShouldRaise(
+        UserError(
+            'release exists locally but not on origin, where the PR needs it — '
+            'git push origin release, then re-run'
+        )
+    ):
+        _pr(tmpdir, git_repo.path, into='release')
 
 
 def test_refuses_without_an_origin(tmpdir: TempDir, git_repo: Repo) -> None:
