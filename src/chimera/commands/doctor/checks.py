@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from collections.abc import Generator, Iterator
 from pathlib import Path
@@ -736,6 +737,52 @@ class ShellCompletionCheck:
         )
 
 
+def fblog_installed() -> bool:
+    """
+    Whether the fblog binary is on the PATH — indirection so the CLI-level doctor tests
+    (which run the real CHECKS tuple) can pin it, like ``chimera_repo``.
+    """
+    return shutil.which('fblog') is not None
+
+
+class FblogCheck:
+    """
+    fblog — ``ch logtail``'s renderer — is installed; ``--fix`` brew-installs it.
+    """
+
+    name = 'fblog'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        if fblog_installed():
+            return
+        missing = "fblog (ch logtail's renderer) is not installed"
+        if shutil.which('brew') is None:
+            yield Finding(
+                self.name,
+                f'{missing} and brew is not available to install it — '
+                'see https://github.com/brocode/fblog',
+                resolved=False,
+                fixable=False,
+            )
+            return
+        if not fix or exclude.matches(self.name, missing):
+            yield Finding(self.name, missing, resolved=False, fixable=True)
+            return
+        try:
+            subprocess.run(['brew', 'install', 'fblog'], capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as error:
+            yield Finding(
+                self.name,
+                f'{missing}; `brew install fblog` failed:\n{error.stderr.strip()}',
+                resolved=False,
+                fixable=True,
+            )
+            return
+        yield Finding(
+            self.name, 'fblog installed (brew install fblog)', resolved=True, fixable=True
+        )
+
+
 # The lightweight model `commit_message` asks to summarise a workspace's staged changes,
 # and the message it falls back to when claude can't be reached (so the fix still commits —
 # leaving nothing uncommitted is the point, a perfect subject line is not).
@@ -812,5 +859,6 @@ CHECKS: tuple[Check, ...] = (
     ChimeraUpToDateCheck(),
     WorkspaceEnvCheck(),
     ShellCompletionCheck(),
+    FblogCheck(),
     WorkspaceCommitCheck(),
 )

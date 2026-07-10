@@ -7,7 +7,7 @@ from testfixtures import Replacer, TempDir, compare
 from typer._click.core import Command as ClickCommand
 from typer.main import get_command
 
-from chimera.__main__ import _strip_to_role, app
+from chimera.__main__ import _strip_restricted_commands, _strip_to_role, app
 from chimera.agent_env import ROLE_AGENT, ROLE_CAPTAIN, ROLE_COMMANDS, ROLE_MANAGER
 from chimera.config import ProjectConfig
 from chimera.context import Project, Scope
@@ -32,10 +32,13 @@ def _citations(text: str) -> set[tuple[str, ...]]:
 
 
 def _role_tree(role: str) -> ClickCommand:
-    """The command tree ``role``'s sessions actually see (the captain's is unstripped)."""
+    """The command tree ``role``'s sessions actually see: the role allowlist prune for the
+    listed roles (the captain skips it), then the human-only command strip every AI
+    session gets — so a prime citing ``ch logtail`` fails here for every role."""
     tree = get_command(app)
     if role in ROLE_COMMANDS:
         _strip_to_role(tree, ROLE_COMMANDS[role])
+    _strip_restricted_commands(tree)
     return tree
 
 

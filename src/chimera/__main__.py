@@ -12,6 +12,7 @@ from typer.main import get_command
 
 from chimera import logging
 from chimera.agent_env import (
+    RESTRICTED_COMMANDS,
     RESTRICTED_OPTIONS,
     ROLE_AGENT,
     ROLE_CAPTAIN,
@@ -44,6 +45,7 @@ from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.init import init as _init
+from chimera.commands.logtail import logtail as _logtail
 from chimera.commands.ls import Board, board
 from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.checkout import checkout as _project_checkout
@@ -601,6 +603,25 @@ def _tag(finding: Finding) -> str:
     if finding.resolved:
         return 'fixed'
     return 'would fix — run with --fix' if finding.fixable else 'needs attention'
+
+
+@app.command(cls=LoggingCommand, help="Tail the workspace's action log, colourised (via fblog).")
+@logs(_logtail)
+def logtail(
+    lines: Annotated[int, typer.Option('--lines', '-n', help='Initial lines to show')] = 20,
+    follow: Annotated[
+        bool, typer.Option('--follow/--no-follow', help='Keep following new lines')
+    ] = True,
+    dump: Annotated[
+        bool,
+        typer.Option(
+            '--dump', '-d', help='Show every field of every record (params, git refs, tracebacks)'
+        ),
+    ] = False,
+) -> None:
+    code = _logtail(resolve_workspace(Path.cwd()), lines=lines, follow=follow, dump=dump)
+    if code:
+        raise typer.Exit(code)
 
 
 @app.command(
@@ -1427,6 +1448,21 @@ def _strip_restricted_options(command: Command) -> None:
         _strip_restricted_options(sub)
 
 
+def _strip_restricted_commands(command: Command, path: str = '') -> None:
+    """Delete the human-only leaves (``RESTRICTED_COMMANDS``) from the Click tree — the
+    option strip one level up, applied to *every* AI session, captain included (the role
+    allowlists narrow further, but never grant these back). Same absence-not-admonition
+    semantics as ``_strip_to_role``, same group-emptying sweep."""
+    commands: dict[str, Command] = getattr(command, 'commands', {})
+    for name, sub in list(commands.items()):
+        if getattr(sub, 'commands', None) is not None:  # a group — prune inside, then itself
+            _strip_restricted_commands(sub, f'{path}{name} ')
+            if not getattr(sub, 'commands'):
+                del commands[name]
+        elif f'{path}{name}' in RESTRICTED_COMMANDS:
+            del commands[name]
+
+
 def _strip_to_role(command: Command, allowed: frozenset[str], path: str = '') -> None:
     """Prune the Click tree to the ``allowed`` canonical leaf paths — the option strip one
     level up. A fenced command isn't hidden but absent: parsing, ``--help``, ``ch help`` and
@@ -1459,8 +1495,9 @@ def main() -> None:
         raise SystemExit(1)
     if ai_session():  # a role stamp alone marks an AI session — CLAUDECODE isn't required
         command = get_command(app)
-        if role in ROLE_COMMANDS:  # prune first: the option strip then walks the smaller tree
+        if role in ROLE_COMMANDS:  # prune first: the later strips walk the smaller tree
             _strip_to_role(command, ROLE_COMMANDS[role])
+        _strip_restricted_commands(command)
         _strip_restricted_options(command)
         command()
     else:
