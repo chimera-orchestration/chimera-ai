@@ -28,6 +28,8 @@ The loop:
 - `ch goal sync <goal>` — bring the human branch up to the agent's work.
 - `ch goal merge <goal>` — land a finished goal: fast-forward the base branch to its work,
   stop its agent, sweep its branches.
+- `ch goal pr <goal>` — publish a finished goal as a pull request instead of landing it
+  locally; its branches stay until the PR lands.
 - `ch goal finish <goal>` — sweep a goal's branches and worktrees without landing them.
 
 Context here layers the workspace's `roles/captain/` and `principles/`; every project's
@@ -51,6 +53,8 @@ The loop:
 - `ch goal sync <goal>` — bring the human branch up to the agent's work.
 - `ch goal merge <goal>` — land a finished goal: fast-forward the base branch to its work,
   stop its agent, sweep its branches.
+- `ch goal pr <goal>` — publish a finished goal as a pull request instead of landing it
+  locally; its branches stay until the PR lands.
 - `ch goal finish <goal>` — sweep a goal's branches and worktrees without landing them.
 
 Context layers workspace then project — `roles/manager/` and `principles/` inline whole;

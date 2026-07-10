@@ -175,7 +175,7 @@ class TestStripToRole:
         goal = cast(TyperGroup, _leaf(tree, 'goal'))
         compare(
             set(goal.commands),
-            expected={'start', 'adopt', 'sync', 'merge', 'finish', 'rename', 'ls'},
+            expected={'start', 'adopt', 'sync', 'merge', 'pr', 'finish', 'rename', 'ls'},
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'agent')).commands),

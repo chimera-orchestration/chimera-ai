@@ -83,7 +83,7 @@ def merge(
         raise UserError(f"{base} is one of {goal}'s own branches — name a base like main")
     if not git.ref_exists(base):
         raise UserError(f'no branch {base} to merge into')
-    source = _source(git, goal, actors, force)
+    source = source_branch(git, goal, actors, force, command='goal merge', or_force=True)
     registered = registered_worktrees(git)
     worktrees = [
         path
@@ -103,22 +103,25 @@ def merge(
     return MergeResult(source, base, sha, fastforwarded, landed, stopped, removed)
 
 
-def _source(git: Git, goal: str, actors: list[str], force: bool) -> str:
-    """The actor branch to land: the one that contains every other actor's work.
+def source_branch(
+    git: Git, goal: str, actors: list[str], force: bool = False, *, command: str, or_force: bool
+) -> str:
+    """The goal's definitive actor branch: the one that contains every other actor's work.
 
     Containment is :func:`chimera.worktrees.is_merged`, so a human branch that squashed
-    the agent's commits still counts as containing them — and landing the container is
-    what lets the sweep prove the others merged afterwards. No branch containing all the
-    others means the actors have truly diverged: refused, pointing at ``goal sync`` (or
-    ``force``, which lands the newest-committed branch and lets the sweep discard the
-    rest). Equivalent tips tie in favour of ``human`` — the curated history. The choice
-    lands a ``goal merge: source`` log line.
+    the agent's commits still counts as containing them — and picking the container is
+    what lets a later sweep prove the others merged. No branch containing all the others
+    means the actors have truly diverged: refused, pointing at ``goal sync`` (plus, for a
+    caller whose ``--force`` can resolve it — ``or_force`` — the blunt way through:
+    ``force`` picks the newest-committed branch regardless). Equivalent tips tie in
+    favour of ``human`` — the curated history. The choice lands a ``<command>: source``
+    log line; shared by ``goal merge`` (what to land) and ``goal pr`` (what to propose).
     """
     branches = [branch(goal, actor) for actor in actors]
     committed = {ref: int(git('log', '-1', '--format=%ct', ref)) for ref in branches}
     if force:
         chosen = max(branches, key=lambda ref: committed[ref])
-        logger.bind(source=chosen, forced=True).info('goal merge: source')
+        logger.bind(source=chosen, forced=True).info(f'{command}: source')
         return chosen
     candidates = [
         ref
@@ -126,14 +129,14 @@ def _source(git: Git, goal: str, actors: list[str], force: bool) -> str:
         if all(other == ref or is_merged(git, other, ref) for other in branches)
     ]
     if not candidates:
+        blunt = ', or --force to land the newest-committed and discard the rest'
         raise UserError(
             f'no actor branch contains all the others ({", ".join(branches)}) — '
-            f'ch goal sync {goal} so one does, or --force to land the newest-committed '
-            f'and discard the rest'
+            f'ch goal sync {goal} so one does{blunt if or_force else ""}'
         )
     human = branch(goal, HUMAN)
     chosen = human if human in candidates else max(candidates, key=lambda ref: committed[ref])
-    logger.bind(source=chosen, candidates=candidates).info('goal merge: source')
+    logger.bind(source=chosen, candidates=candidates).info(f'{command}: source')
     return chosen
 
 

@@ -422,6 +422,21 @@ half-done landing finds the work contained and carries on with the cleanup. `--d
 the whole landing — merge, checkout moves, agent stops, sweep — changing nothing. The source
 choice lands `goal merge: source`; the base move `goal merge: refs`.
 
+`ch goal pr <goal> [--into <branch>] [--draft]` is `goal merge`'s remote-review sibling: the
+same source selection, but the source's tip is pushed to `origin` as branch `<goal>` (the
+actor suffix is local plumbing; the goal name is the publication) and a PR opened via `gh`
+against `--into` (default: the repo's default branch). Nothing local is deleted or stopped —
+the goal keeps working until the PR lands, after which `goal merge` (or `goal finish`) cleans
+up as usual. Title and body derive from the commit messages, never the diff: a single-commit
+branch reuses its subject and body verbatim; a multi-commit branch lists its messages as the
+body and has a lightweight model (`claude -p --model haiku`, the same pattern as doctor's
+workspace-clean commit) compress them into a one-line title — falling back to the goal name
+when the model is unreachable, so nothing is ever invented. Idempotent: a re-run re-pushes
+(git refuses a non-fast-forward, e.g. after a rebase — resolve by hand) and reports an
+already-open PR instead of duplicating it. The pushed remote-tracking ref rides `goal pr:
+refs`; the PR lands `goal pr: opened`/`goal pr: existing`. `--dry` resolves everything —
+source, commits, title, body — and pushes and opens nothing.
+
 `ch agent stop [-g <goal>] [-a <actor>]` stops the live agent session in a goal's worktree:
 SIGTERM to its pid, waiting (10s) for it to exit — never SIGKILL; a session that won't die,
 or reports no pid to signal, is refused for a human to inspect. `goal merge` calls the same

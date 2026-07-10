@@ -42,6 +42,7 @@ from chimera.commands.errand import errand as _errand
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.goal.merge import merge as _goal_merge
+from chimera.commands.goal.pr import pr as _goal_pr
 from chimera.commands.goal.rename import rename as _goal_rename
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
@@ -186,6 +187,11 @@ MergeForceOpt = Annotated[
 MergeDryOpt = Annotated[
     bool,
     typer.Option('--dry', help='Preview the merge, agent stop and sweep; change nothing'),
+]
+DraftOpt = Annotated[bool, typer.Option('--draft', help='Open the PR as a draft')]
+PrDryOpt = Annotated[
+    bool,
+    typer.Option('--dry', help='Preview the push and PR, title and body included; change nothing'),
 ]
 StopDryOpt = Annotated[
     bool,
@@ -1358,6 +1364,38 @@ def goal_merge(
     for session in result.stopped:
         typer.echo(f'{dry_run.verb("Stopped", "Would stop")} {session.name} (pid {session.pid})')
     _report_removed(list(result.removed), goal, dry_run)
+
+
+@goal_app.command(
+    'pr',
+    cls=LoggingCommand,
+    help='Publish a finished goal as a pull request: push its work to origin as the goal '
+    'name and open the PR; local branches stay.',
+)
+@logs(_goal_pr)
+def goal_pr(
+    ctx: typer.Context,
+    goal: ExistingGoalArg,
+    into: IntoOpt = None,
+    draft: DraftOpt = False,
+    offline: OfflineOpt = False,
+    dry: PrDryOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    p = _project(ctx, project)
+    dry_run = Dry(dry)
+    result = _goal_pr(p.repo, goal, into, draft, fetch=not offline, dry=dry_run)
+    verb = dry_run.verb('Pushed', 'Would push')
+    typer.echo(f'{verb} {result.source} to origin as {result.remote_branch} ({result.sha})')
+    if result.created:
+        typer.echo(f'Opened PR: {result.url}')
+    elif result.url is not None:
+        typer.echo(f'PR already open: {result.url}')
+    else:
+        typer.echo(f'Would open a PR against {result.base}:')
+        typer.echo(f'title: {result.title}')
+        if result.body:
+            typer.echo(result.body)
 
 
 @goal_app.command('finish', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")
