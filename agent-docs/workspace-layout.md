@@ -427,13 +427,19 @@ same source selection, but the source's tip is pushed to `origin` as branch `<go
 actor suffix is local plumbing; the goal name is the publication) and a PR opened via `gh`
 against `--into` (default: the repo's default branch). Nothing local is deleted or stopped —
 the goal keeps working until the PR lands, after which `goal merge` (or `goal finish`) cleans
-up as usual. Title and body derive from the commit messages, never the diff: a single-commit
-branch reuses its subject and body verbatim; a multi-commit branch lists its messages as the
-body and has a lightweight model (`claude -p --model haiku`, the same pattern as doctor's
-workspace-clean commit) compress them into a one-line title — falling back to the goal name
-when the model is unreachable, so nothing is ever invented. Idempotent: a re-run re-pushes
-(git refuses a non-fast-forward, e.g. after a rebase — resolve by hand) and reports an
-already-open PR instead of duplicating it. The pushed remote-tracking ref rides `goal pr:
+up as usual. Title and body: a single-commit branch reuses its subject and body verbatim —
+the same content GitHub itself prefills from a lone commit, computed locally so `--dry` can
+preview it. A multi-commit branch's description is *written* by a model
+(`claude -p --model haiku`, doctor's workspace-clean pattern) from the project's own
+`prompts/pr.md` when present, else the packaged default — the customisation point: a
+project's template encodes its own PR dance (required sections, ticket-linking conventions),
+the default asks for a succinct *why* with any referenced tickets/issues/threads linked and
+forbids restating the diff or commit list. Template holes: `$PROJECT $GOAL $BASE $SOURCE
+$COMMITS` (the full messages, oldest first); first output line is the title, the rest the
+body. A model failure or empty answer refuses with the `gh pr create` line to run by hand —
+never a placeholder description. Idempotent: a re-run re-pushes (git refuses a
+non-fast-forward, e.g. after a rebase — resolve by hand) and reports an already-open PR
+instead of duplicating it. The pushed remote-tracking ref rides `goal pr:
 refs`; the PR lands `goal pr: opened`/`goal pr: existing`. `--dry` resolves everything —
 source, commits, title, body — and pushes and opens nothing.
 

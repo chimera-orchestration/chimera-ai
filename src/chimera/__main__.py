@@ -1384,7 +1384,7 @@ def goal_pr(
 ) -> None:
     p = _project(ctx, project)
     dry_run = Dry(dry)
-    result = _goal_pr(p.repo, goal, into, draft, fetch=not offline, dry=dry_run)
+    result = _goal_pr(p.repo, p.name, p.prompts, goal, into, draft, fetch=not offline, dry=dry_run)
     verb = dry_run.verb('Pushed', 'Would push')
     typer.echo(f'{verb} {result.source} to origin as {result.remote_branch} ({result.sha})')
     if result.created:

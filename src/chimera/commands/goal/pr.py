@@ -1,8 +1,9 @@
 import json
 import subprocess
-import textwrap
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
+from string import Template
 
 from loguru import logger
 
@@ -16,17 +17,10 @@ from chimera.worktrees import (
     goal_branch_actors,
 )
 
-# The lightweight model `_title` asks to compress a multi-commit branch's messages into a
-# PR title. It only ever sees text a human or agent already wrote and committed — it
-# compresses, never invents — and any failure falls back to the goal name, so the title is
-# always honest even with no model reachable.
-_TITLE_MODEL = 'haiku'
-_TITLE_PROMPT = (
-    'Write a single-line pull-request title (max 60 chars, imperative mood, no trailing '
-    'period, no type prefix) saying WHY this branch exists, not which files changed. The '
-    "branch's git commit messages are on stdin; compress them faithfully — never mention "
-    'anything they do not. Output only the title.'
-)
+# The model `_compose` asks to write a multi-commit branch's PR description from a
+# project-customisable prompt (see that function). Kept lightweight, as doctor's
+# workspace-clean commit writer is — the template carries the judgement.
+_COMPOSE_MODEL = 'haiku'
 
 
 @dataclass(frozen=True)
@@ -45,6 +39,8 @@ class PrResult:
 
 def pr(
     repo: Path,
+    project: str,
+    prompts_dir: Path,
     goal: str,
     into: str | None = None,
     draft: bool = False,
@@ -62,11 +58,13 @@ def pr(
     until the PR lands, after which ``goal merge`` (or ``goal finish``, once a fetch
     shows the work contained) cleans up as usual.
 
-    Title and body are **derived from the commit messages, never from the diff**: a
-    single-commit branch reuses its subject and body verbatim; a multi-commit branch gets
-    its messages listed as the body, with a one-line title compressed from them by a
-    lightweight model (:data:`_TITLE_PROMPT` — goal name as the fallback when the model
-    can't be reached or answers nothing).
+    Title and body: a single-commit branch reuses its subject and body verbatim — the
+    same content GitHub itself would prefill from the commit, computed here so ``dry``
+    can preview it. A multi-commit branch's description is *written*, by a model working
+    from the project's own PR prompt (:func:`_compose` — ``prompts/pr.md`` when present,
+    else the packaged default asking for a succinct why with any referenced tickets and
+    issues linked, never a diff or commit-list restatement). A model failure refuses
+    outright rather than shipping a placeholder — the PR is the deliverable.
 
     Idempotent: a re-run pushes the branch again (a no-op when unchanged; git refuses a
     non-fast-forward, e.g. after a rebase — resolve that by hand) and, finding the PR
@@ -95,7 +93,10 @@ def pr(
     commits = _commits(git, compared, source)
     if not commits:
         raise UserError(f'{source} has no commits beyond {compared} — nothing to propose')
-    title, body = _title(goal, commits), _body(commits)
+    if len(commits) == 1:
+        title, body = commits[0]  # what github itself would prefill from the lone commit
+    else:
+        title, body = _compose(prompts_dir, project, goal, base, source, commits)
     existing = _existing(repo, goal)
     with git.ref_log('goal pr: refs', f'origin/{goal}', goal=goal, source=source):
         dry(git, 'push', 'origin', f'{source}:refs/heads/{goal}')
@@ -122,48 +123,54 @@ def _commits(git: Git, compared: str, source: str) -> list[tuple[str, str]]:
     return pairs
 
 
-def _title(goal: str, commits: list[tuple[str, str]]) -> str:
-    """The PR title: a lone commit's subject verbatim, else a model-compressed one-liner.
+def _compose(
+    prompts_dir: Path,
+    project: str,
+    goal: str,
+    base: str,
+    source: str,
+    commits: list[tuple[str, str]],
+) -> tuple[str, str]:
+    """A multi-commit branch's ``(title, body)``, written by a model to the project's spec.
 
-    The commit subjects already carry the why (that's the house commit style), so a
-    single-commit branch needs no generation at all. A multi-commit branch feeds its
-    messages — only its messages, never the diff — to a lightweight model to compress;
-    any failure or empty answer falls back to the goal name rather than inventing.
+    The prompt is the project's ``prompts/pr.md`` when present, else the packaged default —
+    the customisation point: each project's template encodes its own PR dance (required
+    sections, ticket-linking conventions, tone), while the default asks for a succinct
+    *why* with any referenced issues or tickets linked, and forbids restating the diff or
+    the commit list. Rendered with :class:`string.Template` (``$PROJECT``, ``$GOAL``,
+    ``$BASE``, ``$SOURCE``, ``$COMMITS`` — the branch's full commit messages, oldest
+    first). The model's first output line is the title, the rest the body. Any failure —
+    no model, non-zero exit, empty answer — refuses with the ``gh pr create`` line to run
+    by hand: a placeholder description is worse than a human moment.
     """
-    if len(commits) == 1:
-        return commits[0][0]
-    log_text = '\n\n'.join(f'{subject}\n{body}' if body else subject for subject, body in commits)
+    override = prompts_dir / 'pr.md'
+    text = override.read_text() if override.exists() else _default_template()
+    log_text = '\n\n'.join(f'{subject}\n\n{body}' if body else subject for subject, body in commits)
+    prompt = Template(text).safe_substitute(
+        PROJECT=project, GOAL=goal, BASE=base, SOURCE=source, COMMITS=log_text
+    )
+    by_hand = f'write it yourself: gh pr create --head {goal} --base {base}'
     try:
         result = subprocess.run(
-            ['claude', '-p', _TITLE_PROMPT, '--model', _TITLE_MODEL],
-            input=log_text,
+            ['claude', '-p', prompt, '--model', _COMPOSE_MODEL],
             capture_output=True,
             text=True,
             check=True,
         )
-    except (OSError, subprocess.CalledProcessError):
-        logger.bind(goal=goal).warning('goal pr: title model unreachable, using the goal name')
-        return goal
-    lines = result.stdout.strip().splitlines()
-    return lines[0].strip() if lines else goal
+    except OSError as error:
+        raise UserError(f'could not write the PR description ({error}) — {by_hand}') from None
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or '').strip() or str(error)
+        raise UserError(f'could not write the PR description ({detail}) — {by_hand}') from None
+    title, _, body = result.stdout.strip().partition('\n')
+    if not title.strip():
+        raise UserError(f'the PR description model answered nothing — {by_hand}')
+    return title.strip(), body.strip()
 
 
-def _body(commits: list[tuple[str, str]]) -> str:
-    """The PR body: the commit messages themselves — provenance, not generated prose.
-
-    A lone commit's body rides verbatim; several are listed oldest-first, each subject a
-    bullet with its body indented under it. The diff speaks for itself on the PR — the
-    body only has to say why, and the commits already do.
-    """
-    if len(commits) == 1:
-        return commits[0][1]
-    blocks = []
-    for subject, body in commits:
-        block = f'- {subject}'
-        if body:
-            block += '\n\n' + textwrap.indent(body, '  ')
-        blocks.append(block)
-    return '\n\n'.join(blocks)
+def _default_template() -> str:
+    """The packaged fallback PR prompt, shipped as ``chimera`` package data."""
+    return (files('chimera.prompts') / 'pr.md').read_text()
 
 
 def _existing(repo: Path, head: str) -> str | None:
