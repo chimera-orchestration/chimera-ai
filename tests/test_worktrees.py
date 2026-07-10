@@ -18,6 +18,7 @@ from chimera.worktrees import (
     goal_actors,
     goals,
     is_dirty,
+    is_goal_worktree,
     is_merged,
     registered_worktrees,
     require_valid_actor,
@@ -274,6 +275,23 @@ class TestFetchOrigin:
             fetch_origin_or_offline(git)
 
 
+class TestIsGoalWorktree:
+    def test_name_and_branch_agree(self) -> None:
+        assert is_goal_worktree(Path('/x/worktrees/g@agent'), 'g/agent')
+
+    def test_plain_checkout_with_an_at_in_its_name(self) -> None:
+        assert not is_goal_worktree(Path('/x/proj@2'), 'g/human')
+
+    def test_detached_head_in_a_managed_shape_counts(self) -> None:
+        assert is_goal_worktree(Path('/x/worktrees/g@agent'), 'HEAD')
+
+    def test_no_separator_at_all(self) -> None:
+        assert not is_goal_worktree(Path('/x/plain'), 'g/agent')
+
+    def test_two_separators_is_not_the_managed_shape(self) -> None:
+        assert not is_goal_worktree(Path('/x/a@b@c'), 'a/b@c')
+
+
 class TestCheckoutHere:
     def test_lands_the_branch_and_logs_the_head_move(self, git_repo: Repo) -> None:
         git = Git(git_repo.path)
@@ -339,6 +357,18 @@ class TestCheckoutHere:
         assert checkout_here(git, 'g/human', tmpdir / 'g@agent', 'x') is None
         compare(
             Git(tmpdir / 'g@agent')('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='g/agent'
+        )
+
+    def test_lands_in_a_plain_checkout_named_with_an_at(
+        self, tmpdir: TempDir, git_repo: Repo
+    ) -> None:
+        git = Git(git_repo.path)
+        git('branch', 'g/human', 'main')
+        git('worktree', 'add', '-b', 'scratch', str(tmpdir / 'proj@2'), 'main')
+        result = checkout_here(git, 'g/human', tmpdir / 'proj@2', 'goal sync')
+        compare(
+            result,
+            expected=Checkout(True, (tmpdir / 'proj@2').resolve(), 'g/human', was='scratch'),
         )
 
     def test_skips_when_already_on_the_branch(self, git_repo: Repo) -> None:

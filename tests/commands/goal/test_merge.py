@@ -233,6 +233,21 @@ def test_lands_a_plain_checkout_on_the_base(tmpdir: TempDir, bare_repo: Path) ->
     compare(git.branches(), expected=['main'])
 
 
+def test_lands_a_plain_checkout_named_with_an_at(tmpdir: TempDir, bare_repo: Path) -> None:
+    worktrees = _goal(tmpdir, bare_repo)
+    Repo(worktrees / 'g@agent').commit_content('work')
+    git = Git(bare_repo)
+    git('branch', '--no-track', 'g/human', 'g/agent')
+    checkout = tmpdir / 'proj@2'  # a plain checkout whose dir name merely carries an @
+    git('worktree', 'add', str(checkout), 'g/human')
+    result = merge(bare_repo, worktrees, 'g')
+    compare(
+        result.landed,
+        expected=(Checkout(done=True, where=checkout.resolve(), branch='main', was='g/human'),),
+    )
+    compare(Git(bare_repo).branches(), expected=['main'])
+
+
 def test_refuses_a_dirty_plain_checkout(tmpdir: TempDir, bare_repo: Path) -> None:
     worktrees = _goal(tmpdir, bare_repo)
     git = Git(bare_repo)

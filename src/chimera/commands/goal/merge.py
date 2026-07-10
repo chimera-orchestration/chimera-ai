@@ -13,7 +13,6 @@ from chimera.dry import Dry
 from chimera.git import Git
 from chimera.worktrees import (
     HUMAN,
-    SEP,
     Checkout,
     branch,
     checkout_of,
@@ -22,6 +21,7 @@ from chimera.worktrees import (
     goal_actors,
     goal_branch_actors,
     is_dirty,
+    is_goal_worktree,
     is_merged,
     registered_worktrees,
     worktree_path,
@@ -107,7 +107,7 @@ def merge(
     # source's tip is where base lands even when --dry left base unmoved; taken now, before
     # the sweep deletes the branch it names
     sha = git.rev_parse(source if fastforwarded else base)
-    landed = tuple(_release(git, checkout, ref, base, dry) for checkout, ref in releases)
+    landed = tuple(_release(checkout, ref, base, dry) for checkout, ref in releases)
     stopped = tuple(session for path in worktrees for session in stop(path, dry))
     if not force:
         # again, now the agents are dead: anything written between the first check and the
@@ -216,7 +216,9 @@ def _release_plan(git: Git, goal: str, actors: list[str], base: str) -> list[tup
     """Plain checkouts sitting on the goal's branches, each to be landed on ``base``.
 
     Git won't delete a checked-out branch, so the sweep needs them moved first. A managed
-    ``<goal>@<actor>`` worktree is skipped — the sweep removes it whole; a plain checkout
+    ``<goal>@<actor>`` worktree is skipped (:func:`chimera.worktrees.is_goal_worktree` —
+    name *and* branch agree, so a plain checkout merely carrying ``@`` in its dir name is
+    never mistaken for one) — the sweep removes it whole; a plain checkout
     (e.g. the one ``goal sync``/``review`` landed a human on) gets ``base`` checked out
     instead, which is also where that human wants to be once the goal has landed. All
     refusals happen here, before anything mutates: a dirty checkout can't be flipped, and
@@ -227,7 +229,7 @@ def _release_plan(git: Git, goal: str, actors: list[str], base: str) -> list[tup
     for actor in actors:
         ref = branch(goal, actor)
         checkout = checkout_of(git, ref)
-        if checkout is None or SEP in checkout.name:
+        if checkout is None or is_goal_worktree(checkout, ref):
             continue
         if is_dirty(checkout):
             raise UserError(
@@ -244,7 +246,7 @@ def _release_plan(git: Git, goal: str, actors: list[str], base: str) -> list[tup
     return plan
 
 
-def _release(git: Git, checkout: Path, ref: str, base: str, dry: Dry) -> Checkout:
+def _release(checkout: Path, ref: str, base: str, dry: Dry) -> Checkout:
     """Move the plain checkout at ``checkout`` from ``ref`` onto ``base``.
 
     A checkout is recovery-logged by where HEAD pointed either side (see

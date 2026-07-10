@@ -158,6 +158,22 @@ class Checkout:
     was: str | None  # the branch HEAD was on before (``None`` when it was detached)
 
 
+def is_goal_worktree(path: Path, head: str) -> bool:
+    """Whether the checkout at ``path`` is a managed ``<goal>@<actor>`` worktree.
+
+    The dir name alone can't say — a *plain* checkout may legitimately carry ``@`` in its
+    name (``proj@2``) — so the name must also agree with ``head``, the branch checked out
+    there (``'HEAD'`` when detached): managed means the name splits on the separator into
+    the pair the branch joins — the same name↔branch trust rule doctor's worktree checks
+    use. A detached checkout in a ``<goal>@<actor>``-shaped dir still counts as managed:
+    what can't be identified must never be flipped.
+    """
+    goal, sep, actor = path.name.partition(SEP)
+    if not sep or SEP in actor:
+        return False  # '@' can't appear in a goal or actor, so this isn't the managed shape
+    return head in (branch(goal, actor), 'HEAD')
+
+
 def checkout_here(git: Git, branch_name: str, into: Path, log_as: str) -> Checkout | None:
     """Check ``branch_name`` out in the checkout containing ``into``, when that's safe.
 
@@ -176,10 +192,10 @@ def checkout_here(git: Git, branch_name: str, into: Path, log_as: str) -> Checko
         return None  # not inside a git repo at all
     if top not in registered_worktrees(git):
         return None  # a different repo (e.g. the workspace itself), not this project's
-    if SEP in top.name:
-        return None  # a managed <goal>@<actor> worktree — never flip its HEAD
     wt = Git(top)
     was = wt('rev-parse', '--abbrev-ref', 'HEAD').strip()  # 'HEAD' when detached
+    if is_goal_worktree(top, was):
+        return None  # a managed <goal>@<actor> worktree — never flip an agent's HEAD
     if was == branch_name:
         return None  # already here
     elsewhere = checkout_of(git, branch_name)
