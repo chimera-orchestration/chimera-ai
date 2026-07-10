@@ -52,12 +52,16 @@ def stop(worktree: Path, dry: Dry = Dry(), timeout: float = 10.0) -> list[Sessio
 
     The polite kill for work that's over — a session's committed work is already on its
     branch, and anything uncommitted was the caller's to check *before* stopping. Refuses
-    when a session reports no pid (nothing to signal — a server-backed harness needs its
-    own stop) or when the pid outlives ``timeout`` seconds after SIGTERM; SIGKILL is never
-    sent — a session that won't die is the user's to inspect. Each stop lands an
-    ``agent stop`` log line binding the session name and pid. Under ``dry`` the discovery
-    runs but nothing is signalled. Returns the sessions that were (or would be) stopped.
+    when the worktree itself doesn't exist (a mistyped goal or actor must never read as
+    "nothing running"), when a session reports no pid (nothing to signal — a
+    server-backed harness needs its own stop) or when the pid outlives ``timeout``
+    seconds after SIGTERM; SIGKILL is never sent — a session that won't die is the
+    user's to inspect. Each stop lands an ``agent stop`` log line binding the session
+    name and pid. Under ``dry`` the discovery runs but nothing is signalled. Returns the
+    sessions that were (or would be) stopped.
     """
+    if not worktree.is_dir():
+        raise UserError(f'no worktree at {worktree} — check the goal (-g) and actor (-a)')
     sessions = live(worktree)
     for session in sessions:
         if (pid := session.pid) is None:

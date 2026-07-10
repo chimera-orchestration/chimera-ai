@@ -1262,3 +1262,28 @@ def test_stop_handles_the_pid_reused_by_another_user(tmpdir: TempDir, replace: R
 
     replace(target=os.kill, container=os, name='kill', replacement=kill)
     compare(stop(tmpdir.path), expected=[session])
+
+
+def test_stop_refuses_a_missing_worktree(tmpdir: TempDir) -> None:
+    with ShouldRaise(
+        UserError(f'no worktree at {tmpdir / "ghost@agent"} — check the goal (-g) and actor (-a)')
+    ):
+        stop(tmpdir / 'ghost@agent')
+
+
+def test_agent_stop_cli_refuses_a_missing_worktree(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    worktree = Path.cwd() / 'worktrees' / 'ghost@agent'
+    error = f'no worktree at {worktree} — check the goal (-g) and actor (-a)'
+    command.run('agent', 'stop', '-g', 'ghost').check(
+        output=f'Error: {error}',
+        logging=action_logs(
+            'agent stop',
+            'chimera.commands.agent.stop',
+            {'goal': 'ghost', 'actor': None, 'dry': False, 'project': None},
+            error=f'UserError: {error}',
+        ),
+        return_code=1,
+    )
