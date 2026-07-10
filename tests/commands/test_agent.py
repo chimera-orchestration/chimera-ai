@@ -1,5 +1,7 @@
 import os
+import signal
 import subprocess
+import sys
 from hashlib import sha256
 from collections.abc import Iterable
 from pathlib import Path
@@ -19,13 +21,22 @@ from chimera.commands.agent import (
     scope_line,
     scoped,
     shown,
+    stop,
     under,
 )
 from chimera.agent_env import ROLE_AGENT
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
+from chimera.dry import Dry
 from chimera.prime import prime
-from tests.cli import Command, action_logs, capture_env, context_sources, sources_lines
+from tests.cli import (
+    Command,
+    action_logs,
+    capture_env,
+    context_sources,
+    full_capture,
+    sources_lines,
+)
 
 
 def _project_obj(directory: Path) -> Project:
@@ -1114,3 +1125,113 @@ def test_agent_resume_cli_stamps_the_agent_role(
     envs = capture_env(replace)
     command.run('agent', 'resume', '-g', 'g')
     compare(envs, expected=[{'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'myproject@g'}])
+
+
+def _orphan_sleeper() -> int:
+    """A sleeping process that is not our child, so SIGTERM leaves no zombie to confuse
+    the exit polling in ``_terminate``."""
+    out = subprocess.run(
+        ['bash', '-c', 'sleep 60 & echo $!'], capture_output=True, text=True, check=True
+    )
+    return int(out.stdout)
+
+
+def _session_with(pid: int | None, cwd: Path, name: str = 'p@g@agent') -> Session:
+    return Session('x', name, 'idle', cwd, None, pid=pid)
+
+
+def test_stop_terminates_the_live_session(tmpdir: TempDir, replace: Replacer) -> None:
+    pid = _orphan_sleeper()
+    session = _session_with(pid, tmpdir.path)
+    replace.in_module(live, lambda worktree: [session])
+    try:
+        with full_capture() as log:
+            compare(stop(tmpdir.path), expected=[session])
+    finally:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    with ShouldRaise(ProcessLookupError):
+        os.kill(pid, 0)
+    log.check({'level': 'INFO', 'session': 'p@g@agent', 'pid': pid, 'message': 'agent stop'})
+
+
+def test_stop_handles_a_session_that_already_died(tmpdir: TempDir, replace: Replacer) -> None:
+    proc = subprocess.Popen(['true'])
+    proc.wait()  # reaped: the pid no longer names a process
+    session = _session_with(proc.pid, tmpdir.path)
+    replace.in_module(live, lambda worktree: [session])
+    compare(stop(tmpdir.path), expected=[session])
+
+
+def test_stop_refuses_a_pidless_session(tmpdir: TempDir, replace: Replacer) -> None:
+    replace.in_module(live, lambda worktree: [_session_with(None, tmpdir.path)])
+    with ShouldRaise(
+        UserError('p@g@agent reports no pid — stop it from its own harness, then re-run')
+    ):
+        stop(tmpdir.path)
+
+
+def test_stop_refuses_a_session_that_will_not_die(tmpdir: TempDir, replace: Replacer) -> None:
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            '-c',
+            'import signal, sys, time\n'
+            'signal.signal(signal.SIGTERM, signal.SIG_IGN)\n'
+            'print("ready", flush=True)\n'
+            'time.sleep(60)',
+        ],
+        stdout=subprocess.PIPE,
+    )
+    assert proc.stdout is not None
+    proc.stdout.readline()  # the handler is installed
+    replace.in_module(live, lambda worktree: [_session_with(proc.pid, tmpdir.path)])
+    try:
+        with ShouldRaise(
+            UserError(
+                f'p@g@agent (pid {proc.pid}) is still running 0.2s after SIGTERM — '
+                f'kill it by hand, then re-run'
+            )
+        ):
+            stop(tmpdir.path, timeout=0.2)
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_stop_dry_signals_nothing(tmpdir: TempDir, replace: Replacer) -> None:
+    session = _session_with(os.getpid(), tmpdir.path)  # us: a signal would be very visible
+    replace.in_module(live, lambda worktree: [session])
+    compare(stop(tmpdir.path, Dry(True)), expected=[session])
+
+
+def test_agent_stop_cli_dry(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
+    _project_with_worktree(tmpdir)
+    worktree = Path.cwd() / 'worktrees' / 'g@agent'
+    replace.in_module(live, lambda w: [_session_with(4242, worktree, 'myproject@g@agent')])
+    command.run('agent', 'stop', '-g', 'g', '--dry').check(
+        output='Would stop myproject@g@agent (pid 4242)',
+        logging=action_logs(
+            'agent stop',
+            'chimera.commands.agent.stop',
+            {'goal': 'g', 'actor': None, 'dry': True, 'project': None},
+        ),
+    )
+
+
+def test_agent_stop_cli_with_nothing_live(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    replace.in_module(live, lambda w: [])
+    worktree = Path.cwd() / 'worktrees' / 'g@agent'
+    command.run('agent', 'stop', '-g', 'g').check(
+        output=f'No live agent in {worktree}',
+        logging=action_logs(
+            'agent stop',
+            'chimera.commands.agent.stop',
+            {'goal': 'g', 'actor': None, 'dry': False, 'project': None},
+        ),
+    )

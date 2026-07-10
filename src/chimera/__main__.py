@@ -32,6 +32,7 @@ from chimera.agents.registry import AgentSpec, resolve_spec
 from chimera.commands.agent import agents, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
+from chimera.commands.agent import stop as _agent_stop
 from chimera.commands.chat import chat as _chat
 from chimera.commands.chat import chat_target
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
@@ -167,6 +168,10 @@ SyncForceOpt = Annotated[
 ]
 DryOpt = Annotated[
     bool, typer.Option('--dry', help='Preview what would be removed; change nothing')
+]
+StopDryOpt = Annotated[
+    bool,
+    typer.Option('--dry', help='Preview which sessions would be stopped; change nothing'),
 ]
 DangerousOpt = Annotated[
     bool,
@@ -1400,6 +1405,30 @@ def agent_resume(
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
         _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
+
+
+@agent_app.command(
+    'stop', cls=LoggingCommand, help="Stop the live agent session in a goal's worktree."
+)
+@logs(_agent_stop)
+def agent_stop(
+    ctx: typer.Context,
+    goal: GoalOpt = None,
+    actor: ActorOpt = None,
+    dry: StopDryOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    overrides = _overrides(ctx)
+    p = _project(ctx, project)
+    g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
+    a = require_valid_actor(actor or overrides.actor or AGENT)
+    worktree = worktree_path(p.worktrees, g, a)
+    dry_run = Dry(dry)
+    stopped = _agent_stop(worktree, dry_run)
+    for session in stopped:
+        typer.echo(f'{dry_run.verb("Stopped", "Would stop")} {session.name} (pid {session.pid})')
+    if not stopped:
+        typer.echo(f'No live agent in {worktree}')
 
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')

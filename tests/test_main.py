@@ -175,7 +175,8 @@ class TestStripToRole:
         goal = cast(TyperGroup, _leaf(tree, 'goal'))
         compare(set(goal.commands), expected={'start', 'adopt', 'sync', 'finish', 'rename', 'ls'})
         compare(
-            set(cast(TyperGroup, _leaf(tree, 'agent')).commands), expected={'start', 'resume', 'ls'}
+            set(cast(TyperGroup, _leaf(tree, 'agent')).commands),
+            expected={'start', 'resume', 'stop', 'ls'},
         )
 
     def test_agent_tree_is_exactly_help_prime_and_errand(self) -> None:

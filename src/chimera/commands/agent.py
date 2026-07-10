@@ -1,5 +1,10 @@
+import os
+import signal
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+
+from loguru import logger
 
 from chimera.agent_env import ai_session
 from chimera.agents import Session
@@ -40,6 +45,47 @@ def live(worktree: Path) -> list[Session]:
     not a single harness's listing.
     """
     return [session for harness in AGENTS.values() for session in harness.live(worktree)]
+
+
+def stop(worktree: Path, dry: Dry = Dry(), timeout: float = 10.0) -> list[Session]:
+    """Stop every live agent session in the worktree: SIGTERM its pid, wait for it to exit.
+
+    The polite kill for work that's over — a session's committed work is already on its
+    branch, and anything uncommitted was the caller's to check *before* stopping. Refuses
+    when a session reports no pid (nothing to signal — a server-backed harness needs its
+    own stop) or when the pid outlives ``timeout`` seconds after SIGTERM; SIGKILL is never
+    sent — a session that won't die is the user's to inspect. Each stop lands an
+    ``agent stop`` log line binding the session name and pid. Under ``dry`` the discovery
+    runs but nothing is signalled. Returns the sessions that were (or would be) stopped.
+    """
+    sessions = live(worktree)
+    for session in sessions:
+        if (pid := session.pid) is None:
+            raise UserError(
+                f'{session.name} reports no pid — stop it from its own harness, then re-run'
+            )
+        dry(_terminate, session.name, pid, timeout)
+    return sessions
+
+
+def _terminate(name: str, pid: int, timeout: float) -> None:
+    """SIGTERM ``pid`` and wait for it to exit, up to ``timeout`` seconds."""
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass  # died between the liveness check and the signal — already what we wanted
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            logger.bind(session=name, pid=pid).info('agent stop')
+            return
+        time.sleep(0.05)
+    raise UserError(
+        f'{name} (pid {pid}) is still running {timeout:g}s after SIGTERM — '
+        f'kill it by hand, then re-run'
+    )
 
 
 def refuse_restricted(spec: AgentSpec, extra: Sequence[str]) -> None:
