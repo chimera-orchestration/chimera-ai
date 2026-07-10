@@ -12,6 +12,7 @@ from chimera.commands.doctor.checks import (
     WorkspaceDirsCheck,
     CaptainCheck,
     ChimeraUpToDateCheck,
+    FblogCheck,
     GitignoreCheck,
     InertBranchCheck,
     LegacyWorktreeSeparatorCheck,
@@ -1459,6 +1460,95 @@ class TestShellCompletion:
                     fixable=False,
                 )
             ],
+        )
+
+
+_FBLOG_MISSING = "fblog (ch logtail's renderer) is not installed"
+
+
+def _no_fblog(replace: Replacer, brew: str | None) -> None:
+    replace.in_module(doctor_checks.fblog_installed, lambda: False)
+    replace.in_module(shutil.which, lambda name: brew)
+
+
+class TestFblog:
+    def test_fblog_installed_reads_the_path(self, replace: Replacer) -> None:
+        found: dict[str, str | None] = {'fblog': '/opt/homebrew/bin/fblog'}
+        replace.in_module(shutil.which, lambda name: found[name])
+        assert doctor_checks.fblog_installed()
+        found['fblog'] = None
+        assert not doctor_checks.fblog_installed()
+
+    def test_installed_is_silent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_module(doctor_checks.fblog_installed, lambda: True)
+        compare(_run(FblogCheck(), _ws(tmpdir)), expected=[])
+
+    def test_missing_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
+        _no_fblog(replace, brew='/opt/homebrew/bin/brew')
+        compare(
+            _run(FblogCheck(), _ws(tmpdir)),
+            expected=[Finding('fblog', _FBLOG_MISSING, resolved=False, fixable=True)],
+        )
+
+    def test_missing_without_brew(self, tmpdir: TempDir, replace: Replacer) -> None:
+        _no_fblog(replace, brew=None)
+        compare(
+            _run(FblogCheck(), _ws(tmpdir)),
+            expected=[
+                Finding(
+                    'fblog',
+                    f'{_FBLOG_MISSING} and brew is not available to install it — '
+                    'see https://github.com/brocode/fblog',
+                    resolved=False,
+                    fixable=False,
+                )
+            ],
+        )
+
+    def test_fix_installs(self, tmpdir: TempDir, replace: Replacer) -> None:
+        _no_fblog(replace, brew='/opt/homebrew/bin/brew')
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
+
+        replace.in_module(subprocess.run, fake_run)
+        compare(
+            _run(FblogCheck(), _ws(tmpdir), fix=True),
+            expected=[
+                Finding(
+                    'fblog', 'fblog installed (brew install fblog)', resolved=True, fixable=True
+                )
+            ],
+        )
+        compare(calls, expected=[['brew', 'install', 'fblog']])
+
+    def test_fix_brew_failure_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
+        _no_fblog(replace, brew='/opt/homebrew/bin/brew')
+
+        def fail_run(cmd, **kw):
+            raise subprocess.CalledProcessError(1, cmd, stderr='Error: no bottle\n')
+
+        replace.in_module(subprocess.run, fail_run)
+        compare(
+            _run(FblogCheck(), _ws(tmpdir), fix=True),
+            expected=[
+                Finding(
+                    'fblog',
+                    f'{_FBLOG_MISSING}; `brew install fblog` failed:\nError: no bottle',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+
+    def test_excluded_is_not_fixed(self, tmpdir: TempDir, replace: Replacer) -> None:
+        _no_fblog(replace, brew='/opt/homebrew/bin/brew')
+        replace.in_module(subprocess.run, _raise(AssertionError('must not install')))
+        compare(
+            _run(FblogCheck(), _ws(tmpdir), fix=True, exclude=Exclusions(('fblog',))),
+            expected=[Finding('fblog', _FBLOG_MISSING, resolved=False, fixable=True)],
         )
 
 

@@ -25,11 +25,20 @@ the loop logs for all of them so a new step can't forget to. `ch doctor` is the 
 check lands `<name>: checked` with its findings count bound, and every finding lands its own
 line (`fixable`/`resolved` bound) — ERROR while unresolved, INFO once fixed.
 
+## Viewing the log
+
+`ch logtail` is the human view: `tail -F` piped through `fblog` (a doctor check verifies it's
+installed; `--fix` brew-installs it) with a main-line format tuned to the fields above —
+`command`, `phase`, `duration_ms`, `error` — since the frame lines carry an empty `message`
+that a generic JSON viewer would render blank. `-n N` sets the initial line count,
+`--no-follow` takes one look and exits, and `-d/--dump` is the post-mortem surface: every
+field of every record (params, git before/after maps, full tracebacks).
+
 ## Git command trace
 
 Every git subprocess runs through `chimera.git.Git` (never `giterator.Git` directly), whose
 `__call__` lands a DEBUG line *before* the command runs — so a hung fetch is on record while it
-hangs (`tail -f logs/chimera.jsonl` to watch live). The message is the exact command
+hangs (`ch logtail` to watch live). The message is the exact command
 (`git fetch --prune origin`), the working directory rides `git_cwd`. The trace goes only to the
 log file, never the console (and is suppressed during shell completion, where the file sink
 isn't configured). `chimera.git` also injects network timeouts (`GIT_SSH_COMMAND`

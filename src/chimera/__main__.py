@@ -44,6 +44,7 @@ from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.init import init as _init
+from chimera.commands.logtail import logtail as _logtail
 from chimera.commands.ls import Board, board
 from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.checkout import checkout as _project_checkout
@@ -601,6 +602,25 @@ def _tag(finding: Finding) -> str:
     if finding.resolved:
         return 'fixed'
     return 'would fix — run with --fix' if finding.fixable else 'needs attention'
+
+
+@app.command(cls=LoggingCommand, help="Tail the workspace's action log, colourised (via fblog).")
+@logs(_logtail)
+def logtail(
+    lines: Annotated[int, typer.Option('--lines', '-n', help='Initial lines to show')] = 20,
+    follow: Annotated[
+        bool, typer.Option('--follow/--no-follow', help='Keep following new lines')
+    ] = True,
+    dump: Annotated[
+        bool,
+        typer.Option(
+            '--dump', '-d', help='Show every field of every record (params, git refs, tracebacks)'
+        ),
+    ] = False,
+) -> None:
+    code = _logtail(resolve_workspace(Path.cwd()), lines=lines, follow=follow, dump=dump)
+    if code:
+        raise typer.Exit(code)
 
 
 @app.command(

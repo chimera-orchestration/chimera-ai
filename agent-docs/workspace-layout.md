@@ -294,6 +294,9 @@ add/retire via the `CHECKS` tuple). Current checks:
   unset shells are skipped): either the `ch --install-completion` artifact (`~/.zfunc/_ch` /
   `~/.bash_completions/ch.sh`) or a `_CH_COMPLETE` eval line in a shell startup file; not
   auto-fixable (same no-profile-edits rule) — the finding prints both fixes
+- **fblog** — `ch logtail`'s renderer (the `fblog` binary) is on the PATH; `--fix` installs it
+  with brew. Without brew there's nothing to install with, so the finding just points at
+  fblog's repo — not auto-fixable
 - **workspace-clean** — the workspace's own git repo has no uncommitted or untracked content
   (skipped when the workspace isn't a git repo; `*/repo/` and `*/worktrees/` are gitignored, so
   only tracked workspace files count). Runs last, so it sweeps up the config/gitignore edits the
