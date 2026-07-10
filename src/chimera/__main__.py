@@ -41,6 +41,7 @@ from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.errand import errand as _errand
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
+from chimera.commands.goal.merge import merge as _goal_merge
 from chimera.commands.goal.rename import rename as _goal_rename
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
@@ -168,6 +169,23 @@ SyncForceOpt = Annotated[
 ]
 DryOpt = Annotated[
     bool, typer.Option('--dry', help='Preview what would be removed; change nothing')
+]
+IntoOpt = Annotated[
+    str | None,
+    typer.Option('--into', help='Branch to land the goal on (default: the repo default branch)'),
+]
+MergeForceOpt = Annotated[
+    bool,
+    typer.Option(
+        '--force',
+        help='Land the newest-committed actor branch even when the actors have diverged, '
+        'discarding the others; skips the dirty-worktree check too (the fast-forward rule '
+        'is never forced)',
+    ),
+]
+MergeDryOpt = Annotated[
+    bool,
+    typer.Option('--dry', help='Preview the merge, agent stop and sweep; change nothing'),
 ]
 StopDryOpt = Annotated[
     bool,
@@ -1308,6 +1326,38 @@ def goal_rename(
         typer.echo(f'warning: {warning}')
     if result.cwd_moved_to is not None:
         typer.echo(f'note: your cwd moved — cd {result.cwd_moved_to}')
+
+
+@goal_app.command(
+    'merge',
+    cls=LoggingCommand,
+    help="Land a finished goal: fast-forward the base branch to its work, stop its agent, "
+    'and sweep its branches and worktrees.',
+)
+@logs(_goal_merge)
+def goal_merge(
+    ctx: typer.Context,
+    goal: ExistingGoalArg,
+    into: IntoOpt = None,
+    force: MergeForceOpt = False,
+    offline: OfflineOpt = False,
+    dry: MergeDryOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    p = _project(ctx, project)
+    dry_run = Dry(dry)
+    result = _goal_merge(p.repo, p.worktrees, goal, into, force, fetch=not offline, dry=dry_run)
+    if result.fastforwarded:
+        verb = dry_run.verb('Fast-forwarded', 'Would fast-forward')
+        typer.echo(f'{verb} {result.into} to {result.source} ({result.sha})')
+    else:
+        typer.echo(f'{result.into} already contains {result.source} ({result.sha})')
+    for landed in result.landed:
+        verb = dry_run.verb('Checked out', 'Would check out')
+        typer.echo(f'{verb} {landed.branch} at {landed.where} (was {landed.was})')
+    for session in result.stopped:
+        typer.echo(f'{dry_run.verb("Stopped", "Would stop")} {session.name} (pid {session.pid})')
+    _report_removed(list(result.removed), goal, dry_run)
 
 
 @goal_app.command('finish', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")

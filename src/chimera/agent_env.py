@@ -40,6 +40,7 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
             'goal start',
             'goal adopt',
             'goal sync',
+            'goal merge',
             'goal finish',
             'goal rename',
             'agent start',

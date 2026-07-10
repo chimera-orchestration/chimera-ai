@@ -26,7 +26,9 @@ The loop:
   `ch goal adopt <branch>` brings an existing branch under management.
 - `ch review <PR>` — stand up a pre-human review of a pull request.
 - `ch goal sync <goal>` — bring the human branch up to the agent's work.
-- `ch goal finish <goal>` — sweep a done goal's branches and worktrees.
+- `ch goal merge <goal>` — land a finished goal: fast-forward the base branch to its work,
+  stop its agent, sweep its branches.
+- `ch goal finish <goal>` — sweep a goal's branches and worktrees without landing them.
 
 Context here layers the workspace's `roles/captain/` and `principles/`; every project's
 `knowledge/` is indexed to read on demand — save workspace-wide learnings to `knowledge/`.
@@ -47,7 +49,9 @@ The loop:
 - `ch review <PR>` — stand up a pre-human review of a pull request.
 - `ch errand <project> "<question>"` — fetch a one-shot read-only report from another project.
 - `ch goal sync <goal>` — bring the human branch up to the agent's work.
-- `ch goal finish <goal>` — sweep a done goal's branches and worktrees.
+- `ch goal merge <goal>` — land a finished goal: fast-forward the base branch to its work,
+  stop its agent, sweep its branches.
+- `ch goal finish <goal>` — sweep a goal's branches and worktrees without landing them.
 
 Context layers workspace then project — `roles/manager/` and `principles/` inline whole;
 {project}'s `knowledge/` is indexed to read on demand — save what you learn there.
