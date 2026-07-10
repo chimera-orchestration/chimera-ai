@@ -1250,3 +1250,15 @@ def test_stop_refuses_a_session_that_is_not_ours_to_signal(
         UserError('p@g@agent (pid 4242) is not ours to signal — stop it by hand, then re-run')
     ):
         stop(tmpdir.path)
+
+
+def test_stop_handles_the_pid_reused_by_another_user(tmpdir: TempDir, replace: Replacer) -> None:
+    session = _session_with(4242, tmpdir.path)
+    replace.in_module(live, lambda worktree: [session])
+
+    def kill(pid: int, sig: int) -> None:
+        if sig == 0:  # the SIGTERM freed the pid; another user's process now wears it
+            raise PermissionError(1, 'Operation not permitted')
+
+    replace(target=os.kill, container=os, name='kill', replacement=kill)
+    compare(stop(tmpdir.path), expected=[session])

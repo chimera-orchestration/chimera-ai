@@ -84,7 +84,9 @@ def _terminate(name: str, pid: int, timeout: float) -> None:
     while time.monotonic() < deadline:
         try:
             os.kill(pid, 0)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
+            # gone — PermissionError here means the pid we could signal a moment ago was
+            # freed by our SIGTERM and already reused by another user's process
             logger.bind(session=name, pid=pid).info('agent stop')
             return
         time.sleep(0.05)
