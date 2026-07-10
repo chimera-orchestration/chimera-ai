@@ -12,6 +12,7 @@ from typer.main import get_command
 
 from chimera import logging
 from chimera.agent_env import (
+    RESTRICTED_COMMANDS,
     RESTRICTED_OPTIONS,
     ROLE_AGENT,
     ROLE_CAPTAIN,
@@ -1447,6 +1448,21 @@ def _strip_restricted_options(command: Command) -> None:
         _strip_restricted_options(sub)
 
 
+def _strip_restricted_commands(command: Command, path: str = '') -> None:
+    """Delete the human-only leaves (``RESTRICTED_COMMANDS``) from the Click tree — the
+    option strip one level up, applied to *every* AI session, captain included (the role
+    allowlists narrow further, but never grant these back). Same absence-not-admonition
+    semantics as ``_strip_to_role``, same group-emptying sweep."""
+    commands: dict[str, Command] = getattr(command, 'commands', {})
+    for name, sub in list(commands.items()):
+        if getattr(sub, 'commands', None) is not None:  # a group — prune inside, then itself
+            _strip_restricted_commands(sub, f'{path}{name} ')
+            if not getattr(sub, 'commands'):
+                del commands[name]
+        elif f'{path}{name}' in RESTRICTED_COMMANDS:
+            del commands[name]
+
+
 def _strip_to_role(command: Command, allowed: frozenset[str], path: str = '') -> None:
     """Prune the Click tree to the ``allowed`` canonical leaf paths — the option strip one
     level up. A fenced command isn't hidden but absent: parsing, ``--help``, ``ch help`` and
@@ -1479,8 +1495,9 @@ def main() -> None:
         raise SystemExit(1)
     if ai_session():  # a role stamp alone marks an AI session — CLAUDECODE isn't required
         command = get_command(app)
-        if role in ROLE_COMMANDS:  # prune first: the option strip then walks the smaller tree
+        if role in ROLE_COMMANDS:  # prune first: the later strips walk the smaller tree
             _strip_to_role(command, ROLE_COMMANDS[role])
+        _strip_restricted_commands(command)
         _strip_restricted_options(command)
         command()
     else:

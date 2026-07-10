@@ -83,8 +83,10 @@ shows blank — a test (`test_every_command_has_a_summary`) fails on it.
 derived, exhaustive), prime the *orientation* (how to work here, right now — the golden path
 for the scope you stand in). Its per-role templates (`chimera/prime.py`) are editorial prose,
 so they *could* drift — a test (`tests/test_prime.py`) pins every backtick-cited `ch …`
-command to a live leaf of that role's **stripped** tree (the captain's against the full
-tree), so prime provably never mentions fenced capability. The role is the session's
+command to a live leaf of the tree that role's sessions actually see: the role allowlist
+prune for the listed roles (the captain skips it), then minus the human-only
+`RESTRICTED_COMMANDS` every AI session loses — so prime provably never mentions fenced
+capability. The role is the session's
 `CHIMERA_ROLE` stamp when set, else inferred from cwd (goal worktree → agent, project dir →
 manager, bare workspace → captain) — the pull path for sessions chimera didn't launch, and
 for humans. The launchers also *push* the role's prime as the identity block of the launch
@@ -116,6 +118,13 @@ never parses the flag, so it never reaches one. A future high-risk option joins 
 frozenset rather than inventing a new mechanism. This only works because console-script entry
 points point at `main()`, not `app` directly — `Typer.__call__` rebuilds an unstripped tree from
 scratch on every call, so stripping has to happen on a tree we build and invoke ourselves.
+
+`RESTRICTED_COMMANDS` (same module) is the identical strip one level up: a whole command
+that only makes sense at a human's terminal (`logtail`, which blocks following the live log
+until Ctrl-C) is deleted from **every** AI session's tree — captain included, unlike the
+per-role allowlists, which narrow further but never grant these back (a test keeps the two
+sets disjoint). Same trigger, same absence-not-admonition semantics; an agent wanting log
+content reads the JSONL directly.
 
 The `--` passthrough tail is the one place this strip can't reach — `PassthroughCommand`
 splits it off before Click parses. Its fence is per-harness: each `Agent` subclass declares

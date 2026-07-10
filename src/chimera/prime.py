@@ -31,6 +31,9 @@ The loop:
 Context here layers the workspace's `roles/captain/` and `principles/`; every project's
 `knowledge/` is indexed to read on demand — save workspace-wide learnings to `knowledge/`.
 
+Debugging: every action lands in `logs/chimera.jsonl` at the workspace root — one JSON
+object per line, so read or grep it directly.
+
 `ch help` is the full reference; `ch help -v` adds each command's options."""
 
 MANAGER_PRIME = """\

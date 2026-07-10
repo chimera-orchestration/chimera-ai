@@ -12,6 +12,12 @@ _AGENT_ENV_VARS = ('CLAUDECODE',)  # Claude Code sets this for every subprocess 
 
 RESTRICTED_OPTIONS = frozenset({'--force', '--dangerous'})
 
+# Human-only commands (canonical leaf paths): stripped from every AI session's tree — the
+# captain included, unlike the per-role allowlists — just as RESTRICTED_OPTIONS strips
+# options. `logtail` is the human's live debugging surface: it blocks following the log
+# until Ctrl-C, a dead end for an agent, which reads the JSONL directly instead.
+RESTRICTED_COMMANDS = frozenset({'logtail'})
+
 # The session-layer roles: the workspace captain, a project's manager (its chat), and a
 # goal's agent. ROLE_-prefixed to avoid colliding with chimera.worktrees.AGENT — the same
 # string on a different axis (actor naming vs session role), deliberately kept apart.

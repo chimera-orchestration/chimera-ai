@@ -27,8 +27,11 @@ line (`fixable`/`resolved` bound) — ERROR while unresolved, INFO once fixed.
 
 ## Viewing the log
 
-`ch logtail` is the human view: `tail -F` piped through `fblog` (a doctor check verifies it's
-installed; `--fix` brew-installs it) with a main-line format tuned to the fields above —
+`ch logtail` is the human view — human-only, in fact: it's in `RESTRICTED_COMMANDS`, stripped
+from every AI session's tree (captain included), since a blocking follow is a dead end for an
+agent, which reads the JSONL directly. It pipes `tail -F` through `fblog` (a doctor check
+verifies it's installed; `--fix` brew-installs it) with a main-line format tuned to the fields
+above —
 `command`, `phase`, `duration_ms`, `error` — since the frame lines carry an empty `message`
 that a generic JSON viewer would render blank. `-n N` sets the initial line count,
 `--no-follow` takes one look and exits, and `-d/--dump` is the post-mortem surface: every

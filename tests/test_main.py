@@ -7,11 +7,18 @@ from typing import cast
 import pytest
 from testfixtures import Replacer, ShouldRaise, TempDir, compare, not_there
 from typer._click.core import Command, Context
-from typer.core import TyperGroup
+from typer.core import TyperCommand, TyperGroup
 from typer.main import get_command
 
-from chimera.__main__ import _strip_restricted_options, _strip_to_role, app, main
-from chimera.agent_env import ROLE_AGENT, ROLE_COMMANDS, ROLE_MANAGER
+from chimera import __main__ as chimera_main
+from chimera.__main__ import (
+    _strip_restricted_commands,
+    _strip_restricted_options,
+    _strip_to_role,
+    app,
+    main,
+)
+from chimera.agent_env import ROLE_AGENT, ROLE_COMMANDS, ROLE_MANAGER, RESTRICTED_COMMANDS
 from tests.cli import Command as CliCommand
 from tests.cli import action_logs, leaves
 
@@ -71,7 +78,68 @@ class TestStripRestrictedOptions:
         assert {'--offline', '--dry', '--project', '-p'} <= _option_names(rm)
 
 
+class TestStripRestrictedCommands:
+    def test_removes_logtail(self) -> None:
+        command = cast(TyperGroup, get_command(app))
+        assert 'logtail' in command.commands  # present for a human…
+        _strip_restricted_commands(command)
+        assert 'logtail' not in command.commands  # …absent for any AI session
+
+    def test_leaves_the_rest_of_the_tree_alone(self) -> None:
+        command = get_command(app)
+        before = {path for path, _ in leaves(command)}
+        _strip_restricted_commands(command)
+        compare(before - {path for path, _ in leaves(command)}, expected=RESTRICTED_COMMANDS)
+
+    def test_a_group_emptied_by_the_strip_goes_with_it(self, replace: Replacer) -> None:
+        # no restricted command is grouped today — prove the sweep on a synthetic tree so
+        # a future `log tail`-shaped entry can't leave an empty husk behind
+        replace(
+            target=chimera_main.RESTRICTED_COMMANDS,
+            container=chimera_main,
+            name='RESTRICTED_COMMANDS',
+            replacement=frozenset({'log tail'}),
+        )
+        root = TyperGroup(
+            name='ch',
+            commands={'log': TyperGroup(name='log', commands={'tail': TyperCommand(name='tail')})},
+        )
+        _strip_restricted_commands(root)
+        compare(root.commands, expected={})
+
+    def test_every_restricted_command_names_a_live_leaf(self) -> None:
+        # a stale entry (a renamed/retired command) would silently restrict nothing
+        live = {path for path, _ in leaves(get_command(app))}
+        compare(RESTRICTED_COMMANDS - live, expected=set())
+
+    def test_no_role_allowlist_grants_a_restricted_command(self) -> None:
+        # the role prune runs first, so an allowlist entry here would be stripped anyway —
+        # but listing one would misdocument the role; keep the two sets disjoint
+        for role, allowed in ROLE_COMMANDS.items():
+            compare(allowed & RESTRICTED_COMMANDS, expected=set(), prefix=role)
+
+
 class TestMain:
+    def test_logtail_unrecognized_under_agent_context(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CLAUDECODE', '1')
+        _argv(replace, 'logtail')
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        compare(excinfo.value.code, expected=2)
+        assert 'No such command' in capsys.readouterr().err
+
+    def test_logtail_recognized_without_agent_context(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        replace.in_environ('CLAUDECODE', not_there)
+        _argv(replace, 'logtail', '--help')
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        compare(excinfo.value.code, expected=0)
+        assert 'Initial lines to show' in capsys.readouterr().out
+
     def test_force_unrecognized_under_agent_context(
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -308,6 +376,16 @@ class TestMainRole:
         # the command itself survived (only a role in ROLE_COMMANDS is pruned) — the
         # error is about the agent-restricted option, which still gets stripped
         assert 'No such option' in capsys.readouterr().err
+
+    def test_captain_still_loses_human_only_commands(
+        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # the role stamp alone marks the AI session — no CLAUDECODE needed (conftest clears it)
+        replace.in_environ('CHIMERA_ROLE', 'captain')
+        _argv(replace, 'logtail')
+        with ShouldRaise(SystemExit(2)):
+            main()
+        assert 'No such command' in capsys.readouterr().err
 
     def test_manager_command_present_with_restricted_option_stripped(
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]
