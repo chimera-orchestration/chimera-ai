@@ -87,8 +87,14 @@ def pr(
     if base.startswith(f'{goal}/'):
         raise UserError(f"{base} is one of {goal}'s own branches — name a base like main")
     source = source_branch(git, goal, actors, command='goal pr', or_force=False)
-    compared = f'origin/{base}' if git.ref_exists(f'origin/{base}') else base
-    if not git.ref_exists(compared):
+    # base must be a branch *name* (local or origin's), not a remote-tracking spelling:
+    # a bare ref_exists would let `origin/main` DWIM its way through here and only fail
+    # server-side in `gh pr create --base origin/main` — after the push
+    if git.ref_exists(f'refs/remotes/origin/{base}'):
+        compared = f'origin/{base}'
+    elif git.ref_exists(f'refs/heads/{base}'):
+        compared = base
+    else:
         raise UserError(f'no branch {base} to propose against')
     commits = _commits(git, compared, source)
     if not commits:
@@ -153,6 +159,7 @@ def _compose(
     try:
         result = subprocess.run(
             ['claude', '-p', prompt, '--model', _COMPOSE_MODEL],
+            input='',  # claude in print mode reads piped stdin to EOF — never hand it ours
             capture_output=True,
             text=True,
             check=True,

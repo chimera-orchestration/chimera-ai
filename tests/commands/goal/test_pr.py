@@ -127,6 +127,9 @@ def test_multi_commit_description_is_written_by_the_model(
     result = _pr(tmpdir, git_repo.path)
     compare(result.title, expected='Compressed why')
     compare(result.body, expected='Because of BCK-1234.')
+    compare(  # stdin is closed on the model: piped input must never leak into the prompt
+        next(inp for args, inp in calls if args[0] == 'claude'), expected=''
+    )
     fed = _prompt_fed(calls)  # the default template, with the commit messages substituted in
     assert 'First why' in fed and 'Detail one.' in fed and 'Second why' in fed
     assert 'succinct summary of WHY' in fed
@@ -296,6 +299,13 @@ def test_refuses_a_missing_base(tmpdir: TempDir, git_repo: Repo, replace: Replac
     _outside(replace)
     with ShouldRaise(UserError('no branch release to propose against')):
         _pr(tmpdir, git_repo.path, into='release')
+
+
+def test_refuses_a_remote_tracking_base(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    _published(tmpdir, git_repo)  # the push left refs/remotes/origin/main behind
+    _outside(replace)
+    with ShouldRaise(UserError('no branch origin/main to propose against')):
+        _pr(tmpdir, git_repo.path, into='origin/main')
 
 
 def test_refuses_diverged_actors_without_advertising_force(

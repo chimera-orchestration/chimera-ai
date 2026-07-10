@@ -74,6 +74,12 @@ def _terminate(name: str, pid: int, timeout: float) -> None:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         pass  # died between the liveness check and the signal — already what we wanted
+    except PermissionError:
+        # the liveness layer deliberately counts another user's pid as live (it proves the
+        # process exists — e.g. a stale registry entry whose pid was reused after a reboot)
+        raise UserError(
+            f'{name} (pid {pid}) is not ours to signal — stop it by hand, then re-run'
+        ) from None
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:

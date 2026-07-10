@@ -413,11 +413,16 @@ landed base (the sweep couldn't delete a checked-out branch, and that's where it
 to be anyway), stops live agent sessions in the goal's worktrees, then sweeps branches and
 worktrees via `goal finish`'s machinery. Everything refuses *before* anything moves: actors
 that have diverged (no branch contains the others — `ch goal sync` first, or `--force` to
-land the newest-committed and discard the rest), a dirty worktree or plain checkout, and a
-base with commits of its own — integrating those is rebase work for the goal's worktree
+land the newest-committed and discard the rest; the `--force` hint is dropped for AI
+sessions, whose trees don't carry the flag), a dirty worktree or plain checkout, a live
+session with no pid to signal, a base that isn't a local branch (`origin/main` would DWIM
+through every check and then mint a junk `refs/heads/origin/main`), and a base with commits
+of its own — integrating those is rebase work for the goal's worktree
 (`git rebase main` there, or however you rebase), deliberately never automated here and never
 forced: `--force` covers discarding *goal-side* work (recoverable from the ref log), but a
-non-fast-forward base move would discard `main`'s own commits. Idempotent: a re-run after a
+non-fast-forward base move would discard `main`'s own commits. The dirty check runs *again*
+once the agents are stopped — work written between the first check and the SIGTERM landing
+refuses rather than being force-swept. Idempotent: a re-run after a
 half-done landing finds the work contained and carries on with the cleanup. `--dry` previews
 the whole landing — merge, checkout moves, agent stops, sweep — changing nothing. The source
 choice lands `goal merge: source`; the base move `goal merge: refs`.

@@ -4,8 +4,9 @@ from pathlib import Path
 from giterator import GitError
 from loguru import logger
 
+from chimera.agent_env import ai_session
 from chimera.agents import Session
-from chimera.commands.agent import stop
+from chimera.commands.agent import live, stop
 from chimera.commands.worktree.rm import remove
 from chimera.config import UserError
 from chimera.dry import Dry
@@ -61,7 +62,9 @@ def merge(
     (``worktree rm``). The sweep runs forced — every check it would make has already been
     made here, in the right order around the fast-forward (and under ``dry`` the base
     hasn't really moved, so the unforced check would wrongly refuse) — which is safe
-    because everything the sweep discards is, by then, contained in ``into``.
+    because everything the sweep discards is, by then, contained in ``into``, and because
+    the dirty check reruns once the agents are dead: work written between the first check
+    and the SIGTERM landing refuses instead of being force-swept.
 
     ``force`` handles diverged actors the blunt way: the newest-committed actor branch is
     landed and the rest are discarded with the sweep (their shas recoverable from the
@@ -81,9 +84,15 @@ def merge(
     base = into if into is not None else default_branch(git)
     if base.startswith(f'{goal}/'):
         raise UserError(f"{base} is one of {goal}'s own branches — name a base like main")
-    if not git.ref_exists(base):
-        raise UserError(f'no branch {base} to merge into')
-    source = source_branch(git, goal, actors, force, command='goal merge', or_force=True)
+    if not git.ref_exists(f'refs/heads/{base}'):
+        # explicitly a local branch: bare ref_exists would let `origin/main` DWIM-resolve
+        # through every check, then have `branch -f` mint a junk refs/heads/origin/main
+        raise UserError(f'no local branch {base} to merge into')
+    # --force can resolve diverged actors here, but the flag is stripped from AI sessions'
+    # trees — never signpost capability the session can't reach
+    source = source_branch(
+        git, goal, actors, force, command='goal merge', or_force=not ai_session()
+    )
     registered = registered_worktrees(git)
     worktrees = [
         path
@@ -92,6 +101,7 @@ def merge(
     ]
     if not force:
         _refuse_if_dirty(worktrees)
+    _refuse_if_unstoppable(worktrees)  # before anything moves — stop() would only find out after
     releases = _release_plan(git, goal, actors, base)
     fastforwarded = _land(git, goal, source, base, dry)
     # source's tip is where base lands even when --dry left base unmoved; taken now, before
@@ -99,6 +109,11 @@ def merge(
     sha = git.rev_parse(source if fastforwarded else base)
     landed = tuple(_release(git, checkout, ref, base, dry) for checkout, ref in releases)
     stopped = tuple(session for path in worktrees for session in stop(path, dry))
+    if not force:
+        # again, now the agents are dead: anything written between the first check and the
+        # SIGTERM landing must refuse here — the sweep below is forced, and an uncommitted
+        # file it discarded would be the one loss the log couldn't recover
+        _refuse_if_dirty(worktrees)
     removed = tuple(remove(repo, worktrees_root, goal, force=True, fetch=False, dry=dry))
     return MergeResult(source, base, sha, fastforwarded, landed, stopped, removed)
 
@@ -148,6 +163,20 @@ def _refuse_if_dirty(worktrees: list[Path]) -> None:
     if problems:
         joined = '\n  '.join(problems)
         raise UserError(f'refusing to merge (use --force to discard):\n  {joined}')
+
+
+def _refuse_if_unstoppable(worktrees: list[Path]) -> None:
+    """A live session :func:`chimera.commands.agent.stop` couldn't stop refuses up front.
+
+    ``stop`` itself refuses a pid-less session, but merge only calls it after the base has
+    moved — knowable-now problems must refuse before anything does.
+    """
+    for path in worktrees:
+        for session in live(path):
+            if session.pid is None:
+                raise UserError(
+                    f'{session.name} reports no pid — stop it from its own harness, then re-run'
+                )
 
 
 def _land(git: Git, goal: str, source: str, base: str, dry: Dry) -> bool:

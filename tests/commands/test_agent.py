@@ -1235,3 +1235,18 @@ def test_agent_stop_cli_with_nothing_live(
             {'goal': 'g', 'actor': None, 'dry': False, 'project': None},
         ),
     )
+
+
+def test_stop_refuses_a_session_that_is_not_ours_to_signal(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    replace.in_module(live, lambda worktree: [_session_with(4242, tmpdir.path)])
+
+    def deny(pid: int, sig: int) -> None:
+        raise PermissionError(1, 'Operation not permitted')
+
+    replace(target=os.kill, container=os, name='kill', replacement=deny)
+    with ShouldRaise(
+        UserError('p@g@agent (pid 4242) is not ours to signal — stop it by hand, then re-run')
+    ):
+        stop(tmpdir.path)

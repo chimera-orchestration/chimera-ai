@@ -9,7 +9,8 @@ from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.agents import Session
-from chimera.commands.agent import live
+from chimera.commands.agent import live, stop
+from chimera.commands.goal import merge as merge_mod
 from chimera.commands.goal.merge import MergeResult, merge
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
@@ -21,7 +22,8 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live, lambda worktree: [])
+    replace.in_module(live, lambda worktree: [])  # what stop() consults
+    replace.in_module(live, lambda worktree: [], module=merge_mod)  # merge's own pre-flight
 
 
 def _short(repo_path: Path, ref: str) -> str:
@@ -107,7 +109,8 @@ def test_equivalent_tips_prefer_the_human_branch(tmpdir: TempDir, git_repo: Repo
     )
 
 
-def test_refuses_diverged_actors(tmpdir: TempDir, git_repo: Repo) -> None:
+def _diverged(tmpdir: TempDir, git_repo: Repo) -> Path:
+    """The goal's actors with a commit each — no branch contains the other. Returns worktrees."""
     worktrees = _goal(tmpdir, git_repo.path)
     Repo(worktrees / 'g@agent').commit_content('agent-work')
     git = Git(git_repo.path)
@@ -115,11 +118,30 @@ def test_refuses_diverged_actors(tmpdir: TempDir, git_repo: Repo) -> None:
     checkout = tmpdir / 'human'
     git('worktree', 'add', str(checkout), 'g/human')
     Repo(checkout).commit_content('human-work')
+    return worktrees
+
+
+def test_refuses_diverged_actors(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _diverged(tmpdir, git_repo)
     with ShouldRaise(
         UserError(
             'no actor branch contains all the others (g/agent, g/human) — '
             'ch goal sync g so one does, or --force to land the newest-committed '
             'and discard the rest'
+        )
+    ):
+        merge(git_repo.path, worktrees, 'g')
+
+
+def test_diverged_refusal_never_advertises_force_to_an_ai_session(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _diverged(tmpdir, git_repo)
+    replace.in_environ('CHIMERA_ROLE', 'manager')  # --force is stripped from this session's tree
+    with ShouldRaise(
+        UserError(
+            'no actor branch contains all the others (g/agent, g/human) — '
+            'ch goal sync g so one does'
         )
     ):
         merge(git_repo.path, worktrees, 'g')
@@ -249,8 +271,57 @@ def test_refuses_a_goal_with_no_branches(tmpdir: TempDir, git_repo: Repo) -> Non
 
 def test_refuses_a_missing_base(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo.path)
-    with ShouldRaise(UserError('no branch release to merge into')):
+    with ShouldRaise(UserError('no local branch release to merge into')):
         merge(git_repo.path, worktrees, 'g', into='release')
+
+
+def test_refuses_a_remote_tracking_base(tmpdir: TempDir, git_repo: Repo) -> None:
+    worktrees = _goal(tmpdir, git_repo.path)
+    # the ref exists, so DWIM would resolve it everywhere — but `branch -f` would mint a
+    # junk local refs/heads/origin/main instead of moving anything real
+    Git(git_repo.path)('update-ref', 'refs/remotes/origin/main', 'main')
+    with ShouldRaise(UserError('no local branch origin/main to merge into')):
+        merge(git_repo.path, worktrees, 'g', into='origin/main')
+
+
+def test_refuses_work_written_while_the_agents_stopped(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo.path)
+    agent_worktree = worktrees / 'g@agent'
+    Repo(agent_worktree).commit_content('work')
+
+    def dirty_stop(worktree: Path, dry: Dry = Dry()) -> list[Session]:
+        (worktree / 'death-rattle.txt').write_text('written between the check and the SIGTERM')
+        return []
+
+    replace.in_module(stop, dirty_stop, module=merge_mod)
+    with ShouldRaise(
+        UserError(
+            f'refusing to merge (use --force to discard):\n'
+            f'  {agent_worktree} has uncommitted or untracked changes'
+        )
+    ):
+        merge(git_repo.path, worktrees, 'g')
+    # the fast-forward had already happened (idempotent re-run continues), but nothing swept
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
+    assert agent_worktree.is_dir()
+
+
+def test_refuses_a_pidless_session_before_anything_moves(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo.path)
+    agent_worktree = worktrees / 'g@agent'
+    Repo(agent_worktree).commit_content('work')
+    session = Session('x', 'p@g@agent', 'idle', agent_worktree, None)  # no pid to signal
+    replace.in_module(live, lambda worktree: [session], module=merge_mod)
+    main_before = _full(git_repo.path, 'main')
+    with ShouldRaise(
+        UserError('p@g@agent reports no pid — stop it from its own harness, then re-run')
+    ):
+        merge(git_repo.path, worktrees, 'g')
+    compare(_full(git_repo.path, 'main'), expected=main_before)
 
 
 def test_refuses_a_goal_branch_as_base(tmpdir: TempDir, git_repo: Repo) -> None:
