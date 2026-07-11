@@ -7,7 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
   "typer>=0.26.8",
   "pydantic>=2.13.4",
-  "giterator>=1.0.0",
+  "giterator>=1.1.0",
   "pyyaml>=6.0.3",
   "loguru>=0.7.3",
 ]
@@ -26,15 +26,19 @@ dev = [
   "ruff>=0.15.20",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
-  "testfixtures>=12.2.0",
+  "testfixtures>=12.3.0",
   "sybil>=10.1.0",
 ]
 docs = ["sphinx>=9.1.0", "furo>=2025.12.19"]
 
 [tool.uv]
+required-version = ">=0.11.28"
 exclude-newer = "1 week"
-# giterator: remove ~2026-07-13 (1.0.0 published 2026-07-06)
-exclude-newer-package = { giterator = false }
+# Pinned past their release so the 1-week window doesn't exclude them; drop once the
+# global window ages past each release date on its own.
+# giterator: remove ~2026-07-17 (1.1.0 published 2026-07-10)
+# testfixtures: remove ~2026-07-15 (12.3.0 published 2026-07-08)
+exclude-newer-package = { giterator = "2026-07-11", testfixtures = "2026-07-11" }
 
 [build-system]
 requires = ["hatchling"]
