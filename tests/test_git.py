@@ -47,7 +47,7 @@ class TestTrace:
         replace.in_environ(var, 'zsh_complete')
         with _trace() as log:
             Git(git_repo.path)('rev-parse', '--git-dir')
-        log.check()
+        log.check_empty()
 
 
 class TestEnv:
@@ -124,7 +124,7 @@ class TestRefLog:
         with _refs() as log:
             with Git(git_repo.path).ref_log('demo: refs', 'HEAD'):
                 pass
-        log.check()
+        log.check_empty()
 
     def test_always_logs_even_unchanged(self, git_repo: Repo) -> None:
         git = Git(git_repo.path)

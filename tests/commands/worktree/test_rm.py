@@ -228,7 +228,7 @@ def test_remove_dry_logs_no_refs(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         remove(git_repo.path, worktrees, 'g', dry=Dry(on=True))
-    log.check()  # nothing deleted → no ref record
+    log.check_empty()  # nothing deleted → no ref record
 
 
 def test_remove_allows_a_squash_merged_branch(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -306,7 +306,7 @@ def test_remove_force_logs_the_discarded_refs(tmpdir: TempDir, git_repo: Repo) -
 def test_remove_a_ghost_goal_logs_nothing(tmpdir: TempDir, git_repo: Repo) -> None:
     with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         remove(git_repo.path, tmpdir / 'worktrees', 'ghost')
-    log.check()  # no refs changed → no ref record
+    log.check_empty()  # no refs changed → no ref record
 
 
 def test_remove_uses_the_repos_default_branch(tmpdir: TempDir) -> None:

@@ -340,7 +340,7 @@ class TestCheckoutHere:
             result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
         compare(result, expected=Checkout(False, git_repo.path.resolve(), 'g/human', was='main'))
         compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
-        log.check()  # nothing moved
+        log.check_empty()  # nothing moved
 
     def test_skips_outside_a_git_repo(self, tmpdir: TempDir, git_repo: Repo) -> None:
         assert checkout_here(Git(git_repo.path), 'main', tmpdir.makedir('plain'), 'x') is None
@@ -376,7 +376,7 @@ class TestCheckoutHere:
         git('checkout', '-q', '-b', 'g/human')  # already here
         with _refs_log() as log:
             assert checkout_here(git, 'g/human', git_repo.path, 'x') is None
-        log.check()
+        log.check_empty()
 
     def test_skips_when_the_branch_is_checked_out_elsewhere(
         self, tmpdir: TempDir, git_repo: Repo

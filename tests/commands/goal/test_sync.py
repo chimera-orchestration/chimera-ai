@@ -61,7 +61,7 @@ def test_is_a_noop_when_already_at_the_target(tmpdir: TempDir, git_repo: Repo) -
     compare(
         result, expected=SyncResult(Outcome.NOOP, 'human', 'agent', _short(git_repo, 'g/agent'))
     )
-    log.check()  # no ref changed → no ref record
+    log.check_empty()  # no ref changed → no ref record
 
 
 def test_fast_forwards_a_bare_mover(tmpdir: TempDir, git_repo: Repo) -> None:
@@ -137,7 +137,7 @@ def test_leaves_a_mover_that_leads_the_target(tmpdir: TempDir, git_repo: Repo) -
             Outcome.AHEAD, 'human', 'agent', _short(git_repo, 'g/human'), ahead_by=1
         ),
     )
-    log.check()  # nothing moved
+    log.check_empty()  # nothing moved
 
 
 def _squash_human(git_repo: Repo, tmpdir: TempDir) -> Path:

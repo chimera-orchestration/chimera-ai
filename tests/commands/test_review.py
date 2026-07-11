@@ -484,7 +484,7 @@ def test_review_dry_wires_nothing(tmpdir: TempDir, replace: Replacer) -> None:
         git('config', '--get-all', 'remote.origin.fetch').splitlines(),
         expected=['+refs/heads/*:refs/remotes/origin/*'],
     )
-    log.check()  # no refs changed, so no 'review: refs' line
+    log.check_empty()  # no refs changed, so no 'review: refs' line
 
 
 def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command) -> None:

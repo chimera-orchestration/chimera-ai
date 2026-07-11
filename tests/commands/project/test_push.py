@@ -108,7 +108,7 @@ def test_push_dry_mutates_nothing(tmpdir: TempDir, git_repo: Repo) -> None:
     target = _target(tmpdir)
     with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
         compare(push(git_repo.path, str(target), dry=Dry(on=True)), expected='main')
-    log.check()  # no pushed line either
+    log.check_empty()  # no pushed line either
     compare(Git(target).branches(), expected=[])
     git = Git(git_repo.path)
     assert not git('remote').strip()

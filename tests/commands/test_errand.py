@@ -328,7 +328,7 @@ class TestErrand:
         assert not (tmpdir / 'wt').exists()  # no worktree tree
         assert not (tmpdir / 'r.md').exists()  # no report file
         compare(Git(git_repo.path).branches(), expected=['main'])  # no branch
-        log.check()  # no refs changed, so no ref lines either
+        log.check_empty()  # no refs changed, so no ref lines either
 
 
 def _workspace_project(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> Path:
