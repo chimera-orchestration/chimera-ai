@@ -29,8 +29,8 @@ def new(workspace: Path, name: str, checkout: Path | None = None) -> Path:
     repo = project / 'repo'
     if (project / 'config.yaml').exists() or repo.exists():
         raise UserError(f'project {name} already exists at {project}')
-    Git(workspace)('init', '--bare', '-b', BRANCH, str(repo))
     git = Git(repo)
+    git.init(branch=BRANCH, bare=True)
     empty_tree = git('hash-object', '-w', '-t', 'tree', os.devnull).strip()
     with git.ref_log('project new: refs', BRANCH):
         seed = git('commit-tree', empty_tree, '-m', SEED_MESSAGE).strip()
