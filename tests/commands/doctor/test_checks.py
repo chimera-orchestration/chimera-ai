@@ -5,6 +5,7 @@ import yaml
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, TempDir, compare, not_there
 from testfixtures.loguru import LoguruSource
+from testfixtures.popen import MockPopen, shell_join
 
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.git import Git
@@ -1507,13 +1508,9 @@ class TestFblog:
 
     def test_fix_installs(self, tmpdir: TempDir, replace: Replacer) -> None:
         _no_fblog(replace, brew='/opt/homebrew/bin/brew')
-        calls = []
-
-        def fake_run(cmd, **kw):
-            calls.append(cmd)
-            return subprocess.CompletedProcess(cmd, 0, stdout='', stderr='')
-
-        replace.in_module(subprocess.run, fake_run)
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(shell_join(['brew', 'install', 'fblog']))
         compare(
             _run(FblogCheck(), _ws(tmpdir), fix=True),
             expected=[
@@ -1522,15 +1519,16 @@ class TestFblog:
                 )
             ],
         )
-        compare(calls, expected=[['brew', 'install', 'fblog']])
 
     def test_fix_brew_failure_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
         _no_fblog(replace, brew='/opt/homebrew/bin/brew')
-
-        def fail_run(cmd, **kw):
-            raise subprocess.CalledProcessError(1, cmd, stderr='Error: no bottle\n')
-
-        replace.in_module(subprocess.run, fail_run)
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(
+            shell_join(['brew', 'install', 'fblog']),
+            stderr=b'Error: no bottle\n',
+            returncode=1,
+        )
         compare(
             _run(FblogCheck(), _ws(tmpdir), fix=True),
             expected=[
@@ -1647,40 +1645,39 @@ def _no_claude(cmd, **kw):
 _real_run = subprocess.run
 
 
+def _commit_cmd() -> str:
+    return shell_join(['claude', '-p', doctor_checks._COMMIT_PROMPT, '--model', 'haiku'])
+
+
+def _missing_claude(command: str, stdin: object) -> None:
+    raise FileNotFoundError('claude')
+
+
 class TestCommitMessage:
     def test_uses_the_models_reply(self, replace: Replacer) -> None:
-        seen: dict[str, object] = {}
-
-        def fake_run(cmd, *, input, capture_output, text, check):
-            seen.update(cmd=cmd, input=input, capture_output=capture_output, text=text, check=check)
-            return subprocess.CompletedProcess(cmd, 0, stdout='Tidy the notes\n', stderr='')
-
-        replace.in_module(subprocess.run, fake_run)
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(_commit_cmd(), stdout=b'Tidy the notes\n')
         compare(commit_message('a staged diff'), expected='Tidy the notes')
-        compare(
-            seen,
-            expected={
-                'cmd': ['claude', '-p', doctor_checks._COMMIT_PROMPT, '--model', 'haiku'],
-                'input': 'a staged diff',
-                'capture_output': True,
-                'text': True,
-                'check': True,
-            },
-        )
+        root_call = Popen.all_calls[0]
+        assert root_call.communicate('a staged diff', timeout=None) in Popen.all_calls
 
     def test_empty_reply_falls_back(self, replace: Replacer) -> None:
-        replace.in_module(
-            subprocess.run,
-            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout='  \n', stderr=''),
-        )
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(_commit_cmd(), stdout=b'  \n')
         compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
 
     def test_claude_missing_falls_back(self, replace: Replacer) -> None:
-        replace.in_module(subprocess.run, _raise(FileNotFoundError('claude')))
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(_commit_cmd(), behaviour=_missing_claude)
         compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
 
     def test_nonzero_exit_falls_back(self, replace: Replacer) -> None:
-        replace.in_module(subprocess.run, _raise(subprocess.CalledProcessError(1, 'claude')))
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(_commit_cmd(), returncode=1)
         compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
 
 

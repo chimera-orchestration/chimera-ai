@@ -3,13 +3,13 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from string import Template
-from subprocess import CompletedProcess
 
 from giterator import GitError
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 from testfixtures.mock import Mock
+from testfixtures.popen import MockPopen
 
 import chimera.__main__ as main
 from chimera.commands import review as review_mod
@@ -18,6 +18,7 @@ from chimera.dry import Dry
 from chimera.commands.agent import agent
 from chimera.commands.review import (
     GUARDRAIL,
+    _PR_FIELDS,
     _check_pr_repo,
     _default_template,
     _pr_argument,
@@ -283,17 +284,19 @@ def test_default_template_ships_as_package_data() -> None:
 
 
 def test_pr_metadata_parses_gh_json(tmpdir: TempDir, replace: Replacer) -> None:
-    replace.in_module(
-        subprocess.run,
-        lambda *a, **k: CompletedProcess(a, 0, stdout='{"number": 7, "title": "t"}', stderr=''),
-    )
+    Popen = MockPopen()
+    replace.in_module(subprocess.Popen, Popen)
+    Popen.set_command(f'gh pr view 7 --json {_PR_FIELDS}', stdout=b'{"number": 7, "title": "t"}')
     compare(_pr_metadata(tmpdir.path, '7'), expected={'number': 7, 'title': 't'})
 
 
 def test_pr_metadata_raises_on_gh_failure(tmpdir: TempDir, replace: Replacer) -> None:
-    replace.in_module(
-        subprocess.run,
-        lambda *a, **k: CompletedProcess(a, 1, stdout='', stderr='no pull requests found'),
+    Popen = MockPopen()
+    replace.in_module(subprocess.Popen, Popen)
+    Popen.set_command(
+        f'gh pr view 999 --json {_PR_FIELDS}',
+        stderr=b'no pull requests found',
+        returncode=1,
     )
     with ShouldRaise(UserError('gh pr view 999 failed: no pull requests found')):
         _pr_metadata(tmpdir.path, '999')
