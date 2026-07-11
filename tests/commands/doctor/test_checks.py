@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+from typing import NoReturn
 
 import yaml
 from giterator.testing import Repo
@@ -1543,7 +1544,8 @@ class TestFblog:
 
     def test_excluded_is_not_fixed(self, tmpdir: TempDir, replace: Replacer) -> None:
         _no_fblog(replace, brew='/opt/homebrew/bin/brew')
-        replace.in_module(subprocess.run, _raise(AssertionError('must not install')))
+        # nothing registered: a real attempt to install would raise, not silently succeed
+        replace.in_module(subprocess.Popen, MockPopen())
         compare(
             _run(FblogCheck(), _ws(tmpdir), fix=True, exclude=Exclusions(('fblog',))),
             expected=[Finding('fblog', _FBLOG_MISSING, resolved=False, fixable=True)],
@@ -1649,7 +1651,7 @@ def _commit_cmd() -> str:
     return shell_join(['claude', '-p', doctor_checks._COMMIT_PROMPT, '--model', 'haiku'])
 
 
-def _missing_claude(command: str, stdin: object) -> None:
+def _missing_claude(command: str, stdin: object) -> NoReturn:
     raise FileNotFoundError('claude')
 
 
@@ -1679,10 +1681,3 @@ class TestCommitMessage:
         replace.in_module(subprocess.Popen, Popen)
         Popen.set_command(_commit_cmd(), returncode=1)
         compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
-
-
-def _raise(error: Exception):
-    def run(cmd, **kw):
-        raise error
-
-    return run
