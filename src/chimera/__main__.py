@@ -32,6 +32,7 @@ from chimera.agents.registry import AgentSpec, resolve_spec
 from chimera.commands.agent import agents, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
+from chimera.commands.agent import stop as _agent_stop
 from chimera.commands.chat import chat as _chat
 from chimera.commands.chat import chat_target
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
@@ -40,6 +41,8 @@ from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.errand import errand as _errand
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
+from chimera.commands.goal.merge import merge as _goal_merge
+from chimera.commands.goal.pr import pr as _goal_pr
 from chimera.commands.goal.rename import rename as _goal_rename
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
@@ -167,6 +170,32 @@ SyncForceOpt = Annotated[
 ]
 DryOpt = Annotated[
     bool, typer.Option('--dry', help='Preview what would be removed; change nothing')
+]
+IntoOpt = Annotated[
+    str | None,
+    typer.Option('--into', help='Branch to land the goal on (default: the repo default branch)'),
+]
+MergeForceOpt = Annotated[
+    bool,
+    typer.Option(
+        '--force',
+        help='Land the newest-committed actor branch even when the actors have diverged, '
+        'discarding the others; skips the dirty-worktree check too (the fast-forward rule '
+        'is never forced)',
+    ),
+]
+MergeDryOpt = Annotated[
+    bool,
+    typer.Option('--dry', help='Preview the merge, agent stop and sweep; change nothing'),
+]
+DraftOpt = Annotated[bool, typer.Option('--draft', help='Open the PR as a draft')]
+PrDryOpt = Annotated[
+    bool,
+    typer.Option('--dry', help='Preview the push and PR, title and body included; change nothing'),
+]
+StopDryOpt = Annotated[
+    bool,
+    typer.Option('--dry', help='Preview which sessions would be stopped; change nothing'),
 ]
 DangerousOpt = Annotated[
     bool,
@@ -1305,6 +1334,70 @@ def goal_rename(
         typer.echo(f'note: your cwd moved — cd {result.cwd_moved_to}')
 
 
+@goal_app.command(
+    'merge',
+    cls=LoggingCommand,
+    help="Land a finished goal: fast-forward the base branch to its work, stop its agent, "
+    'and sweep its branches and worktrees.',
+)
+@logs(_goal_merge)
+def goal_merge(
+    ctx: typer.Context,
+    goal: ExistingGoalArg,
+    into: IntoOpt = None,
+    force: MergeForceOpt = False,
+    offline: OfflineOpt = False,
+    dry: MergeDryOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    p = _project(ctx, project)
+    dry_run = Dry(dry)
+    result = _goal_merge(p.repo, p.worktrees, goal, into, force, fetch=not offline, dry=dry_run)
+    if result.fastforwarded:
+        verb = dry_run.verb('Fast-forwarded', 'Would fast-forward')
+        typer.echo(f'{verb} {result.into} to {result.source} ({result.sha})')
+    else:
+        typer.echo(f'{result.into} already contains {result.source} ({result.sha})')
+    for landed in result.landed:
+        verb = dry_run.verb('Checked out', 'Would check out')
+        typer.echo(f'{verb} {landed.branch} at {landed.where} (was {landed.was})')
+    for session in result.stopped:
+        typer.echo(f'{dry_run.verb("Stopped", "Would stop")} {session.name} (pid {session.pid})')
+    _report_removed(list(result.removed), goal, dry_run)
+
+
+@goal_app.command(
+    'pr',
+    cls=LoggingCommand,
+    help='Publish a finished goal as a pull request: push its work to origin as the goal '
+    'name and open the PR; local branches stay.',
+)
+@logs(_goal_pr)
+def goal_pr(
+    ctx: typer.Context,
+    goal: ExistingGoalArg,
+    into: IntoOpt = None,
+    draft: DraftOpt = False,
+    offline: OfflineOpt = False,
+    dry: PrDryOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    p = _project(ctx, project)
+    dry_run = Dry(dry)
+    result = _goal_pr(p.repo, p.name, p.prompts, goal, into, draft, fetch=not offline, dry=dry_run)
+    verb = dry_run.verb('Pushed', 'Would push')
+    typer.echo(f'{verb} {result.source} to origin as {result.remote_branch} ({result.sha})')
+    if result.created:
+        typer.echo(f'Opened PR: {result.url}')
+    elif result.url is not None:
+        typer.echo(f'PR already open: {result.url}')
+    else:
+        typer.echo(f'Would open a PR against {result.base}:')
+        typer.echo(f'title: {result.title}')
+        if result.body:
+            typer.echo(result.body)
+
+
 @goal_app.command('finish', cls=LoggingCommand, help="Remove a goal's worktrees and branches.")
 @logs(_worktree_remove)
 def goal_finish(
@@ -1400,6 +1493,30 @@ def agent_resume(
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
         _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
+
+
+@agent_app.command(
+    'stop', cls=LoggingCommand, help="Stop the live agent session in a goal's worktree."
+)
+@logs(_agent_stop)
+def agent_stop(
+    ctx: typer.Context,
+    goal: GoalOpt = None,
+    actor: ActorOpt = None,
+    dry: StopDryOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    overrides = _overrides(ctx)
+    p = _project(ctx, project)
+    g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
+    a = require_valid_actor(actor or overrides.actor or AGENT)
+    worktree = worktree_path(p.worktrees, g, a)
+    dry_run = Dry(dry)
+    stopped = _agent_stop(worktree, dry_run)
+    for session in stopped:
+        typer.echo(f'{dry_run.verb("Stopped", "Would stop")} {session.name} (pid {session.pid})')
+    if not stopped:
+        typer.echo(f'No live agent in {worktree}')
 
 
 @agent_app.command('ls', cls=LoggingCommand, help='List running agents.')

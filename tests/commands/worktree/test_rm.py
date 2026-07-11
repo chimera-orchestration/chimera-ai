@@ -113,11 +113,15 @@ def test_remove_sweeps_the_goals_sync_watermarks(tmpdir: TempDir, git_repo: Repo
     marker = common / 'chimera' / 'appending' / 'g@human'  # a conflicted-append marker
     marker.parent.mkdir(parents=True)
     marker.write_text('before=x\ntarget=y\n')
+    description = common / 'chimera' / 'pr' / 'g'  # a `goal pr` cached description
+    description.parent.mkdir(parents=True)
+    description.write_text('key\ntitle\n\nbody')
     remove(git_repo.path, worktrees, 'g')
     compare(
         git('for-each-ref', '--format=%(refname)', 'refs/chimera/synced/g/').strip(), expected=''
     )
     assert not marker.exists()
+    assert not description.exists()
 
 
 def test_remove_refuses_uncommitted_changes(tmpdir: TempDir, git_repo: Repo) -> None:

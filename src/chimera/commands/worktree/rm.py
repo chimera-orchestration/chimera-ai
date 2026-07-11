@@ -76,15 +76,18 @@ def _sync_refs(git: Git, goal: str) -> tuple[str, ...]:
 
 
 def _clear_markers(git: Git, goal: str, dry: Dry) -> None:
-    """Remove any transient append-in-progress markers the goal left in the shared git dir."""
-    appending = (
-        Path(git('rev-parse', '--path-format=absolute', '--git-common-dir').strip())
-        / 'chimera'
-        / 'appending'
+    """Remove transient state the goal left in the shared git dir: ``goal sync``'s
+    append-in-progress markers and ``goal pr``'s cached description."""
+    chimera = (
+        Path(git('rev-parse', '--path-format=absolute', '--git-common-dir').strip()) / 'chimera'
     )
+    appending = chimera / 'appending'
     if appending.is_dir():
         for marker in appending.glob(f'{goal}{SEP}*'):
             dry(marker.unlink)
+    description = chimera / 'pr' / goal
+    if description.is_file():
+        dry(description.unlink)
 
 
 def refuse_if_agents_running(worktrees: Iterable[Path]) -> None:

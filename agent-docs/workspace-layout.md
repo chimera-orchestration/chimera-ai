@@ -404,6 +404,64 @@ checkout of `main` next to (not managed by) chimera's goal worktrees.
 
 **Append (the squash case).** A **watermark** ref `refs/chimera/synced/<goal>/<mover>` records the target sha last integrated; the new commits are `<watermark>..<target>`, cherry-picked onto the mover, so a squashed history gains the new work without re-applying what was folded in. A range carrying merge commits is refused — once the target has rebased onto or merged in other work, the range sweeps in history that isn't the target's own (and cherry-pick can't replay a merge); `--force` is the way through. The watermark is set on every integrating outcome. A legacy branch with no watermark is auto-seeded by matching the mover tip's *tree* to a target commit (a faithful squash preserves the tree); a squash that also carries the human's own edits matches nothing and is refused (do that first integration by hand — there's no seed flag). The append needs the mover **checked out** (bare → refused) and clean; a faithful squash applies conflict-free, but a conflict against the human's own edits is **left in the checkout** to resolve and `git cherry-pick --continue` (exit 1). A transient marker (`<git-common-dir>/chimera/appending/<goal>@<mover>`) lets a re-run tell a finished append (advance the watermark) from an aborted one (retry), and blocks a re-run while a cherry-pick is still in progress. Any cherry-pick already live in the mover's checkout — even one sync didn't start — blocks an append, and a replay that dies without leaving a conflict to resolve is rolled back, never left half-applied. The mover and watermark shas ride the `goal sync: refs` log line; `goal finish` sweeps a goal's watermark refs and markers.
 
+`ch goal merge <goal> [--into <branch>]` is the manager's finish-up: land a finished goal on
+`--into` (default: the repo's default branch) and clean everything away. It picks the goal's
+**source** branch — the actor branch containing every other actor's work (`is_merged`, so a
+squashed human branch still counts; equivalent tips prefer `human`, the curated history) —
+fast-forwards the base to its tip, moves any plain checkout sitting on a goal branch onto the
+landed base (the sweep couldn't delete a checked-out branch, and that's where its human wants
+to be anyway), stops live agent sessions in the goal's worktrees, then sweeps branches and
+worktrees via `goal finish`'s machinery. Everything refuses *before* anything moves: actors
+that have diverged (no branch contains the others — `ch goal sync` first, or `--force` to
+land the newest-committed and discard the rest; the `--force` hint is dropped for AI
+sessions, whose trees don't carry the flag), a dirty worktree or plain checkout, a live
+session with no pid to signal, a base that isn't a local branch (`origin/main` would DWIM
+through every check and then mint a junk `refs/heads/origin/main`), and a base with commits
+of its own — integrating those is rebase work for the goal's worktree
+(`git rebase main` there, or however you rebase), deliberately never automated here and never
+forced: `--force` covers discarding *goal-side* work (recoverable from the ref log), but a
+non-fast-forward base move would discard `main`'s own commits. The dirty check runs *again*
+once the agents are stopped — work written between the first check and the SIGTERM landing
+refuses rather than being force-swept. Idempotent: a re-run after a
+half-done landing finds the work contained and carries on with the cleanup. `--dry` previews
+the whole landing — merge, checkout moves, agent stops, sweep — changing nothing. The source
+choice lands `goal merge: source`; the base move `goal merge: refs`.
+
+`ch goal pr <goal> [--into <branch>] [--draft]` is `goal merge`'s remote-review sibling: the
+same source selection, but the source's tip is pushed to `origin` as branch `<goal>` (the
+actor suffix is local plumbing; the goal name is the publication) and a PR opened via `gh`
+against `--into` (default: the repo's default branch). The base must already be on origin —
+the PR targets origin's branch, and the goal's commits are counted against origin's view of
+it — so a local-only base refuses (push it first) rather than failing server-side after the
+push. Nothing local is deleted or stopped —
+the goal keeps working until the PR lands, after which `goal merge` (or `goal finish`) cleans
+up as usual. Title and body: a single-commit branch reuses its subject and body verbatim —
+the same content GitHub itself prefills from a lone commit, computed locally so `--dry` can
+preview it. A multi-commit branch's description is *written* by a model
+(`claude -p --model haiku`, doctor's workspace-clean pattern) from the project's own
+`prompts/pr.md` when present, else the packaged default — the customisation point: a
+project's template encodes its own PR dance (required sections, ticket-linking conventions),
+the default asks for a succinct *why* with any referenced tickets/issues/threads linked and
+forbids restating the diff or commit list. Template holes: `$PROJECT $GOAL $BASE $SOURCE
+$COMMITS` (the full messages, oldest first); first output line is the title, the rest the
+body. A model failure or empty answer refuses with the `gh pr create` line to run by hand —
+never a placeholder description. The written description is cached in the repo's shared git
+dir keyed by the exact prompt and reused while that's unchanged — the title/body a `--dry`
+previewed are byte-for-byte what the later run ships, never a fresh model run's different
+words (`goal pr: description` logs the path, key and whether it was reused; `goal finish`
+sweeps the cache with the goal's other transient markers). Idempotent: a re-run re-pushes
+(git refuses a non-fast-forward, e.g. after a rebase — resolve by hand) and reports an
+already-open PR instead of duplicating it — found *before* any composing, so no model run is
+spent on a description the open PR already carries. The pushed remote-tracking ref rides
+`goal pr: refs`; the PR lands `goal pr: opened`/`goal pr: existing`. `--dry` resolves
+everything — source, commits, title, body — and pushes and opens nothing.
+
+`ch agent stop [-g <goal>] [-a <actor>]` stops the live agent session in a goal's worktree:
+SIGTERM to its pid, waiting (10s) for it to exit — never SIGKILL; a session that won't die,
+or reports no pid to signal, is refused for a human to inspect, as is a goal/actor with no
+worktree at all (a typo must never read as "nothing running"). `goal merge` calls the same
+machinery before its sweep. `--dry` previews which sessions would be stopped.
+
 `ch review <PR|url>` stands a goal up from a pull request and launches a pre-human review agent. A project with no `origin` at all (workspace-only, not yet pushed) is refused up front, pointing at `ch project push`. It resolves the PR through `gh` (authoritative `headRefOid`); the *project* is still resolved from cwd/`-p`, so a URL naming a repo other than the resolved project's github origin is refused up front (both must carry a github identity — a local-path origin skips the check). The URL needn't be github's: any review tool's URL that embeds `owner/repo` and the PR number in its path (reviewable.io, graphite, …) works generically — the origin's slug is located in the path and the first numeric segment after it is the number, no per-tool table; a URL not naming the origin's repo (or a local-path origin, with no slug to match) is refused with a pointer to pass the number. It then fetches `refs/pull/<N>/head` into the `origin/pr/<N>` remote-tracking ref (targeted, so a missing PR ref fails cleanly), persists the refspec only after that fetch succeeds (so `git status` compares against the PR without a failed run leaving a dead refspec that bricks future fetches), verifies the fetch matches `headRefOid`, then branches `pr-<N>/{human,agent}` off that verified head with the PR ref as upstream — reusing `worktree add`, so a re-run only relaunches. The agent's prompt is the project's `prompts/review.md` (rendered with `string.Template`; `$PR $PR_URL $PR_TITLE $BASE $GOAL $PROJECT`) if present, else a packaged default, always behind a hardcoded guardrail forbidding any post to the PR — publishing stays the human's call. Like `goal sync`, a clean project-repo cwd is landed on `pr-<N>/human`. `--no-agent` stops after that checkout — branches, worktree and upstream all stand, but no agent launches (the output hints both follow-ups: `ch agent start -g <goal>` for an agent, re-running `ch review <N>` for the standard review); the agent-only knobs (`--dangerous`, `-- …` passthrough) are refused with it.
 
 `ch agent start` launches `claude` in an existing worktree (`--name <project>@<goal>@<actor>`); `ch agent resume` reattaches to that same session label (`claude --resume <name>`). Resume exists because `claude` has no `--cwd`: Chimera knows the worktree and sets it, so a dead session is revived in the right place from anywhere. Both run foreground, or background (`--bg`) when a `[prompt]` is given, and both refuse if a session is already live in the worktree.
