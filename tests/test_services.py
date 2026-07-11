@@ -106,19 +106,19 @@ def test_discriminator_selects_correct_type() -> None:
 
 
 def test_unknown_type_raises() -> None:
-    with ShouldRaise(ValidationError):
+    with ShouldRaise(ValidationError, match="does not match any of the expected tags"):
         adapter.validate_python(
             {"type": "unknown", "name": "x", "use": "y", "ports": {}, "started_at": STARTED}
         )
 
 
 def test_missing_type_raises() -> None:
-    with ShouldRaise(ValidationError):
+    with ShouldRaise(ValidationError, match="Unable to extract tag using discriminator"):
         adapter.validate_python({"name": "x", "use": "y", "ports": {}, "started_at": STARTED})
 
 
 def test_missing_type_specific_field_raises() -> None:
-    with ShouldRaise(ValidationError):
+    with ShouldRaise(ValidationError, match=r"tmux\.session\s+Field required"):
         adapter.validate_python(
             {"type": "tmux", "name": "x", "use": "y", "ports": {}, "started_at": STARTED}
         )

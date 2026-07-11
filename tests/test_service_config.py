@@ -124,7 +124,7 @@ services:
     use: bad
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
-    with ShouldRaise(ValidationError):
+    with ShouldRaise(ValidationError, match="does not match any of the expected tags"):
         load_services_config(path)
 
 
@@ -136,7 +136,7 @@ services:
     use: cache
 """
     path = tmpdir.write("services-config.yaml", yaml_text.encode())
-    with ShouldRaise(ValidationError):
+    with ShouldRaise(ValidationError, match=r"docker\.image\s+Field required"):
         load_services_config(path)
 
 

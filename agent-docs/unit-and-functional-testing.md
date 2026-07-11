@@ -39,21 +39,34 @@ inherently True/False and a failure needs no diff to read.
 Assert raised exceptions with `ShouldRaise` from testfixtures — never `pytest.raises`:
 - `ShouldRaise(SomeError(...))` — the **exact** exception instance (type *and* message). The
   default; mirrors the whole-object rule above. Build the message from the test's own inputs.
-- `ShouldRaise(SomeError, match='…')` — only when the message embeds something you can't
-  reconstruct (a subprocess's output, a timestamp); `match` is a substring/regex of `str(exc)`.
-- `ShouldRaise(SomeError)` — type only, when the message is genuinely uninteresting (e.g. a
-  pydantic `ValidationError`, whose text isn't ours to pin).
+- `ShouldRaise(SomeError, match='…')` — when the message embeds something you can't reconstruct
+  (a subprocess's output, a timestamp) *or* comes from a third party in a form not ours to pin
+  (a pydantic `ValidationError`'s field trace, versioned doc-link footer). `match` is a
+  substring/regex of `str(exc)` — pin the stable bit that proves *which* thing failed (a field
+  name, an error type), not the whole message.
+- `ShouldRaise(SomeError)` — type only, and only when genuinely nothing in the message is
+  stable enough to pin. Rare: a bare type check passes for *any* instance of that type, so it
+  can't distinguish "the field we broke failed validation" from "some other field failed" or
+  "validation didn't run at all" — a real gap, not a shortcut for a message that's merely
+  verbose or third-party-formatted (that's what `match=` is for).
 
 ```python
 with ShouldRaise(NotInProjectError(ws / 'ghost')):   # exact: type + message
     resolve_project(ws, 'ghost')
 with ShouldRaise(RuntimeError, match='no commits'):  # message embeds `git status` output
     add(repo.path, worktrees, 'g')
-with ShouldRaise(ValidationError):                   # type alone is the contract
+with ShouldRaise(ValidationError, match=r'docker\.image\s+Field required'):  # the right field, not just "a" ValidationError
     load_services_config(path)
 ```
 `ShouldRaise` is a context manager like `pytest.raises`; the value check lives in its argument,
 not an `assert` afterwards.
+
+`str_like`/`repr_like` (testfixtures 12.3+) also slot into `ShouldRaise` directly
+(`ShouldRaise(str_like(SomeError, '…'))`), but they check an *exact* `str()`/`repr()` (or a
+regex via their own `match=`) — reach for them only when checking an exception *outside* a
+raise (nested inside a larger `compare()`, or a constructed-not-raised instance). For "this
+raise's message contains X", `ShouldRaise(SomeError, match='X')` already does the job and is
+simpler.
 
 ## Mocking
 
