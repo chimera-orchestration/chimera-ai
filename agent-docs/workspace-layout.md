@@ -245,6 +245,11 @@ add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-dirs** — every directory the current workspace template ships (`processes/`,
   `roles/`, …) exists; derived from the template itself so it can't drift. `--fix` creates the
   dir with a `.gitkeep` (matching `ch init`), which workspace-clean then commits
+- **captain** — the workspace names its captain persona (`captain:` in the workspace
+  `config.yaml`) and `roles/captain/` holds at least one `*.md` directive for it. `--fix` writes
+  the literal default (`captain: captain`) onto a config that predates the feature — it never
+  invents a unique persona name, that stays a human's call. Missing directives are only ever
+  reported, and only once a captain is actually named, so an unnamed captain isn't flagged twice
 - **gitignore** — the workspace `.gitignore` carries every entry the current template ships
   (`state/`, `*/repo/`, …); `--fix` appends any missing ones, preserving existing/custom lines.
   Reconciles workspaces created before a template entry was added

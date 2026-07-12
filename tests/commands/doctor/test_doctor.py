@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
@@ -195,6 +196,17 @@ def test_select_checks_unknown_name_raises() -> None:
     valid = [check.name for check in CHECKS]
     with ShouldRaise(UnknownCheckError(['bogus'], valid)):
         select_checks(['bogus', 'gitignore'])
+
+
+def test_workspace_layout_doc_lists_every_check() -> None:
+    text = (Path(__file__).parents[3] / 'agent-docs' / 'workspace-layout.md').read_text()
+    section = text.split('Current checks:')[1].split('\n## ')[0]
+    documented = {
+        name
+        for bold in re.findall(r'^- \*\*(.+?)\*\*', section, flags=re.MULTILINE)
+        for name in bold.split(' / ')
+    }
+    compare(documented, expected={check.name for check in CHECKS})
 
 
 def test_doctor_logs_a_clean_check(tmpdir: TempDir, full_logs: LogCapture) -> None:
