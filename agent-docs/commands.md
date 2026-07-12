@@ -71,7 +71,7 @@ Rules:
 Every command — group *and* leaf — sets its summary via explicit `help=` (groups use
 `typer.Typer(help=…)`, leaves `@app.command(help=…)`); never a wrapper docstring (groups
 can't carry one, so docstrings would split the convention). One `help=` string is the
-single source: `--help`, `ch X help`, and `ch help` all derive from it.
+single source: `--help` and `ch help` both derive from it.
 
 `ch help` is the whole tree in one chunk — flat, plain text, terse, agent-optimised. It's
 **derived** by walking the live command objects (`chimera/help.py`), never a hand-kept
