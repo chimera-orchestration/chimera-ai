@@ -536,7 +536,7 @@ class TestErrandCli:
             'this worktree and branch are your entire workspace.'
         )
         digest = sha256(text.encode()).hexdigest()
-        artifact = ws / 'logs' / 'context' / f'proj@errand-abc123@agent-{digest[:8]}.md'
+        artifact = ws / 'state' / 'context' / f'proj@errand-abc123@agent-{digest[:8]}.md'
         sources = context_sources(ws, 'agent', pinned=ws / 'proj')
         start, end = action_logs('errand', 'chimera.commands.errand.errand', _params(dry=True))
         command.run('errand', 'proj', 'q', '--dry').check(

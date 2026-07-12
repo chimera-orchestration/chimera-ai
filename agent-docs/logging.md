@@ -1,6 +1,6 @@
 # Logging
 
-One JSONL sink: `<workspace>/logs/chimera.jsonl` (gitignored), written by loguru through a
+One JSONL sink: `<workspace>/state/log.jsonl` (gitignored), written by loguru through a
 custom one-line-JSON format (see `chimera/logging.py`). Every CLI action lands a start/end
 pair through `LoggingCommand` → `log_start`/`log_finish`.
 
@@ -41,7 +41,7 @@ field of every record (params, git before/after maps, full tracebacks).
 
 Every git subprocess runs through `chimera.git.Git` (never `giterator.Git` directly), whose
 `__call__` lands a DEBUG line *before* the command runs — so a hung fetch is on record while it
-hangs (`tail -f logs/chimera.jsonl` to watch live — the raw form deliberately, since agents
+hangs (`tail -f state/log.jsonl` to watch live — the raw form deliberately, since agents
 don't get `ch logtail`). The message is the exact command
 (`git fetch --prune origin`), the working directory rides `git_cwd`. The trace goes only to the
 log file, never the console (and is suppressed during shell completion, where the file sink

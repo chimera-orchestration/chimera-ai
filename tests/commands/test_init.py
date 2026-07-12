@@ -22,7 +22,10 @@ def test_init_names_the_captain(tmpdir: TempDir) -> None:
 
 def test_init_gitignores_repos_and_worktrees(tmpdir: TempDir) -> None:
     gitignore = (init(tmpdir / 'ws') / '.gitignore').read_text()
-    compare(gitignore, expected='*.lock\nservices-running.jsonl\nlogs/\n*/repo/\n*/worktrees/\n')
+    compare(
+        gitignore,
+        expected='*.lock\nservices-running.jsonl\nstate/\n*/repo/\n*/worktrees/\n',
+    )
 
 
 def test_init_existing_path_raises(tmpdir: TempDir) -> None:

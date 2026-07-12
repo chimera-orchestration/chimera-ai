@@ -2,7 +2,7 @@ Logging
 =======
 
 Every ``ch`` action records a line to a single JSON-lines log at
-``<workspace>/logs/chimera.jsonl`` (gitignored). Each line carries the canonical
+``<workspace>/state/log.jsonl`` (gitignored). Each line carries the canonical
 command path and its parsed parameters, plus any extra structured fields the
 command binds. The log is the audit trail and — for anything that rewrites git
 history — the recovery backstop.

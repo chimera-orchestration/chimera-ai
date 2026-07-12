@@ -155,7 +155,7 @@ def test_chat_cli_launches_the_captain(
     run = command.run('chat')
     text = f'{CAPTAIN_TEXT}\n\n<!-- {directive.resolve()} (workspace) -->\nDirect the work.'
     digest = sha256(text.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'pegasus-{digest[:8]}.md'
     compare(context.read_text(), expected=text)
     sources = context_sources(ws, 'captain')
     sources[str(ws / 'roles' / 'captain' / '*.md')] = [str(directive)]
@@ -211,7 +211,7 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
     calls = _stub(replace)
     # role directives lead every chimera-launched session's context — the manager's too
     digest = sha256(MANAGER_TEXT.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'proj@manager-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'proj@manager-{digest[:8]}.md'
     command.run('chat').check(
         output=f'Launched chat proj@manager in {project}',
         logging=[
@@ -266,7 +266,7 @@ def test_chat_cli_manager_layers_project_role_directives(
         f'<!-- {persona.resolve()} (project) -->\nWatch the datacenter feeds.'
     )
     digest = sha256(text.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'proj@manager-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'proj@manager-{digest[:8]}.md'
     sources = context_sources(ws, 'manager', pinned=Path.cwd())
     sources[str(ws / 'roles' / 'manager' / '*.md')] = [str(generic)]
     sources[str(Path.cwd() / 'roles' / 'manager' / '*.md')] = [str(persona.resolve())]
@@ -375,7 +375,7 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
     # even without a roles/captain dir the prime renders, so context is injected
     text = CAPTAIN_TEXT
     digest = sha256(text.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'pegasus-{digest[:8]}.md'
     compare(context.read_text(), expected=text)
     run.check(
         output=f'Resumed chat pegasus in {ws}',
@@ -418,7 +418,7 @@ def test_chat_cli_dry_previews_without_launching(
     calls = _stub(replace)
     text = CAPTAIN_TEXT
     digest = sha256(text.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'pegasus-{digest[:8]}.md'
     command.run('chat', '--dry').check(
         output='\n'.join(
             [
@@ -470,7 +470,7 @@ def test_chat_cli_dry_previews_beside_the_live_chat(
     calls = _stub(replace, live=[Session('x', 'pegasus', 'idle', ws, None)])
     text = CAPTAIN_TEXT
     digest = sha256(text.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'pegasus-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'pegasus-{digest[:8]}.md'
     command.run('chat', '--dry').check(
         output='\n'.join(
             [
@@ -528,7 +528,7 @@ def test_chat_cli_dry_project_scope_leads_with_the_manager_role(
     project = Path.cwd()  # resolves symlinks like the wrapper
     calls = _stub(replace)
     digest = sha256(MANAGER_TEXT.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'proj@manager-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'proj@manager-{digest[:8]}.md'
     command.run('chat', '--dry').check(
         output='\n'.join(
             [

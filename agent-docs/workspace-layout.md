@@ -171,7 +171,7 @@ big enough to want loading on demand is knowledge misfiled: move it to `knowledg
 the index carry it.
 
 The render is a build product, never committed: it's written content-addressed to
-`<workspace>/logs/context/<session>-<sha8>.md` (gitignored; identical re-renders land on the
+`<workspace>/state/context/<session>-<sha8>.md` (gitignored; identical re-renders land on the
 same file) and handed to the harness by path — claude gets `--append-system-prompt-file` — so
 the repo and worktree stay untouched. The `context: rendered` log line binds the path, the
 full sha256 and a sources map (each glob searched → the files it matched): the audit record
@@ -246,8 +246,12 @@ add/retire via the `CHECKS` tuple). Current checks:
   `roles/`, …) exists; derived from the template itself so it can't drift. `--fix` creates the
   dir with a `.gitkeep` (matching `ch init`), which workspace-clean then commits
 - **gitignore** — the workspace `.gitignore` carries every entry the current template ships
-  (`logs/`, `*/repo/`, …); `--fix` appends any missing ones, preserving existing/custom lines.
+  (`state/`, `*/repo/`, …); `--fix` appends any missing ones, preserving existing/custom lines.
   Reconciles workspaces created before a template entry was added
+- **state-dir** — runtime state (the action log, session archive, rendered contexts, mailboxes)
+  lives under one gitignored `state/`; `--fix` migrates the legacy layout, renaming `logs/` →
+  `state/` (its `chimera.jsonl` → `state/log.jsonl`) and `comms/` → `state/mail/`. Clean-only: a
+  collision (the target already exists) is reported for a human to merge, never clobbered
 - **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **inert-branches** — delete a known goal's non-agent actor branch (`{goal}/human`, `reviewer`, `pr`,

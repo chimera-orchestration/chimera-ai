@@ -338,7 +338,7 @@ def test_goal_start_cli_dry_role_leads_the_context(
         f'<!-- {persona} (project) -->\nGuard the reactor.'
     )
     digest = sha256(text.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     sources = context_sources(ws, 'agent', pinned=Path.cwd())
     sources[str(Path.cwd() / 'roles' / 'agent' / '*.md')] = [str(persona)]
     command.run('goal', 'start', 'g', '--dry').check(

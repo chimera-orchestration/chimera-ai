@@ -204,6 +204,58 @@ class ProjectConfigCheck:
                 )
 
 
+class RuntimeStateDirCheck:
+    """Runtime state lives under ``state/`` — migrating the legacy ``logs/`` and ``comms/``.
+
+    The action log, session archive, rendered launch contexts and mailboxes all sit under
+    one gitignored ``state/`` dir. Older workspaces kept the log (and ``context/``) under
+    ``logs/`` and the mail under ``comms/``; ``--fix`` renames them into place — ``logs/`` →
+    ``state/`` (its ``chimera.jsonl`` → ``state/log.jsonl``) and ``comms/`` → ``state/mail/``.
+    Clean-only: a collision (the target already exists) is reported for a human to merge
+    rather than clobbered.
+    """
+
+    name = 'state-dir'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        state = workspace / 'state'
+        legacy_log = workspace / 'logs'
+        if legacy_log.is_dir():
+            if state.exists():
+                yield Finding(
+                    self.name,
+                    f'legacy logs/ and state/ both exist under {workspace} — merge by hand',
+                    resolved=False,
+                    fixable=False,
+                )
+            else:
+                message = 'legacy logs/ → state/ (chimera.jsonl → log.jsonl)'
+                fixing = fix and not exclude.matches(self.name, message)
+                if fixing:
+                    legacy_log.rename(state)
+                    jsonl = state / 'chimera.jsonl'
+                    if jsonl.exists():
+                        jsonl.rename(state / 'log.jsonl')
+                yield Finding(self.name, message, resolved=fixing, fixable=True)
+        legacy_mail = workspace / 'comms'
+        if legacy_mail.is_dir():
+            mail = state / 'mail'
+            if mail.exists():
+                yield Finding(
+                    self.name,
+                    f'legacy comms/ and state/mail/ both exist under {workspace} — merge by hand',
+                    resolved=False,
+                    fixable=False,
+                )
+            else:
+                message = 'legacy comms/ → state/mail/'
+                fixing = fix and not exclude.matches(self.name, message)
+                if fixing:
+                    state.mkdir(parents=True, exist_ok=True)
+                    legacy_mail.rename(mail)
+                yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
 class StaleHumanWorktreeCheck:
     """Legacy {goal}-human worktrees are gone; the human branch survives bare."""
 
@@ -851,6 +903,7 @@ CHECKS: tuple[Check, ...] = (
     WorkspaceDirsCheck(),
     CaptainCheck(),
     ProjectConfigCheck(),
+    RuntimeStateDirCheck(),
     StaleHumanWorktreeCheck(),
     InertBranchCheck(),
     LegacyWorktreeSeparatorCheck(),

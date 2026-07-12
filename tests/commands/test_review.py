@@ -625,12 +625,12 @@ def test_review_cli_url_and_number_share_the_context_artifact(
     _stub_meta(replace, _meta(head))
     _stub_agent(replace)
     compare(command.run('review', '1', '--dry').return_code, expected=0)
-    [artifact] = (ws / 'logs' / 'context').iterdir()
+    [artifact] = (ws / 'state' / 'context').iterdir()
     assert artifact.name.startswith('proj@pr-1@agent-')
     url_run = command.run('review', 'https://github.com/o/r/pull/1', '--dry')
     compare(url_run.return_code, expected=0)
     # the URL form lands on the very same artifact the number form rendered
-    compare(sorted((ws / 'logs' / 'context').iterdir()), expected=[artifact])
+    compare(sorted((ws / 'state' / 'context').iterdir()), expected=[artifact])
 
 
 def test_review_cli_dry_with_packaged_template(

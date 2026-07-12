@@ -1,6 +1,6 @@
 """Action logging — every action lands in the workspace's JSON-lines log.
 
-One sink, one file: ``<workspace>/logs/chimera.jsonl``, gitignored. Each line is a flat JSON
+One sink, one file: ``<workspace>/state/log.jsonl``, gitignored. Each line is a flat JSON
 object ``{time, pid, command?, level, message?, **extra}`` — everything bound on the record is
 included (only the ``line`` scratch is dropped), so any ``logger.bind(...)`` anywhere in the
 codebase surfaces without touching this format.
@@ -33,7 +33,7 @@ from chimera.context import resolve_workspace
 if TYPE_CHECKING:
     from loguru import Record
 
-LOG_RELPATH = Path('logs') / 'chimera.jsonl'
+LOG_RELPATH = Path('state') / 'log.jsonl'
 
 
 def log_path(workspace: Path) -> Path:

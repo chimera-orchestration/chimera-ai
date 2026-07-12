@@ -8,7 +8,7 @@ line names the file it came from and its layer, so the session can resolve a ten
 between directives by layer order (project builds on workspace), cite a directive
 back to its file, and propose an edit to the right place. Nothing here ever touches
 the repo or worktree: the render is written under the workspace's gitignored
-``logs/`` and handed to the harness by path, so it is both the injected input and
+``state/`` and handed to the harness by path, so it is both the injected input and
 the audit record of what was injected (the log line binds the path, content hash and
 the sources searched).
 """
@@ -91,7 +91,7 @@ def materialize(workspace: Path, name: str, rendered: Rendered) -> Path | None:
         return None
     digest = sha256(rendered.text.encode()).hexdigest()
     slug = re.sub(r'[^\w@.-]', '-', name)  # defensive: keep the filename filesystem-safe
-    path = workspace / 'logs' / 'context' / f'{slug}-{digest[:8]}.md'
+    path = workspace / 'state' / 'context' / f'{slug}-{digest[:8]}.md'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(rendered.text)
     logger.bind(

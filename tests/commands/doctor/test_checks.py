@@ -20,6 +20,7 @@ from chimera.commands.doctor.checks import (
     LegacyWorktreeSeparatorCheck,
     OrphanedWorktreeCheck,
     ProjectConfigCheck,
+    RuntimeStateDirCheck,
     ShellCompletionCheck,
     StaleHumanWorktreeCheck,
     WorkspaceCommitCheck,
@@ -183,7 +184,7 @@ class TestGitignore:
             expected=[
                 Finding(
                     'gitignore',
-                    f"{ws / '.gitignore'} missing 'logs/'",
+                    f"{ws / '.gitignore'} missing 'state/'",
                     resolved=False,
                     fixable=True,
                 )
@@ -197,7 +198,7 @@ class TestGitignore:
         compare(
             _run(GitignoreCheck(), ws, fix=True, exclude=Exclusions(('*/repo/',))),
             expected=[
-                Finding('gitignore', f"{gitignore} missing 'logs/'", resolved=True, fixable=True),
+                Finding('gitignore', f"{gitignore} missing 'state/'", resolved=True, fixable=True),
                 Finding(
                     'gitignore', f"{gitignore} missing '*/repo/'", resolved=False, fixable=True
                 ),
@@ -205,7 +206,7 @@ class TestGitignore:
         )
         compare(  # the excluded entry stays missing; the other was appended
             gitignore.read_text(),
-            expected='*.lock\nservices-running.jsonl\n*/worktrees/\nlogs/\n',
+            expected='*.lock\nservices-running.jsonl\n*/worktrees/\nstate/\n',
         )
 
     def test_missing_entry_appended_after_an_unterminated_final_line(self, tmpdir: TempDir) -> None:
@@ -215,13 +216,16 @@ class TestGitignore:
             _run(GitignoreCheck(), ws, fix=True),
             expected=[
                 Finding(
-                    'gitignore', f"{ws / '.gitignore'} missing 'logs/'", resolved=True, fixable=True
+                    'gitignore',
+                    f"{ws / '.gitignore'} missing 'state/'",
+                    resolved=True,
+                    fixable=True,
                 )
             ],
         )
         compare(
             (ws / '.gitignore').read_text(),
-            expected='*.lock\nservices-running.jsonl\n*/repo/\n*/worktrees/\nlogs/\n',
+            expected='*.lock\nservices-running.jsonl\n*/repo/\n*/worktrees/\nstate/\n',
         )
 
     def test_keeps_unrelated_custom_entries(self, tmpdir: TempDir) -> None:
@@ -230,7 +234,7 @@ class TestGitignore:
         _run(GitignoreCheck(), ws, fix=True)
         compare(
             (ws / '.gitignore').read_text(),
-            expected='.DS_Store\n*.lock\nservices-running.jsonl\nlogs/\n*/repo/\n*/worktrees/\n',
+            expected='.DS_Store\n*.lock\nservices-running.jsonl\nstate/\n*/repo/\n*/worktrees/\n',
         )
 
     def test_absent_file_created(self, tmpdir: TempDir) -> None:
@@ -248,7 +252,7 @@ class TestGitignore:
                 for entry in (
                     '*.lock',
                     'services-running.jsonl',
-                    'logs/',
+                    'state/',
                     '*/repo/',
                     '*/worktrees/',
                 )
@@ -256,8 +260,105 @@ class TestGitignore:
         )
         compare(
             (ws / '.gitignore').read_text(),
-            expected='*.lock\nservices-running.jsonl\nlogs/\n*/repo/\n*/worktrees/\n',
+            expected='*.lock\nservices-running.jsonl\nstate/\n*/repo/\n*/worktrees/\n',
         )
+
+
+class TestStateDir:
+    def test_current_layout_is_silent(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / 'state').mkdir()
+        compare(_run(RuntimeStateDirCheck(), ws), expected=[])
+
+    def test_legacy_logs_migrated_to_state(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        logs = ws / 'logs'
+        (logs / 'context').mkdir(parents=True)  # the whole dir moves
+        (logs / 'chimera.jsonl').write_text('{}\n')
+        compare(
+            _run(RuntimeStateDirCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'state-dir',
+                    'legacy logs/ → state/ (chimera.jsonl → log.jsonl)',
+                    resolved=True,
+                    fixable=True,
+                )
+            ],
+        )
+        assert not logs.exists()
+        assert (ws / 'state' / 'log.jsonl').exists()
+        assert (ws / 'state' / 'context').is_dir()
+        assert not (ws / 'state' / 'chimera.jsonl').exists()
+
+    def test_legacy_logs_without_a_log_file(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / 'logs' / 'context').mkdir(parents=True)  # context only, no chimera.jsonl
+        _run(RuntimeStateDirCheck(), ws, fix=True)
+        assert (ws / 'state' / 'context').is_dir()
+        assert not (ws / 'state' / 'log.jsonl').exists()
+
+    def test_legacy_logs_reported_without_fix(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / 'logs').mkdir()
+        compare(
+            _run(RuntimeStateDirCheck(), ws),
+            expected=[
+                Finding(
+                    'state-dir',
+                    'legacy logs/ → state/ (chimera.jsonl → log.jsonl)',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        assert (ws / 'logs').is_dir()  # untouched without --fix
+
+    def test_logs_collision_is_reported_not_clobbered(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / 'logs').mkdir()
+        (ws / 'state').mkdir()
+        compare(
+            _run(RuntimeStateDirCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'state-dir',
+                    f'legacy logs/ and state/ both exist under {ws} — merge by hand',
+                    resolved=False,
+                    fixable=False,
+                )
+            ],
+        )
+        assert (ws / 'logs').is_dir()  # left for a human
+
+    def test_legacy_comms_migrated_to_state_mail(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / 'comms' / 'pegasus' / 'new').mkdir(parents=True)
+        compare(
+            _run(RuntimeStateDirCheck(), ws, fix=True),
+            expected=[
+                Finding('state-dir', 'legacy comms/ → state/mail/', resolved=True, fixable=True)
+            ],
+        )
+        assert not (ws / 'comms').exists()
+        assert (ws / 'state' / 'mail' / 'pegasus' / 'new').is_dir()
+
+    def test_comms_collision_is_reported_not_clobbered(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / 'comms').mkdir()
+        (ws / 'state' / 'mail').mkdir(parents=True)
+        compare(
+            _run(RuntimeStateDirCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'state-dir',
+                    f'legacy comms/ and state/mail/ both exist under {ws} — merge by hand',
+                    resolved=False,
+                    fixable=False,
+                )
+            ],
+        )
+        assert (ws / 'comms').is_dir()
 
 
 class TestWorkspaceEnv:

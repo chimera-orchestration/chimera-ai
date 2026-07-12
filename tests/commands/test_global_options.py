@@ -69,7 +69,7 @@ def test_goal_and_actor_before_the_command(
     worktree = workspace_with_env / 'myproject' / 'worktrees' / 'g@reviewer'
     text = f'# Role: agent\n\n{prime(ROLE_AGENT, project="myproject", goal="g")}'
     digest = sha256(text.encode()).hexdigest()
-    context = workspace_with_env / 'logs' / 'context' / f'myproject@g@reviewer-{digest[:8]}.md'
+    context = workspace_with_env / 'state' / 'context' / f'myproject@g@reviewer-{digest[:8]}.md'
     command.run('agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start').check(
         output=f'Launched agent in {worktree}',
         logging=[

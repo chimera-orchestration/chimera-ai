@@ -852,7 +852,7 @@ def test_agent_start_cli_model_from_workspace_config(
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     digest = sha256(AGENT_ROLE_TEXT.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected}',
         logging=[
@@ -955,7 +955,7 @@ def test_agent_start_cli_injects_rendered_context(
         f'<!-- {principle.resolve()} (workspace) -->\nVerify before done.'
     )
     digest = sha256(text.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     sources = context_sources(ws, 'agent', pinned=project.resolve())
     sources[str(ws / 'principles' / '*.md')] = [str(principle)]
     command.run('agent', 'start', '-g', 'g').check(
@@ -1012,7 +1012,7 @@ def test_agent_start_cli_dry_previews_without_launching(
         f'<!-- {principle.resolve()} (workspace) -->\nVerify before done.'
     )
     digest = sha256(text_.encode()).hexdigest()
-    context = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    context = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     sources = context_sources(ws, 'agent', pinned=project.resolve())
     sources[str(ws / 'principles' / '*.md')] = [str(principle)]
     command.run('agent', 'start', 'do it', '-g', 'g', '-m', 'opus', '--dry').check(

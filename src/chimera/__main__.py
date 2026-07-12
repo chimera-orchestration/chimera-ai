@@ -446,7 +446,7 @@ def _context_file(
     Role directives + the ``intro`` identity block lead the render (every chimera-launched
     session knows what it is before anything else), then principles and knowledge. The
     render needs a workspace both for the role/workspace-level sources and as the home of
-    the stored artifact (``logs/context/``), so a project standing outside any workspace
+    the stored artifact (``state/context/``), so a project standing outside any workspace
     launches without injected context rather than failing. The sources searched ride back
     for the ``--dry`` preview.
     """

@@ -147,7 +147,7 @@ class TestMaterialize:
         digest = sha256(text.encode()).hexdigest()
         source = Source(str(ws / 'principles' / '*.md'), (ws / 'principles' / 'verify.md',))
         path = materialize(ws, 'proj@g@agent', Rendered(text, (source,)))
-        expected = ws / 'logs' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+        expected = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
         compare(path, expected=expected)
         compare(expected.read_text(), expected=text)
         full_logs.check(
@@ -166,7 +166,7 @@ class TestMaterialize:
         first = materialize(ws, 'n', Rendered('same text', ()))
         second = materialize(ws, 'n', Rendered('same text', ()))
         compare(second, expected=first)  # content-addressed: a re-run lands on the same artifact
-        tmpdir.compare([first.name if first else '?'], path=ws / 'logs' / 'context')
+        tmpdir.compare([first.name if first else '?'], path=ws / 'state' / 'context')
 
     def test_sanitizes_a_url_bearing_name(self, tmpdir: TempDir) -> None:
         ws = tmpdir.makedir('lycia')
@@ -177,5 +177,5 @@ class TestMaterialize:
     def test_none_when_nothing_to_inject(self, tmpdir: TempDir, full_logs: LogCapture) -> None:
         ws = tmpdir.makedir('lycia')
         assert materialize(ws, 'n', Rendered('', ())) is None
-        assert not (ws / 'logs').exists()  # no file either
+        assert not (ws / 'state').exists()  # no file either
         full_logs.check()  # and no log line: nothing was rendered

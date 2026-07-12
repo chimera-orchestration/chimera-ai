@@ -46,7 +46,7 @@ def _start() -> dict[str, object]:
 
 
 def test_log_path(tmpdir: TempDir) -> None:
-    compare(log_path(tmpdir.path), expected=tmpdir / 'logs' / 'chimera.jsonl')
+    compare(log_path(tmpdir.path), expected=tmpdir / 'state' / 'log.jsonl')
 
 
 class TestActionLines:
