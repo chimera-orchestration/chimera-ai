@@ -366,7 +366,7 @@ checking out `main` somewhere to work in directly.
 
 Both paths:
 1. Create the project directory structure in the workspace
-   (`knowledge/`, `prompts/`, `principles/`, `processes/`)
+   (`knowledge/`, `prompts/`, `principles/`, `processes/`, `roles/`)
 2. Write `{project}/config.yaml` (`kind: project` + the repo location)
 
 `ch project rm <name>` removes a project directory. It refuses while the project
@@ -395,7 +395,7 @@ non-human actors:
 
 Only the agent is created up front. The `human` branch (and any ad-hoc `reviewer`/`pr`) is **lazy** — materialised on demand by `ch goal sync`, so a short-lived spike never accrues a dead branch. Naming actors explicitly (`ch worktree add --goal <goal> --actor human --actor agent`) still creates them: `human` gets a bare branch (`git branch --no-track {goal}/human <base>`, checked out where the human likes), every other named actor gets a worktree.
 
-`<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out), falling back to `HEAD` if neither exists. Branches are created with no upstream tracking.
+`<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out); with neither present the add refuses — pass `--from <ref>`. Branches are created with no upstream tracking.
 
 **Ad-hoc mode**: `ch worktree add <branch> <path>` checks `<branch>` out as a plain worktree at
 `<path>`, which must sit outside the project's `worktrees/` — that tree is reserved for the
