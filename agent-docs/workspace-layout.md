@@ -6,7 +6,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
 ~/lycia/                        # git repo — tracks everything except gitignored dirs
   .gitignore                    # ignores: */repo/ */worktrees/
   config.yaml                   # `kind: workspace` — marks the workspace root
-  processes/                    # workspace-wide process definitions
+  processes/                    # workspace-wide processes (agent runbooks — see AGENTS.md core concepts)
   roles/                        # workspace-level role directives: roles/{role}/*.md (e.g. roles/captain/)
   principles/                   # workspace-wide principles
   knowledge/                    # workspace-wide extracted knowledge (plain markdown)

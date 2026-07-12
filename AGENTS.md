@@ -18,7 +18,8 @@ isn't built yet — the vocabulary stands regardless; what's implemented is the 
 - **Principle** — context an agent must always load before beginning work (inlined at launch)
 - **Knowledge** — named, versioned context loaded on demand (e.g. "load knowledge for testfixtures")
 - **Reference** — a project used only for tracking knowledge
-- **Service** — a long-running system process managed by Chimera (e.g. a tmux session or docker container); distinct from the workflow concept "Process"
+- **Process** — a recurring job's runbook: one `processes/{name}.md` carrying everything a run needs — trigger (on demand or a cadence), dispatch (the `ch` command, goal naming and reuse), guardrails (what a run must never touch), and the artifact it maintains. Harness-agnostic: any agent pointed at the file can run it (e.g. "run another refresh per `processes/nav-refresh.md`")
+- **Service** — a long-running system process managed by Chimera (e.g. a tmux session or docker container); a Process (above) is a runbook, a Service is something running
 - **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera; works in a **worktree** (only the captain works on the workspace itself)
 - **Role** — the function an agent is launched as; a role's directives live in `roles/{role}/` dirs, the workspace's (reaching every project) layered before the pinned project's (that project only), and each workspace names its own instance of a role (the concept/instance split mirrors workspace/lycia)
 - **Captain** — the role of the workspace-level agent chatted with to direct all work across the workspace; no goal, branch or worktree — it works on the workspace as a whole (lycia's captain is named *pegasus*)
