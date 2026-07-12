@@ -246,7 +246,8 @@ add/retire via the `CHECKS` tuple). Current checks:
   `roles/`, …) exists; derived from the template itself so it can't drift. `--fix` creates the
   dir with a `.gitkeep` (matching `ch init`), which workspace-clean then commits
 - **captain** — the workspace names its captain persona (`captain:` in the workspace
-  `config.yaml`) and `roles/captain/` holds at least one `*.md` directive for it. `--fix` writes
+  `config.yaml`) and `roles/captain/` holds at least one top-level `*.md` directive for it
+  (nested files don't count — the launch render reads roles dirs non-recursively). `--fix` writes
   the literal default (`captain: captain`) onto a config that predates the feature — it never
   invents a unique persona name, that stays a human's call. Missing directives are only ever
   reported, and only once a captain is actually named, so an unnamed captain isn't flagged twice

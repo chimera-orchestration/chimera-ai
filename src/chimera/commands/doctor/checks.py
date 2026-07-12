@@ -152,8 +152,10 @@ class CaptainCheck:
                 write_config(workspace, {**(raw or {}), 'captain': 'captain'})
             yield Finding(self.name, message, resolved=fixing, fixable=True)
             return
+        # Top-level only, mirroring the launch render: a *.md in a subdir is
+        # structure, not payload, so it doesn't count as a directive here either.
         directives = workspace / 'roles' / 'captain'
-        if not directives.is_dir() or not any(directives.rglob('*.md')):
+        if not directives.is_dir() or not any(directives.glob('*.md')):
             yield Finding(
                 self.name,
                 f'{directives} has no *.md directive files for the captain role',
