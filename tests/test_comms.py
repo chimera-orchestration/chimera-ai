@@ -205,6 +205,21 @@ def test_drain_skips_a_message_another_drainer_already_claimed(
     assert [m.id for m in comms.inbox(TO, unread_only=True)] == ['01']  # left for the winner
 
 
+def test_messages_lists_every_mailbox_with_its_state(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('01', to='a@g@agent', subject='to-a'))
+    comms.send(a_message('02', to='b@manager', subject='to-b'))
+    comms.drain('a@g@agent')  # 01 → cur/
+    assert [(state, m.subject) for state, m in comms.messages()] == [
+        ('cur', 'to-a'),
+        ('new', 'to-b'),
+    ]
+
+
+def test_messages_is_empty_for_an_unused_root(tmpdir: TempDir) -> None:
+    assert Comms(tmpdir.path / 'nope').messages() == []
+
+
 def _trace() -> LogCapture:
     """Capture everything, DEBUG included — the message trace is what these tests cover."""
     return LogCapture(LoguruSource(('message', 'extra')))

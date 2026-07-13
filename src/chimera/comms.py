@@ -203,6 +203,20 @@ class Comms:
             if thread in (message.id, message.thread)
         ]
 
+    def messages(self) -> list[tuple[str, Message]]:
+        """Every message across all mailboxes, oldest first, as ``(state, message)``.
+
+        ``state`` is ``new`` (delivered, undrained), ``cur`` (drained, awaiting disposition)
+        or ``done`` (disposed, awaiting cleanup) — the whole picture, for a captain to inspect.
+        """
+        found: list[tuple[str, Message]] = []
+        if not self._root.is_dir():
+            return found
+        for mailbox in sorted(self._root.iterdir()):
+            for state in ('new', 'cur', 'done'):
+                found.extend((state, _read(path)) for path in (mailbox / state).glob('*.json'))
+        return sorted(found, key=lambda item: item[1].id)
+
     def _ensure(self, address: str) -> Path:
         mailbox = self._root / address
         for state in _STATES:

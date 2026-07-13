@@ -50,6 +50,7 @@ from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.init import init as _init
 from chimera.commands.logtail import logtail as _logtail
 from chimera.commands.ls import Board, board
+from chimera.commands.msg.ls import outstanding as _msg_outstanding
 from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.checkout import checkout as _project_checkout
 from chimera.commands.project.ls import projects as _projects
@@ -1545,6 +1546,31 @@ def agent_ls(
     if withheld:
         plural = 's' if withheld != 1 else ''
         typer.echo(f'(+{withheld} stale session{plural} — ch agent ls -v to show)')
+
+
+msg_app = typer.Typer(cls=alias_group({'list': 'ls'}), help='Inter-agent mail.')
+app.add_typer(msg_app, name='msg')
+
+
+@msg_app.command('ls', cls=LoggingCommand, help='List outstanding inter-agent messages.')
+@logs(_msg_outstanding)
+def msg_ls(
+    verbose: Annotated[
+        bool, typer.Option('--verbose', '-v', help='Also show disposed messages awaiting cleanup')
+    ] = False,
+) -> None:
+    located = _msg_outstanding(resolve_workspace(Path.cwd()))
+    rows = located if verbose else [(state, m) for state, m in located if state != 'done']
+    if not rows:
+        typer.echo('No outstanding messages')
+    for state, message in rows:
+        typer.echo(
+            f'{state:<4}  {message.sender} → {message.to}  [{message.kind}] {message.subject}'
+        )
+    withheld = sum(1 for state, _ in located if state == 'done')
+    if withheld and not verbose:
+        plural = 's' if withheld != 1 else ''
+        typer.echo(f'(+{withheld} disposed message{plural} — ch msg ls -v to show)')
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
