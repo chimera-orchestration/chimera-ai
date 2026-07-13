@@ -5,4 +5,5 @@
 - every example in any doc — human or agent — must be executed by the test suite via Sybil
   (wired in the root @conftest.py): a hand-verified example is drift waiting to happen. A
   genuinely unrunnable step (interactive session, network install) carries an explicit
-  `.. skip:` with the reason beside it, never a silently untested block.
+  skip directive with the reason beside it — `.. skip:` in .rst, `<!-- skip: ... -->` in
+  .md — never a silently untested block.

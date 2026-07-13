@@ -76,8 +76,8 @@ Each goal's agent is a session Chimera can find again by name:
   typo never reads as "nothing running").
 
 While a session is *live* in a worktree, ``start`` and ``resume`` both
-refuse, naming it — attach to a live background session through the harness
-itself (``claude agents attach``), or stop it first.
+refuse, naming it — attach to a live background session through the harness's
+agent view (``claude agents``), or stop it first.
 
 Previewing with ``--dry``
 -------------------------

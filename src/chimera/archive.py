@@ -5,8 +5,8 @@ index *over* those happenings — the one place that ties them together: which c
 ran where, on which harness, for which goal, which actors worked it, and when. It is
 a single SQLite database in WAL mode, so any number of ``ch`` processes (agents and
 humans alike) can read and write it at once: many concurrent readers, writers
-serialised for milliseconds by SQLite itself. Nothing here is wired into a command
-yet — it is the component other commands and hooks call.
+serialised for milliseconds by SQLite itself. The session hooks (``ch hook``) feed
+it; it is the component other commands and hooks call.
 
 It archives *every* LLM session on the machine, not just Chimera's, along two
 orthogonal axes:

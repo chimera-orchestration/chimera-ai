@@ -13,8 +13,10 @@ The function in `commands/**` is plain importable Python:
 - `return`s values and `raise`s ordinary exceptions — never `typer.echo` / `typer.Exit`
 - built from other pure functions where possible
 
-`__main__.py` is the only module that imports typer: it parses args, injects
-context, renders the return value, and lets exceptions bubble to a non-zero exit.
+`__main__.py` is the only module that assembles the CLI from typer: it parses args,
+injects context, renders the return value, and lets exceptions bubble to a non-zero
+exit. (`completions.py` and `help.py` also import from typer, but only its click
+layer — completion callbacks and the derived help tree; no command logic.)
 
 Typer metadata always rides on `Annotated`, never a default value — this keeps
 the function callable from Python:

@@ -22,8 +22,10 @@ isn't built yet — the vocabulary stands regardless; what's implemented is the 
 - **Service** — a long-running system process managed by Chimera (e.g. a tmux session or docker container); a Process (above) is a runbook, a Service is something running
 - **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera; works in a **worktree** (only the captain works on the workspace itself)
 - **Role** — the function an agent is launched as; a role's directives live in `roles/{role}/` dirs, the workspace's (reaching every project) layered before the pinned project's (that project only), and each workspace names its own instance of a role (the concept/instance split mirrors workspace/lycia)
-- **Captain** — the role of the workspace-level agent chatted with to direct all work across the workspace; no goal, branch or worktree — it works on the workspace as a whole (lycia's captain is named *pegasus*)
+- **Captain** — the role of the workspace-level agent chatted with to direct all work across the workspace; no goal, branch or worktree — it works on the workspace as a whole (each workspace names its own — *pegasus*, say)
 - **Manager** — the role of a project's chat session (`<project>@manager`), directing that project's goals; fenced to its project — cross-project work goes through the captain
+- **Message** — inter-agent mail (`ch msg`): one immutable file per message in a per-address Maildir under `state/`; an address *is* a session name (the captain's persona, `<project>@manager`, `<project>@<goal>@<actor>`), drained into a session then acked or deferred
+- **Archive** — the queryable index over every LLM session on the machine, chimera-launched or not: one SQLite store (`state/archive.db`) tying sessions to harnesses, goals, actors and a timeline; fed by session hooks (doctor's claude-hooks check installs them)
 
 ## Principles
 
@@ -64,7 +66,7 @@ Note: CLAUDE.md is a symlink to AGENTS.md — edits to either always show as `AG
 ## Research files
 
 Research notes live in the chimera project's knowledge dir in the workspace
-(`$CHIMERA_WORKSPACE/chimera/knowledge/`), not in this repo. Save ad-hoc research there.
+(`$CHIMERA_WORKSPACE/chimera-ai/knowledge/`), not in this repo. Save ad-hoc research there.
 
 ## Topic documentation
 
