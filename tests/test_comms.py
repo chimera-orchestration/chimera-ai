@@ -6,6 +6,7 @@ from testfixtures import LogCapture, Replacer, TempDir
 from testfixtures.loguru import LoguruSource
 
 from chimera.comms import Comms, Kind, Message, Priority, compose
+from tests.cli import full_capture
 
 NOON = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
 TO = 'chimera@logs-and-sessions@agent'
@@ -266,6 +267,32 @@ def test_the_logged_text_carries_the_kind_and_subject(tmpdir: TempDir) -> None:
     with _trace() as log:
         comms.send(message)
     log.check((f'comms: send {FROM} -> {TO} [escalation] build is red (e1)', message.log_fields()))
+
+
+def test_the_read_only_peeks_trace_at_debug(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    with full_capture() as log:
+        comms.inbox(TO)
+        comms.thread(TO, 'm1')
+        comms.messages()
+    log.check(
+        {
+            'level': 'DEBUG',
+            'message': f'comms: inbox {TO} (1)',
+            'address': TO,
+            'unread_only': False,
+            'count': 1,
+        },
+        {
+            'level': 'DEBUG',
+            'message': f'comms: thread m1 {TO} (1)',
+            'address': TO,
+            'thread': 'm1',
+            'count': 1,
+        },
+        {'level': 'DEBUG', 'message': 'comms: messages (1)', 'count': 1},
+    )
 
 
 def test_many_agents_send_to_one_mailbox_concurrently(tmpdir: TempDir) -> None:

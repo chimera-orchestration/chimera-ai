@@ -27,7 +27,9 @@ the same log-is-truth split the archive keeps. Each send, receive (drain) and di
 logs at INFO through :func:`_log`: routing in the message text (who -> whom, kind,
 subject, id — what a live tail shows) and :meth:`Message.log_fields` bound structured —
 so a message's whole journey is traceable from the log alone; the read-only
-peeks (inbox/thread) stay silent. Timestamps must be timezone-aware.
+peeks (inbox/thread/messages) trace at DEBUG — below triage, like the git command
+trace — naming what was peeked and how much was found. Timestamps must be
+timezone-aware.
 """
 
 import os
@@ -152,7 +154,11 @@ class Comms:
     def inbox(self, address: str, *, unread_only: bool = False) -> list[Message]:
         """The messages awaiting ``address``, oldest first: undrained plus (by default) undisposed."""
         states = ('new',) if unread_only else ('new', 'cur')
-        return self._collect(address, states)
+        found = self._collect(address, states)
+        logger.bind(address=address, unread_only=unread_only, count=len(found)).debug(
+            f'comms: inbox {address} ({len(found)})'
+        )
+        return found
 
     def drain(self, address: str) -> list[Message]:
         """Claim every undrained message for ``address`` (``new/`` → ``cur/``), returning them.
@@ -199,11 +205,15 @@ class Comms:
         ``thread`` is the root message's id; a message belongs to it when it *is* the root or
         carries the root as its ``thread``.
         """
-        return [
+        found = [
             message
             for message in self._collect(address, ('new', 'cur', 'done'))
             if thread in (message.id, message.thread)
         ]
+        logger.bind(address=address, thread=thread, count=len(found)).debug(
+            f'comms: thread {thread} {address} ({len(found)})'
+        )
+        return found
 
     def messages(self) -> list[tuple[str, Message]]:
         """Every message across all mailboxes, oldest first, as ``(state, message)``.
@@ -212,11 +222,11 @@ class Comms:
         or ``done`` (disposed, awaiting cleanup) — the whole picture, for a captain to inspect.
         """
         found: list[tuple[str, Message]] = []
-        if not self._root.is_dir():
-            return found
-        for mailbox in sorted(self._root.iterdir()):
-            for state in ('new', 'cur', 'done'):
-                found.extend((state, _read(path)) for path in (mailbox / state).glob('*.json'))
+        if self._root.is_dir():
+            for mailbox in sorted(self._root.iterdir()):
+                for state in ('new', 'cur', 'done'):
+                    found.extend((state, _read(path)) for path in (mailbox / state).glob('*.json'))
+        logger.bind(count=len(found)).debug(f'comms: messages ({len(found)})')
         return sorted(found, key=lambda item: item[1].id)
 
     def _ensure(self, address: str) -> Path:
