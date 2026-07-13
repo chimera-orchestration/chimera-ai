@@ -28,7 +28,9 @@ ROLE_SCOPE_ENV_VAR = 'CHIMERA_ROLE_SCOPE'  # '<project>' or '<project>@<goal>'
 
 # The inter-agent mail commands — every actor (manager and agent alike) sends, reads and
 # retires its own mail, so both role trees carry the whole set.
-_MSG_COMMANDS = frozenset({'msg ls', 'msg send', 'msg inbox', 'msg thread', 'msg ack', 'msg defer'})
+_MSG_COMMANDS = frozenset(
+    {'msg ls', 'msg send', 'msg inbox', 'msg thread', 'msg ack', 'msg defer', 'msg drain'}
+)
 
 # Per-role command allowlists (canonical leaf paths). A role's session sees only these —
 # the rest of the tree is stripped (see __main__._strip_to_role), never admonished about.

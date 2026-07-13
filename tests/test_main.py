@@ -183,7 +183,7 @@ class TestStripToRole:
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
-            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer'},
+            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain'},
         )
 
     def test_agent_tree_is_help_prime_errand_and_the_mail_verbs(self) -> None:
@@ -191,7 +191,7 @@ class TestStripToRole:
         compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg'})
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
-            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer'},
+            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain'},
         )
 
     def test_synonyms_survive_iff_their_canonical_does(self) -> None:

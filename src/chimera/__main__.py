@@ -51,6 +51,8 @@ from chimera.commands.init import init as _init
 from chimera.commands.logtail import logtail as _logtail
 from chimera.commands.ls import Board, board
 from chimera.commands.msg.dispose import dispose as _msg_dispose
+from chimera.commands.msg.drain import as_context as _msg_as_context
+from chimera.commands.msg.drain import drain as _msg_drain
 from chimera.commands.msg.inbox import inbox as _msg_inbox
 from chimera.commands.msg.ls import outstanding as _msg_outstanding
 from chimera.commands.msg.send import send as _msg_send
@@ -1670,6 +1672,28 @@ def msg_defer(
     who = address if address is not None else _msg_caller(Path.cwd())
     _msg_dispose(resolve_workspace(Path.cwd()), who, message_id)
     typer.echo(f'Deferred {message_id}: {reason}')
+
+
+@msg_app.command('drain', cls=LoggingCommand, help='Claim (receive) new messages for an address.')
+@logs(_msg_drain)
+def msg_drain(
+    address: Annotated[
+        str | None, typer.Argument(help='Whose mail to receive (default: inferred from cwd)')
+    ] = None,
+    inject: Annotated[
+        bool, typer.Option('--inject', help='Print as a context block for a turn-boundary hook')
+    ] = False,
+) -> None:
+    who = address if address is not None else _msg_caller(Path.cwd())
+    claimed = _msg_drain(resolve_workspace(Path.cwd()), who)
+    if inject:
+        if claimed:
+            typer.echo(_msg_as_context(claimed))
+    else:
+        if not claimed:
+            typer.echo('Nothing to receive')
+        for message in claimed:
+            typer.echo(f'{message.id}  from {message.sender}  [{message.kind}] {message.subject}')
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
