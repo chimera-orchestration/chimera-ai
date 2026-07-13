@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from chimera.comms import Comms, Message
+from chimera.commands.msg.store import mail
+from chimera.comms import Message
 
 
 def outstanding(workspace: Path) -> list[tuple[str, Message]]:
@@ -8,4 +9,4 @@ def outstanding(workspace: Path) -> list[tuple[str, Message]]:
 
     The mail store lives at ``<workspace>/state/mail``; ``state`` is ``new``/``cur``/``done``.
     """
-    return Comms(workspace / 'state' / 'mail').messages()
+    return mail(workspace).messages()

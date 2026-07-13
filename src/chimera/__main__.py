@@ -50,7 +50,12 @@ from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.init import init as _init
 from chimera.commands.logtail import logtail as _logtail
 from chimera.commands.ls import Board, board
+from chimera.commands.msg.dispose import dispose as _msg_dispose
+from chimera.commands.msg.inbox import inbox as _msg_inbox
 from chimera.commands.msg.ls import outstanding as _msg_outstanding
+from chimera.commands.msg.send import send as _msg_send
+from chimera.commands.msg.store import caller as _msg_caller
+from chimera.commands.msg.thread import thread as _msg_thread
 from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.checkout import checkout as _project_checkout
 from chimera.commands.project.ls import projects as _projects
@@ -1571,6 +1576,100 @@ def msg_ls(
     if withheld and not verbose:
         plural = 's' if withheld != 1 else ''
         typer.echo(f'(+{withheld} disposed message{plural} — ch msg ls -v to show)')
+
+
+@msg_app.command('send', cls=LoggingCommand, help='Send a message to an actor address.')
+@logs(_msg_send)
+def msg_send(
+    to: Annotated[str, typer.Argument(help='Recipient address, e.g. chimera@fix@agent or pegasus')],
+    subject: Annotated[str, typer.Argument()],
+    body: Annotated[str, typer.Argument(help='Message body')] = '',
+    frm: Annotated[
+        str | None, typer.Option('--from', help='Sender address (default: inferred from cwd)')
+    ] = None,
+    kind: Annotated[
+        str, typer.Option('--kind', help='message | request | escalation | notice')
+    ] = 'message',
+    priority: Annotated[str, typer.Option('--priority', help='normal | urgent')] = 'normal',
+    re: Annotated[
+        str | None, typer.Option('--re', help='Id of the message this replies to')
+    ] = None,
+) -> None:
+    sender = frm if frm is not None else _msg_caller(Path.cwd())
+    message = _msg_send(
+        resolve_workspace(Path.cwd()),
+        sender=sender,
+        to=to,
+        subject=subject,
+        body=body,
+        kind=kind,
+        priority=priority,
+        re=re,
+    )
+    typer.echo(f'Sent {message.id} to {to}')
+
+
+@msg_app.command('inbox', cls=LoggingCommand, help='Show the messages awaiting an address.')
+@logs(_msg_inbox)
+def msg_inbox(
+    address: Annotated[
+        str | None, typer.Argument(help='Whose inbox (default: inferred from cwd)')
+    ] = None,
+    unread: Annotated[
+        bool, typer.Option('--unread', help='Only the undrained (new) messages')
+    ] = False,
+) -> None:
+    who = address if address is not None else _msg_caller(Path.cwd())
+    messages = _msg_inbox(resolve_workspace(Path.cwd()), who, unread_only=unread)
+    if not messages:
+        typer.echo('No messages')
+    for message in messages:
+        typer.echo(f'{message.id}  {message.sender}  [{message.kind}] {message.subject}')
+
+
+@msg_app.command('thread', cls=LoggingCommand, help='Show a whole conversation by its root id.')
+@logs(_msg_thread)
+def msg_thread(
+    root: Annotated[str, typer.Argument(help='Root message id of the thread')],
+    address: Annotated[
+        str | None, typer.Argument(help='Whose mailbox (default: inferred from cwd)')
+    ] = None,
+) -> None:
+    who = address if address is not None else _msg_caller(Path.cwd())
+    messages = _msg_thread(resolve_workspace(Path.cwd()), who, root)
+    if not messages:
+        typer.echo('No such thread')
+    for message in messages:
+        typer.echo(
+            f'{message.id}  {message.sender} → {message.to}  [{message.kind}] {message.subject}'
+        )
+
+
+@msg_app.command('ack', cls=LoggingCommand, help='Mark a message handled (retire it).')
+@logs(_msg_dispose)
+def msg_ack(
+    message_id: Annotated[str, typer.Argument(help='Id of the message to retire')],
+    address: Annotated[
+        str | None, typer.Argument(help='Whose mailbox (default: inferred from cwd)')
+    ] = None,
+) -> None:
+    who = address if address is not None else _msg_caller(Path.cwd())
+    _msg_dispose(resolve_workspace(Path.cwd()), who, message_id)
+    typer.echo(f'Acked {message_id}')
+
+
+@msg_app.command('defer', cls=LoggingCommand, help='Retire a message, recording why (deferred).')
+@logs(_msg_dispose)
+def msg_defer(
+    message_id: Annotated[str, typer.Argument(help='Id of the message to retire')],
+    reason: Annotated[str, typer.Option('--reason', help='Why it is being deferred (logged)')],
+    address: Annotated[
+        str | None, typer.Argument(help='Whose mailbox (default: inferred from cwd)')
+    ] = None,
+) -> None:
+    who = address if address is not None else _msg_caller(Path.cwd())
+    _msg_dispose(resolve_workspace(Path.cwd()), who, message_id)
+    typer.echo(f'Deferred {message_id}: {reason}')
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
