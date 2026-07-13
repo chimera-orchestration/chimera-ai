@@ -303,7 +303,9 @@ add/retire via the `CHECKS` tuple). Current checks:
   fblog's repo — not auto-fixable
 - **claude-hooks** — chimera's session-capture + mail-delivery hooks are installed in the
   user's global `~/.claude/settings.json` (SessionStart/End → the archive, UserPromptSubmit →
-  `ch msg drain --inject`). `--fix` merges them in idempotently, preserving any existing hooks.
+  `ch hook deliver`). `--fix` merges them in idempotently, preserving any existing hooks while
+  sweeping superseded chimera spellings (the old `ch msg drain --inject`, which surfaced only
+  the mail it claimed itself — left in place it would double-inject beside the new hook).
   Machine config, not the workspace's, so doctor *is* the installer — there's no `ch hook
   install` to remember
 - **workspace-clean** — the workspace's own git repo has no uncommitted or untracked content

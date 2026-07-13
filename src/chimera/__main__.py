@@ -51,6 +51,7 @@ from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.hook.capture import session_end as _hook_session_end
 from chimera.commands.hook.capture import session_start as _hook_session_start
+from chimera.commands.hook.deliver import deliver as _hook_deliver
 from chimera.commands.init import init as _init
 from chimera.commands.logtail import logtail as _logtail
 from chimera.commands.ls import Board, board
@@ -1727,6 +1728,17 @@ def hook_session_end() -> None:
         str(payload['session_id']),
         str(payload.get('reason') or 'ended'),
     )
+
+
+@hook_app.command(
+    'deliver', cls=LoggingCommand, help='Surface unacked mail to a session (UserPromptSubmit hook).'
+)
+@logs(_hook_deliver)
+def hook_deliver() -> None:
+    payload = json.load(sys.stdin)
+    delivered = _hook_deliver(Path(str(payload['cwd'])), str(payload['session_id']))
+    if delivered:
+        typer.echo(_msg_as_context(delivered))
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:

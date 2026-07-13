@@ -1845,3 +1845,71 @@ class TestClaudeHooks:
         ws = _ws(tmpdir)
         _run(ClaudeHooksCheck(), ws, fix=True)
         compare(_run(ClaudeHooksCheck(), ws, fix=True), expected=[])  # nothing left to do
+
+    def _superseded(self, tmpdir: TempDir, replace: Replacer) -> Path:
+        """Settings from before `ch hook deliver`: the drain-based injection installed."""
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        installed = hook_install.merge({})
+        installed['hooks']['UserPromptSubmit'] = [
+            {'hooks': [{'type': 'command', 'command': 'ch msg drain --inject'}]}
+        ]
+        hook_install.write(settings, installed)
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        return settings
+
+    def test_sweep_leaves_an_entry_without_commands_alone(self) -> None:
+        # not command-shaped, so it can't be a stale chimera hook — kept verbatim
+        settings = hook_install.merge({'hooks': {'Stop': [{'matcher': 'foo'}]}})
+        compare(settings['hooks']['Stop'], expected=[{'matcher': 'foo'}])
+
+    def test_superseded_hook_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = self._superseded(tmpdir, replace)
+        compare(
+            _run(ClaudeHooksCheck(), _ws(tmpdir)),
+            expected=[
+                Finding(
+                    'claude-hooks',
+                    f'{settings} missing chimera hooks: UserPromptSubmit; '
+                    'superseded chimera hooks: ch msg drain --inject',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+
+    def test_fix_sweeps_the_superseded_hook(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = self._superseded(tmpdir, replace)
+        [finding] = _run(ClaudeHooksCheck(), _ws(tmpdir), fix=True)
+        assert finding.resolved
+        data = hook_install.read(settings)
+        prompts = [
+            h['command'] for entry in data['hooks']['UserPromptSubmit'] for h in entry['hooks']
+        ]
+        compare(prompts, expected=['ch hook deliver'])  # replaced, not doubled
+
+    def test_fix_sweep_preserves_a_users_hook_sharing_the_event(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        hook_install.write(
+            settings,
+            {
+                'hooks': {
+                    'UserPromptSubmit': [
+                        {
+                            'hooks': [
+                                {'type': 'command', 'command': 'echo mine'},
+                                {'type': 'command', 'command': 'ch msg drain --inject'},
+                            ]
+                        }
+                    ]
+                }
+            },
+        )
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        _run(ClaudeHooksCheck(), _ws(tmpdir), fix=True)
+        data = hook_install.read(settings)
+        prompts = [
+            h['command'] for entry in data['hooks']['UserPromptSubmit'] for h in entry['hooks']
+        ]
+        compare(prompts, expected=['echo mine', 'ch hook deliver'])
