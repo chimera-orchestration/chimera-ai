@@ -170,7 +170,7 @@ class TestStripToRole:
         # chat/init/doctor gone; project and worktree emptied by the prune, so gone whole
         compare(
             set(tree.commands),
-            expected={'help', 'prime', 'ls', 'review', 'errand', 'goal', 'agent'},
+            expected={'help', 'prime', 'ls', 'review', 'errand', 'goal', 'agent', 'msg'},
         )
         goal = cast(TyperGroup, _leaf(tree, 'goal'))
         compare(
@@ -181,9 +181,18 @@ class TestStripToRole:
             set(cast(TyperGroup, _leaf(tree, 'agent')).commands),
             expected={'start', 'resume', 'stop', 'ls'},
         )
+        compare(
+            set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
+            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer'},
+        )
 
-    def test_agent_tree_is_exactly_help_prime_and_errand(self) -> None:
-        compare(set(_role_tree(ROLE_AGENT).commands), expected={'help', 'prime', 'errand'})
+    def test_agent_tree_is_help_prime_errand_and_the_mail_verbs(self) -> None:
+        tree = _role_tree(ROLE_AGENT)
+        compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg'})
+        compare(
+            set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
+            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer'},
+        )
 
     def test_synonyms_survive_iff_their_canonical_does(self) -> None:
         manager = _role_tree(ROLE_MANAGER)
@@ -366,7 +375,7 @@ class TestMainRole:
         compare(
             set(capsys.readouterr().out.splitlines()),
             # the manager's pruned root, plus ls's surviving synonym — nothing else
-            expected={'help', 'prime', 'ls', 'list', 'review', 'errand', 'goal', 'agent'},
+            expected={'help', 'prime', 'ls', 'list', 'review', 'errand', 'goal', 'agent', 'msg'},
         )
 
     def test_captain_keeps_the_full_tree_with_options_stripped(

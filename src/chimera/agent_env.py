@@ -26,6 +26,10 @@ ROLE_CAPTAIN, ROLE_MANAGER, ROLE_AGENT = 'captain', 'manager', 'agent'
 ROLE_ENV_VAR = 'CHIMERA_ROLE'
 ROLE_SCOPE_ENV_VAR = 'CHIMERA_ROLE_SCOPE'  # '<project>' or '<project>@<goal>'
 
+# The inter-agent mail commands — every actor (manager and agent alike) sends, reads and
+# retires its own mail, so both role trees carry the whole set.
+_MSG_COMMANDS = frozenset({'msg ls', 'msg send', 'msg inbox', 'msg thread', 'msg ack', 'msg defer'})
+
 # Per-role command allowlists (canonical leaf paths). A role's session sees only these —
 # the rest of the tree is stripped (see __main__._strip_to_role), never admonished about.
 ROLE_COMMANDS: dict[str, frozenset[str]] = {
@@ -50,11 +54,12 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
             'review',
             'errand',
         }
-    ),
+    )
+    | _MSG_COMMANDS,
     # errand is deliberately in both trees: cross-project *reading* is knowledge, not
     # capability (same rule that leaves listers unfenced), and its target axis has its
     # own containment (see __main__._foreign)
-    ROLE_AGENT: frozenset({'help', 'prime', 'errand'}),
+    ROLE_AGENT: frozenset({'help', 'prime', 'errand'}) | _MSG_COMMANDS,
 }
 
 
