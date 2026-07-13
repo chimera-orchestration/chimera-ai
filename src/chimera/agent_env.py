@@ -26,10 +26,19 @@ ROLE_CAPTAIN, ROLE_MANAGER, ROLE_AGENT = 'captain', 'manager', 'agent'
 ROLE_ENV_VAR = 'CHIMERA_ROLE'
 ROLE_SCOPE_ENV_VAR = 'CHIMERA_ROLE_SCOPE'  # '<project>' or '<project>@<goal>'
 
-# The inter-agent mail commands — every actor (manager and agent alike) sends, reads and
-# retires its own mail, so both role trees carry the whole set.
+# The inter-agent mail commands — every actor (manager and agent alike) sends, reads,
+# watches and retires its own mail, so both role trees carry the whole set.
 _MSG_COMMANDS = frozenset(
-    {'msg ls', 'msg send', 'msg inbox', 'msg thread', 'msg ack', 'msg defer', 'msg drain'}
+    {
+        'msg ls',
+        'msg send',
+        'msg inbox',
+        'msg thread',
+        'msg ack',
+        'msg defer',
+        'msg drain',
+        'msg watch',
+    }
 )
 
 # The harness hooks — installed user-wide, so they fire inside chimera-launched sessions too,

@@ -183,7 +183,7 @@ class TestStripToRole:
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
-            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain'},
+            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain', 'watch'},
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'hook')).commands),
@@ -195,7 +195,7 @@ class TestStripToRole:
         compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg', 'hook'})
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
-            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain'},
+            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain', 'watch'},
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'hook')).commands),

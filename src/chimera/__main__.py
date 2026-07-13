@@ -63,6 +63,8 @@ from chimera.commands.msg.ls import outstanding as _msg_outstanding
 from chimera.commands.msg.send import send as _msg_send
 from chimera.commands.msg.store import caller as _msg_caller
 from chimera.commands.msg.thread import thread as _msg_thread
+from chimera.commands.msg.watch import line as _msg_line
+from chimera.commands.msg.watch import watch as _msg_watch
 from chimera.commands.project.add import add as _project_add
 from chimera.commands.project.checkout import checkout as _project_checkout
 from chimera.commands.project.ls import projects as _projects
@@ -1699,6 +1701,29 @@ def msg_drain(
             typer.echo('Nothing to receive')
         for message in claimed:
             typer.echo(f'{message.id}  from {message.sender}  [{message.kind}] {message.subject}')
+
+
+@msg_app.command(
+    'watch',
+    cls=LoggingCommand,
+    help='Follow an inbox: one line per newly arriving message (read-only, never claims).',
+)
+@logs(_msg_watch)
+def msg_watch(
+    address: Annotated[
+        str | None, typer.Argument(help='Whose inbox (default: inferred from cwd)')
+    ] = None,
+    interval: Annotated[
+        float, typer.Option('--interval', help='Seconds between inbox polls')
+    ] = 1.0,
+) -> None:
+    who = address if address is not None else _msg_caller(Path.cwd())
+    feed = _msg_watch(resolve_workspace(Path.cwd()), who, interval=interval)
+    try:
+        for message in feed:  # typer.echo flushes per line — the line-buffered contract
+            typer.echo(_msg_line(message))
+    except KeyboardInterrupt:
+        pass  # the normal way a watch ends — a clean exit, so the end frame still logs
 
 
 hook_app = typer.Typer(help='Hooks chimera installs into the harness (invoked by it, not you).')
