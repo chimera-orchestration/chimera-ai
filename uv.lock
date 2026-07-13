@@ -7,8 +7,8 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "P1W"
 
 [options.exclude-newer-package]
-giterator = "2026-07-11T23:00:00Z"
-testfixtures = "2026-07-11T23:00:00Z"
+giterator = "2026-07-12T00:00:00Z"
+testfixtures = "2026-07-12T00:00:00Z"
 
 [[package]]
 name = "accessible-pygments"
