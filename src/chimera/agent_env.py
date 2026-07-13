@@ -32,6 +32,11 @@ _MSG_COMMANDS = frozenset(
     {'msg ls', 'msg send', 'msg inbox', 'msg thread', 'msg ack', 'msg defer', 'msg drain'}
 )
 
+# The capture hooks — installed user-wide, so they fire inside chimera-launched sessions too,
+# where the role strip would otherwise reach them. They record to the archive; harmless as
+# capability, and the hook process (not the agent) is what actually invokes them.
+_HOOK_COMMANDS = frozenset({'hook session-start', 'hook session-end'})
+
 # Per-role command allowlists (canonical leaf paths). A role's session sees only these —
 # the rest of the tree is stripped (see __main__._strip_to_role), never admonished about.
 ROLE_COMMANDS: dict[str, frozenset[str]] = {
@@ -57,11 +62,12 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
             'errand',
         }
     )
-    | _MSG_COMMANDS,
+    | _MSG_COMMANDS
+    | _HOOK_COMMANDS,
     # errand is deliberately in both trees: cross-project *reading* is knowledge, not
     # capability (same rule that leaves listers unfenced), and its target axis has its
     # own containment (see __main__._foreign)
-    ROLE_AGENT: frozenset({'help', 'prime', 'errand'}) | _MSG_COMMANDS,
+    ROLE_AGENT: frozenset({'help', 'prime', 'errand'}) | _MSG_COMMANDS | _HOOK_COMMANDS,
 }
 
 

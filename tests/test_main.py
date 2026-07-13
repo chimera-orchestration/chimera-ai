@@ -170,7 +170,7 @@ class TestStripToRole:
         # chat/init/doctor gone; project and worktree emptied by the prune, so gone whole
         compare(
             set(tree.commands),
-            expected={'help', 'prime', 'ls', 'review', 'errand', 'goal', 'agent', 'msg'},
+            expected={'help', 'prime', 'ls', 'review', 'errand', 'goal', 'agent', 'msg', 'hook'},
         )
         goal = cast(TyperGroup, _leaf(tree, 'goal'))
         compare(
@@ -185,13 +185,21 @@ class TestStripToRole:
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
             expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain'},
         )
+        compare(
+            set(cast(TyperGroup, _leaf(tree, 'hook')).commands),
+            expected={'session-start', 'session-end'},
+        )
 
-    def test_agent_tree_is_help_prime_errand_and_the_mail_verbs(self) -> None:
+    def test_agent_tree_is_help_prime_errand_mail_and_capture_hooks(self) -> None:
         tree = _role_tree(ROLE_AGENT)
-        compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg'})
+        compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg', 'hook'})
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
             expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain'},
+        )
+        compare(
+            set(cast(TyperGroup, _leaf(tree, 'hook')).commands),
+            expected={'session-start', 'session-end'},
         )
 
     def test_synonyms_survive_iff_their_canonical_does(self) -> None:
@@ -339,7 +347,7 @@ class TestMainRole:
         with ShouldRaise(SystemExit(0)):
             main()
         entries = json.loads(capsys.readouterr().out)
-        compare({entry['path'] for entry in entries}, expected=ROLE_COMMANDS[ROLE_AGENT])
+        compare({entry['path'] for entry in entries}, expected=set(ROLE_COMMANDS[ROLE_AGENT]))
 
     def test_unknown_role_fails_hard_before_any_command_parses(
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]
@@ -375,7 +383,18 @@ class TestMainRole:
         compare(
             set(capsys.readouterr().out.splitlines()),
             # the manager's pruned root, plus ls's surviving synonym — nothing else
-            expected={'help', 'prime', 'ls', 'list', 'review', 'errand', 'goal', 'agent', 'msg'},
+            expected={
+                'help',
+                'prime',
+                'ls',
+                'list',
+                'review',
+                'errand',
+                'goal',
+                'agent',
+                'msg',
+                'hook',
+            },
         )
 
     def test_captain_keeps_the_full_tree_with_options_stripped(

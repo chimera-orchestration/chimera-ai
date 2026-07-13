@@ -1,4 +1,6 @@
+import json
 import os
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +49,8 @@ from chimera.commands.goal.rename import rename as _goal_rename
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
+from chimera.commands.hook.capture import session_end as _hook_session_end
+from chimera.commands.hook.capture import session_start as _hook_session_start
 from chimera.commands.init import init as _init
 from chimera.commands.logtail import logtail as _logtail
 from chimera.commands.ls import Board, board
@@ -1694,6 +1698,35 @@ def msg_drain(
             typer.echo('Nothing to receive')
         for message in claimed:
             typer.echo(f'{message.id}  from {message.sender}  [{message.kind}] {message.subject}')
+
+
+hook_app = typer.Typer(help='Hooks chimera installs into the harness (invoked by it, not you).')
+app.add_typer(hook_app, name='hook')
+
+
+@hook_app.command(
+    'session-start', cls=LoggingCommand, help='Record a starting session (SessionStart hook).'
+)
+@logs(_hook_session_start)
+def hook_session_start() -> None:
+    payload = json.load(sys.stdin)
+    _hook_session_start(
+        Path(str(payload['cwd'])),
+        str(payload['session_id']),
+        str(payload['transcript_path']),
+        str(payload.get('source') or ''),
+    )
+
+
+@hook_app.command('session-end', cls=LoggingCommand, help='Mark a session ended (SessionEnd hook).')
+@logs(_hook_session_end)
+def hook_session_end() -> None:
+    payload = json.load(sys.stdin)
+    _hook_session_end(
+        Path(str(payload['cwd'])),
+        str(payload['session_id']),
+        str(payload.get('reason') or 'ended'),
+    )
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
