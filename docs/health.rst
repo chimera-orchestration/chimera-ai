@@ -7,6 +7,11 @@ configuration marker, a leftover worktree, a stale registration, an
 out-of-date Chimera checkout, missing shell completion — and, where it's
 safe, how to repair it.
 
+.. illustrative — not run by the doc tests: doctor's report is machine- and
+   network-dependent by design (it checks this very chimera checkout against
+   origin, brew-installed tools, your shell), so its output can't be pinned.
+.. skip: next
+
 .. code-block:: console
 
     $ ch doctor

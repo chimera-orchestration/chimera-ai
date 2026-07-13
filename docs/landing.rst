@@ -17,7 +17,24 @@ Syncing: your branch catches up
 -------------------------------
 
 ``ch goal sync <goal>`` brings your ``human`` branch up to the agent's work,
-creating it if it doesn't exist yet::
+creating it if it doesn't exist yet:
+
+.. invisible-code-block: python
+
+    # stand up what the tutorial built: a workspace, the demo project, and the
+    # agent's greeting commit — then run this guide's commands from the project
+    # directory, which is why they need no -p.
+    session.run('ch init ~/lycia --captain pegasus')
+    session.env['CHIMERA_WORKSPACE'] = str(session.home / 'lycia')
+    session.run('ch project new demo')
+    session.run('ch worktree add --goal add-greeting -p demo')
+    worktree = session.home / 'lycia/demo/worktrees/add-greeting@agent'
+    (worktree / 'greeting.txt').write_text('Hello there, and welcome!\n')
+    session.run(f'git -C {worktree} add greeting.txt')
+    session.run(f'git -C {worktree} commit -q -m "Add greeting"')
+    session.cwd = session.home / 'lycia/demo'
+
+.. code-block:: console
 
     $ ch goal sync add-greeting
     Created human at agent (3ada24c)
@@ -47,7 +64,9 @@ Landing locally: ``goal merge``
 ``ch goal merge <goal>`` is the finish-up for work that doesn't need a pull
 request: it fast-forwards the default branch (or ``--into <branch>``) to the
 goal's work, stops any live agent sessions, and sweeps the goal's branches
-and worktrees::
+and worktrees:
+
+.. code-block:: console
 
     $ ch goal merge add-greeting
     Fast-forwarded main to add-greeting/human (3ada24c)

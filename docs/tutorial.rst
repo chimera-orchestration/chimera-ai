@@ -12,6 +12,9 @@ agent harness Chimera launches by default.
 Install
 -------
 
+.. installs from PyPI — not run by the doc tests, which use the checkout itself.
+.. skip: next
+
 .. code-block:: console
 
     $ uv tool install chimera-ai
@@ -95,9 +98,23 @@ context Chimera injects at launch (see :doc:`concepts`).
 Now run it for real, from anywhere (``-p demo`` names the project; inside the
 project directory you could drop it):
 
+.. interactive — not run by the doc tests; the invisible block below stands in.
+.. skip: next
+
 .. code-block:: console
 
     $ ch goal start add-greeting -p demo
+
+.. invisible-code-block: python
+
+    # goal start was skipped above (it opens an interactive agent session), so the
+    # doc tests stand in for it: the same branch-and-worktree setup it performs,
+    # then the commit the prose below asks the agent for.
+    session.run('ch worktree add --goal add-greeting -p demo')
+    worktree = session.home / 'lycia/demo/worktrees/add-greeting@agent'
+    (worktree / 'greeting.txt').write_text('Hello there, and welcome!\n')
+    session.run(f'git -C {worktree} add greeting.txt')
+    session.run(f'git -C {worktree} commit -q -m "Add greeting"')
 
 This opens an interactive Claude Code session in the worktree. Ask it for
 something small — *"create greeting.txt containing a friendly greeting, and
@@ -164,6 +181,9 @@ Talk to the captain
 You don't have to drive every step yourself. From the workspace root,
 ``ch chat`` launches the captain — a workspace-level agent that knows the
 ``ch`` commands and directs work across all projects:
+
+.. interactive — not run by the doc tests.
+.. skip: next
 
 .. code-block:: console
 

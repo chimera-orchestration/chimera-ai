@@ -3,9 +3,12 @@ The workspace
 
 Chimera keeps everything it manages — projects, goals and agent worktrees —
 under a single directory tree called the :ref:`workspace <concept-workspace>`
-(named ``lycia`` by convention). Create one with::
+(named ``lycia`` by convention). Create one with:
 
-    ch init ~/lycia --captain pegasus
+.. code-block:: console
+
+    $ ch init ~/lycia --captain pegasus
+    Initialized workspace at /Users/you/lycia
 
 ``--captain`` names the persona of the workspace's captain (see
 :doc:`concepts`); it can be set later in ``config.yaml``.
