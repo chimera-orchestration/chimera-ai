@@ -252,6 +252,14 @@ def test_disposing_a_message_is_logged(tmpdir: TempDir) -> None:
     log.check((f'comms: dispose {FROM} -> {TO} [message] hello (m1)', message.log_fields()))
 
 
+def test_a_long_subject_is_elided_in_the_text_never_the_fields(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    message = a_message('m1', subject='s' * 80)
+    with _trace() as log:
+        comms.send(message)
+    log.check((f'comms: send {FROM} -> {TO} [message] {"s" * 57}... (m1)', message.log_fields()))
+
+
 def test_the_logged_text_carries_the_kind_and_subject(tmpdir: TempDir) -> None:
     comms = Comms(tmpdir.path)
     message = a_message('e1', kind='escalation', priority='urgent', subject='build is red')

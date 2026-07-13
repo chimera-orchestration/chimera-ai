@@ -234,16 +234,24 @@ class Comms:
         return [_read(path) for path in sorted(paths, key=lambda p: p.name)]
 
 
+_SUBJECT_LIMIT = 60
+
+
 def _log(action: str, message: Message) -> None:
     """Land ``action`` on ``message`` at INFO — the one log site for every mailbox mutation.
 
     The text carries the routing (``comms: send <sender> -> <to> [<kind>] <subject> (<id>)``)
     because that's all a live tail shows; :meth:`Message.log_fields` rides bound, so the
-    structured record stays whole. One helper, so no site can drift from either half.
+    structured record stays whole. One helper, so no site can drift from either half. A
+    subject past :data:`_SUBJECT_LIMIT` is elided in the text only — the bound field, like
+    the body (which never enters the text), stays whole.
     """
+    subject = message.subject
+    if len(subject) > _SUBJECT_LIMIT:
+        subject = subject[: _SUBJECT_LIMIT - 3] + '...'
     logger.bind(**message.log_fields()).info(
         f'comms: {action} {message.sender} -> {message.to} '
-        f'[{message.kind}] {message.subject} ({message.id})'
+        f'[{message.kind}] {subject} ({message.id})'
     )
 
 
