@@ -24,6 +24,11 @@ key constraints passed explicitly (subagents inherit no CLAUDE.md: give them `uv
 
 ## Phase 1 — audit the agent docs
 
+This phase is executable: under Claude Code, run the `docs-sweep` workflow
+(@.claude/workflows/docs-sweep.js) — it scouts the docs, fans out the auditors below,
+adversarially verifies every finding, and returns the drift report; optional
+`{docs: [...]}` args limit scope. Elsewhere (or by hand), the spec it implements:
+
 Fan out one **read-only** auditor per doc, in parallel; slice any doc over ~200 lines at
 section boundaries so each auditor holds its whole slice. Every auditor gets the same
 method:
