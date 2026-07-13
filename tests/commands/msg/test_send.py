@@ -95,7 +95,7 @@ def test_msg_send_cli(tmpdir: TempDir, command: Command, replace: Replacer) -> N
     )
     sent = {  # the store's own INFO line: source/dest/content
         'level': 'INFO',
-        'message': 'comms: send',
+        'message': 'comms: send pegasus -> proj@g@agent [message] ping (sent-1)',
         'msg_id': 'sent-1',
         'sender': 'pegasus',
         'to': 'proj@g@agent',

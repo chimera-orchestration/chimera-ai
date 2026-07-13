@@ -230,7 +230,8 @@ def test_sending_a_message_is_logged_with_full_context(tmpdir: TempDir) -> None:
     message = a_message('m1', subject='ping')
     with _trace() as log:
         comms.send(message)
-    log.check(('comms: send', message.log_fields()))  # source, dest and full context
+    # routing in the text (all a live tail shows), full context bound
+    log.check((f'comms: send {FROM} -> {TO} [message] ping (m1)', message.log_fields()))
 
 
 def test_receiving_a_message_is_logged(tmpdir: TempDir) -> None:
@@ -239,7 +240,7 @@ def test_receiving_a_message_is_logged(tmpdir: TempDir) -> None:
     comms.send(message)  # outside the capture, so only the receive is caught
     with _trace() as log:
         comms.drain(TO)
-    log.check(('comms: receive', message.log_fields()))
+    log.check((f'comms: receive {FROM} -> {TO} [message] hello (m1)', message.log_fields()))
 
 
 def test_disposing_a_message_is_logged(tmpdir: TempDir) -> None:
@@ -248,7 +249,15 @@ def test_disposing_a_message_is_logged(tmpdir: TempDir) -> None:
     comms.send(message)
     with _trace() as log:
         comms.dispose(TO, 'm1')
-    log.check(('comms: dispose', message.log_fields()))
+    log.check((f'comms: dispose {FROM} -> {TO} [message] hello (m1)', message.log_fields()))
+
+
+def test_the_logged_text_carries_the_kind_and_subject(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    message = a_message('e1', kind='escalation', priority='urgent', subject='build is red')
+    with _trace() as log:
+        comms.send(message)
+    log.check((f'comms: send {FROM} -> {TO} [escalation] build is red (e1)', message.log_fields()))
 
 
 def test_many_agents_send_to_one_mailbox_concurrently(tmpdir: TempDir) -> None:

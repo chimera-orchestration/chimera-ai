@@ -24,8 +24,9 @@ directory listing is FIFO.
 The store models the message *lifecycle*; *why* a message was disposed (handled vs
 deferred, and the deferral reason) is audit metadata for the log, not the mailbox —
 the same log-is-truth split the archive keeps. Each send, receive (drain) and disposal
-logs at INFO, binding :meth:`Message.log_fields` — source, destination, party identifiers
-and content — so a message's whole journey is traceable from the log alone; the read-only
+logs at INFO through :func:`_log`: routing in the message text (who -> whom, kind,
+subject, id — what a live tail shows) and :meth:`Message.log_fields` bound structured —
+so a message's whole journey is traceable from the log alone; the read-only
 peeks (inbox/thread) stay silent. Timestamps must be timezone-aware.
 """
 
@@ -77,7 +78,8 @@ class Message(BaseModel):
 
         Source, destination, the identifiers of all parties and the message, and the content —
         so a message's whole journey is reconstructable from the log alone and no site (send,
-        drain, dispose, delivery) can forget a field. Bind with ``logger.bind(**msg.log_fields())``.
+        drain, dispose, delivery) can forget a field. The store's own sites bind them via
+        :func:`_log`; anywhere else, ``logger.bind(**msg.log_fields())``.
         """
         return {
             'msg_id': self.id,
@@ -144,7 +146,7 @@ class Comms:
         tmp = mailbox / 'tmp' / name
         tmp.write_text(message.model_dump_json())
         os.replace(tmp, mailbox / 'new' / name)
-        logger.bind(**message.log_fields()).info('comms: send')
+        _log('send', message)
         return message
 
     def inbox(self, address: str, *, unread_only: bool = False) -> list[Message]:
@@ -170,7 +172,7 @@ class Comms:
             except FileNotFoundError:
                 continue  # another drainer claimed it first
             message = _read(destination)
-            logger.bind(**message.log_fields()).info('comms: receive')
+            _log('receive', message)
             claimed.append(message)
         return claimed
 
@@ -188,7 +190,7 @@ class Comms:
             if source.exists():
                 message = _read(source)
                 os.replace(source, done / name)
-                logger.bind(**message.log_fields()).info('comms: dispose')
+                _log('dispose', message)
                 return
 
     def thread(self, address: str, thread: str) -> list[Message]:
@@ -230,6 +232,19 @@ class Comms:
             if directory.is_dir():
                 paths.extend(directory.glob('*.json'))
         return [_read(path) for path in sorted(paths, key=lambda p: p.name)]
+
+
+def _log(action: str, message: Message) -> None:
+    """Land ``action`` on ``message`` at INFO — the one log site for every mailbox mutation.
+
+    The text carries the routing (``comms: send <sender> -> <to> [<kind>] <subject> (<id>)``)
+    because that's all a live tail shows; :meth:`Message.log_fields` rides bound, so the
+    structured record stays whole. One helper, so no site can drift from either half.
+    """
+    logger.bind(**message.log_fields()).info(
+        f'comms: {action} {message.sender} -> {message.to} '
+        f'[{message.kind}] {message.subject} ({message.id})'
+    )
 
 
 def _new_id(ts: datetime) -> str:
