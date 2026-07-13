@@ -159,6 +159,49 @@ def test_drain_is_empty_for_an_unused_address(tmpdir: TempDir) -> None:
     assert Comms(tmpdir.path).drain('nobody@nowhere@agent') == []
 
 
+def test_deliver_claims_and_surfaces_new_mail(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    assert [m.id for m in comms.deliver(TO, 'session-1')] == ['m1']
+    assert comms.inbox(TO, unread_only=True) == []  # claimed on the way through: new/ → cur/
+
+
+def test_deliver_surfaces_mail_a_third_party_drained(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    comms.drain(TO)  # someone else claims it — the delivery trap this method closes
+    assert [m.id for m in comms.deliver(TO, 'session-1')] == ['m1']
+
+
+def test_deliver_shows_a_session_each_message_only_once(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    comms.deliver(TO, 'session-1')
+    assert comms.deliver(TO, 'session-1') == []  # seen, unacked — not re-injected here
+    comms.send(a_message('m2'))
+    assert [m.id for m in comms.deliver(TO, 'session-1')] == ['m2']  # only what's genuinely new
+
+
+def test_deliver_keeps_surfacing_unacked_mail_to_fresh_sessions(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    comms.deliver(TO, 'session-1')
+    assert [m.id for m in comms.deliver(TO, 'session-2')] == ['m1']  # unacked → every session
+
+
+def test_deliver_stops_once_disposed(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    comms.deliver(TO, 'session-1')
+    comms.dispose(TO, 'm1')
+    assert comms.deliver(TO, 'session-1') == []
+    assert comms.deliver(TO, 'session-2') == []  # ack is the sole thing that ends surfacing
+
+
+def test_deliver_is_empty_for_an_unused_address(tmpdir: TempDir) -> None:
+    assert Comms(tmpdir.path).deliver('nobody@nowhere@agent', 'session-1') == []
+
+
 def test_dispose_removes_a_drained_message_from_the_inbox(tmpdir: TempDir) -> None:
     comms = Comms(tmpdir.path)
     comms.send(a_message('m1'))
@@ -240,6 +283,16 @@ def test_receiving_a_message_is_logged(tmpdir: TempDir) -> None:
     with _trace() as log:
         comms.drain(TO)
     log.check(('comms: receive', message.log_fields()))
+
+
+def test_delivering_a_message_is_logged_with_the_session(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    message = a_message('m1')
+    comms.send(message)
+    comms.drain(TO)  # outside the capture: only the delivery itself is caught
+    with _trace() as log:
+        comms.deliver(TO, 'session-1')
+    log.check(('comms: deliver', {'session': 'session-1', **message.log_fields()}))
 
 
 def test_disposing_a_message_is_logged(tmpdir: TempDir) -> None:
