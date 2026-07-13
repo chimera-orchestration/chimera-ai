@@ -112,6 +112,33 @@ up after itself. Cross-project *reading* is deliberately cheap; cross-project
 *writing* is not a thing any single session can do. See
 :ref:`errands <guide-errands>`.
 
+.. _concept-message:
+
+Message
+-------
+
+Sessions run as separate processes, so they talk by mail: one immutable
+message per file, in a per-address mailbox under the workspace's ``state/``
+directory. An address *is* a session name — the captain's persona,
+``<project>@manager``, ``<project>@<goal>@<actor>`` — so knowing who you
+want already names the mailbox. A message is *drained* into its recipient's
+session at a turn boundary, then *acked* (handled) or *deferred* (put
+aside, with a reason). ``ch msg`` is the command group; :doc:`collaboration`
+the guide.
+
+.. _concept-archive:
+
+Archive
+-------
+
+The queryable index of every LLM session on the machine, Chimera-launched
+or not: one SQLite database at ``state/archive.db`` recording which harness
+ran each session, who orchestrated it, when, and — for sessions in a managed
+worktree — the workspace, project, goal and actor it served. Session hooks
+feed it as sessions start and end; ``ch doctor --fix`` installs them. Where
+the :doc:`log <logging>` records what happened line by line, the archive
+ties happenings to sessions. See :doc:`collaboration`.
+
 Reserved vocabulary
 -------------------
 

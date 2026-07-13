@@ -5,9 +5,11 @@ Each document gets a scratch ConsoleSession — a throwaway home directory with 
 git identity and environment, so nothing ever touches the user's real workspace. In a
 ``code-block:: console``, each ``$ `` line runs for real (``ch`` resolving to this
 venv's chimera) and its output is compared, with doctest ``...`` ellipsis, after
-normalising: the scratch home reads as the docs' ``/Users/you``, and commit shas map
-consistently — the same real sha always maps to the same documented sha, so a sha the
-docs repeat provably names one commit throughout.
+normalising: the scratch home reads as the docs' ``/Users/you``, and commit shas and
+message ids map consistently — the same real value always maps to the same documented
+one, so a sha or id the docs repeat provably names one thing throughout. Message-id
+mapping also runs in reverse on the *command* line, so a documented id shown by one
+step can be passed to a later one (``ch msg ack <id>``) and reach the real message.
 """
 
 import doctest
@@ -28,11 +30,12 @@ from testfixtures import compare
 from chimera.config import AgentConfig
 
 SHA = re.compile(r'\b[0-9a-f]{7,40}\b')
+MSG_ID = re.compile(r'\b\d{8}T\d{12}-[0-9a-f]{8}\b')
 CHECKER = doctest.OutputChecker()
 
 
 class ConsoleSession:
-    """One document's scratch world: a fake home, its environment, and its sha mapping."""
+    """One document's scratch world: a fake home, its environment, and its value mappings."""
 
     def __init__(self, home: Path) -> None:
         self.home = home
@@ -43,12 +46,15 @@ class ConsoleSession:
             'GIT_CONFIG_NOSYSTEM': '1',
         }
         self.shas: dict[str, str] = {}
+        self.msg_ids: dict[str, str] = {}
         (home / '.gitconfig').write_text('[user]\nname = You\nemail = you@example.com\n')
 
     def _expand(self, token: str) -> str:
         if token.startswith('~'):
             token = str(self.home) + token[1:]
-        return token.replace('$HOME', str(self.home))
+        token = token.replace('$HOME', str(self.home))
+        real = {documented: real for real, documented in self.msg_ids.items()}
+        return MSG_ID.sub(lambda match: real.get(match.group(), match.group()), token)
 
     def run(self, command: str) -> str:
         program, *args = (self._expand(token) for token in shlex.split(command))
@@ -69,10 +75,14 @@ class ConsoleSession:
 
     def normalise(self, want: str, got: str) -> str:
         got = got.replace(str(self.home), '/Users/you')
-        for documented, real in zip(SHA.findall(want), SHA.findall(got)):
-            if real not in self.shas and documented not in self.shas.values():
-                self.shas[real] = documented
-        return SHA.sub(lambda match: self.shas.get(match.group(), match.group()), got)
+        got = self._map(MSG_ID, self.msg_ids, want, got)
+        return self._map(SHA, self.shas, want, got)
+
+    def _map(self, pattern: re.Pattern[str], mapping: dict[str, str], want: str, got: str) -> str:
+        for documented, real in zip(pattern.findall(want), pattern.findall(got)):
+            if real not in mapping and documented not in mapping.values():
+                mapping[real] = documented
+        return pattern.sub(lambda match: mapping.get(match.group(), match.group()), got)
 
 
 def _steps(source: str) -> list[tuple[str, str]]:

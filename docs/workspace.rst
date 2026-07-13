@@ -24,7 +24,11 @@ Layout
       principles/               # workspace-wide principles (inlined at every launch)
       knowledge/                # workspace-wide knowledge (indexed at launch)
       processes/                # reserved for agent runbooks (not built yet)
-      logs/                     # chimera.jsonl and rendered launch contexts
+      state/                    # runtime state (gitignored):
+        log.jsonl               #   the action log (see the logging guide)
+        archive.db              #   the session archive
+        mail/                   #   inter-agent mailboxes, one per address
+        context/                #   rendered launch contexts
       <project>/
         config.yaml             # kind: project + where its repo lives
         principles/  knowledge/  prompts/  roles/  processes/
@@ -33,9 +37,9 @@ Layout
 
 The workspace's own git tracks configuration and context — ``config.yaml``
 files, ``principles/``, ``knowledge/``, ``prompts/``, ``roles/``,
-``processes/`` — and ignores the live repositories and worktrees
-(``*/repo/``, ``*/worktrees/``, ``logs/``). Your accumulated context is
-versioned; the managed checkouts are not double-tracked.
+``processes/`` — and ignores the live repositories, worktrees and runtime
+state (``*/repo/``, ``*/worktrees/``, ``state/``). Your accumulated context
+is versioned; the managed checkouts and machine-local state are not.
 
 ``config.yaml``'s ``kind`` marker is the only on-disk signal of what a
 directory is — depth and naming are never assumed.

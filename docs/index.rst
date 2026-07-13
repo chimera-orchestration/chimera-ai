@@ -38,6 +38,7 @@ read :doc:`concepts`. Day to day, the guides below cover each workflow, and
 
    directing
    landing
+   collaboration
    health
    logging
    completion

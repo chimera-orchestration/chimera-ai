@@ -4,8 +4,9 @@ Keeping the workspace healthy
 ``ch doctor`` is the workspace's health check: a registry of independent
 checks, each of which knows how to spot one kind of drift — a missing
 configuration marker, a leftover worktree, a stale registration, an
-out-of-date Chimera checkout, missing shell completion — and, where it's
-safe, how to repair it.
+out-of-date Chimera checkout, missing shell completion, session hooks not
+yet installed (see :doc:`collaboration`) — and, where it's safe, how to
+repair it.
 
 .. illustrative — not run by the doc tests: doctor's report is machine- and
    network-dependent by design (it checks this very chimera checkout against
