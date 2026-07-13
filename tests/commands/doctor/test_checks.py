@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+from pathlib import Path
 from typing import NoReturn
 
 import yaml
@@ -14,6 +15,7 @@ from chimera.commands.doctor.checks import (
     WorkspaceDirsCheck,
     CaptainCheck,
     ChimeraUpToDateCheck,
+    ClaudeHooksCheck,
     FblogCheck,
     GitignoreCheck,
     InertBranchCheck,
@@ -30,6 +32,7 @@ from chimera.commands.doctor.checks import (
     commit_message,
 )
 from chimera.commands.doctor.core import Check, Exclusions, Finding
+from chimera.commands.hook import install as hook_install
 from chimera.commands.init import TEMPLATE
 from chimera.worktrees import is_dirty, registered_worktrees
 
@@ -1782,3 +1785,63 @@ class TestCommitMessage:
         replace.in_module(subprocess.Popen, Popen)
         Popen.set_command(_commit_cmd(), returncode=1)
         compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
+
+
+class TestClaudeHooks:
+    def test_settings_path_is_under_the_claude_home(self) -> None:
+        assert hook_install.settings_path() == Path.home() / '.claude' / 'settings.json'
+
+    def test_current_is_silent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / 'settings.json'
+        hook_install.write(settings, hook_install.merge({}))  # already installed
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        compare(_run(ClaudeHooksCheck(), _ws(tmpdir)), expected=[])
+
+    def test_missing_hooks_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'  # absent
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        compare(
+            _run(ClaudeHooksCheck(), _ws(tmpdir)),
+            expected=[
+                Finding(
+                    'claude-hooks',
+                    f'{settings} missing chimera hooks: SessionStart, SessionEnd, UserPromptSubmit',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+
+    def test_fix_installs_them(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        [finding] = _run(ClaudeHooksCheck(), _ws(tmpdir), fix=True)
+        assert finding.resolved
+        assert hook_install.missing_hooks(hook_install.read(settings)) == []
+
+    def test_fix_preserves_a_users_own_hooks_and_settings(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        hook_install.write(
+            settings,
+            {
+                'model': 'opus',
+                'hooks': {
+                    'SessionStart': [{'hooks': [{'type': 'command', 'command': 'echo mine'}]}]
+                },
+            },
+        )
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        _run(ClaudeHooksCheck(), _ws(tmpdir), fix=True)
+        data = hook_install.read(settings)
+        assert data['model'] == 'opus'  # unrelated settings preserved
+        starts = [h['command'] for entry in data['hooks']['SessionStart'] for h in entry['hooks']]
+        assert starts == ['echo mine', 'ch hook session-start']  # user's survives, ours appended
+
+    def test_fix_is_idempotent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        ws = _ws(tmpdir)
+        _run(ClaudeHooksCheck(), ws, fix=True)
+        compare(_run(ClaudeHooksCheck(), ws, fix=True), expected=[])  # nothing left to do

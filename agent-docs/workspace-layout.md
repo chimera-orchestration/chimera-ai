@@ -301,6 +301,11 @@ add/retire via the `CHECKS` tuple). Current checks:
 - **fblog** — `ch logtail`'s renderer (the `fblog` binary) is on the PATH; `--fix` installs it
   with brew. Without brew there's nothing to install with, so the finding just points at
   fblog's repo — not auto-fixable
+- **claude-hooks** — chimera's session-capture + mail-delivery hooks are installed in the
+  user's global `~/.claude/settings.json` (SessionStart/End → the archive, UserPromptSubmit →
+  `ch msg drain --inject`). `--fix` merges them in idempotently, preserving any existing hooks.
+  Machine config, not the workspace's, so doctor *is* the installer — there's no `ch hook
+  install` to remember
 - **workspace-clean** — the workspace's own git repo has no uncommitted or untracked content
   (skipped when the workspace isn't a git repo; `*/repo/` and `*/worktrees/` are gitignored, so
   only tracked workspace files count). Runs last, so it sweeps up the config/gitignore edits the

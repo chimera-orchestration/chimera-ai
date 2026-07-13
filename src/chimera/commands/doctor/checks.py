@@ -16,6 +16,7 @@ from chimera.commands.doctor.core import (
     read_raw,
     write_config,
 )
+from chimera.commands.hook import install as hook_install
 from chimera.commands.init import TEMPLATE
 from chimera.git import Git
 from chimera.worktrees import (
@@ -835,6 +836,30 @@ class FblogCheck:
         )
 
 
+class ClaudeHooksCheck:
+    """Chimera's capture + delivery hooks are installed in the user's Claude settings.
+
+    User-wide (``~/.claude/settings.json``), so they fire for every session: SessionStart/End
+    feed the archive, UserPromptSubmit drains mail into the turn. ``--fix`` merges them in
+    idempotently, preserving any existing hooks. It is the machine's Claude config, not the
+    workspace's — so doctor *is* the installer (there is no ``ch hook install`` to forget).
+    """
+
+    name = 'claude-hooks'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        path = hook_install.settings_path()
+        settings = hook_install.read(path)
+        missing = hook_install.missing_hooks(settings)
+        if not missing:
+            return
+        message = f'{path} missing chimera hooks: {", ".join(missing)}'
+        fixing = fix and not exclude.matches(self.name, message)
+        if fixing:
+            hook_install.write(path, hook_install.merge(settings))
+        yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
 # The lightweight model `commit_message` asks to summarise a workspace's staged changes,
 # and the message it falls back to when claude can't be reached (so the fix still commits —
 # leaving nothing uncommitted is the point, a perfect subject line is not).
@@ -913,5 +938,6 @@ CHECKS: tuple[Check, ...] = (
     WorkspaceEnvCheck(),
     ShellCompletionCheck(),
     FblogCheck(),
+    ClaudeHooksCheck(),
     WorkspaceCommitCheck(),
 )
