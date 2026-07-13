@@ -73,10 +73,26 @@ standard for every site that touches a ref.
 **`Git.ref_log` is the canonical mechanism** — wrap the mutating block, never hand-roll the
 snapshots:
 
+<!-- invisible-code-block: python
+from testfixtures import TempDir
+from giterator.testing import Repo
+
+from chimera.git import Git
+
+d = TempDir().create()
+git = Git(Repo.make(d / 'repo').path)
+refs = ('main',)
+goal = 'g'
+-->
+
 ```python
 with git.ref_log('worktree rm: refs', *refs, goal=goal):
     ...  # the mutations
 ```
+
+<!-- invisible-code-block: python
+d.cleanup()
+-->
 
 It snapshots the named refs either side of the block and lands one line, skipped when nothing
 changed; `always=True` for a site whose line is the recovery record even on a no-op re-run

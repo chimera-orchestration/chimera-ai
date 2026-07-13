@@ -50,11 +50,27 @@ Assert raised exceptions with `ShouldRaise` from testfixtures — never `pytest.
   "validation didn't run at all" — a real gap, not a shortcut for a message that's merely
   verbose or third-party-formatted (that's what `match=` is for).
 
+<!-- invisible-code-block: python
+from pydantic import ValidationError
+from testfixtures import ShouldRaise, TempDir
+from giterator.testing import Repo
+
+from chimera.commands.worktree.add import add
+from chimera.config import NotInProjectError, find_project
+from chimera.service_config import load_services_config
+
+d = TempDir().create()
+ws = d / 'ws'
+repo = Repo.make(d / 'repo')  # deliberately no commits
+worktrees = d / 'worktrees'
+path = d.dump('services.yaml', {'services': [{'name': 'x', 'type': 'docker'}]})  # docker needs image
+-->
+
 ```python
 with ShouldRaise(NotInProjectError(ws / 'ghost')):   # exact: type + message
-    resolve_project(ws, 'ghost')
+    find_project(ws / 'ghost')
 with ShouldRaise(RuntimeError, match='no commits'):  # message embeds `git status` output
-    add(repo.path, worktrees, 'g')
+    add(repo.path, worktrees, goal='g')
 with ShouldRaise(ValidationError, match=r'docker\.image\s+Field required'):  # the right field, not just "a" ValidationError
     load_services_config(path)
 ```
@@ -108,6 +124,7 @@ d.dump('proj/config.yaml', {'kind': 'project', 'repo': str(repo.path)})  # → k
 
 *Checking directory structure* — assert on-disk layout with `d.compare(...)`, which checks the
 **whole** listing (so it also proves nothing extra was written) and scopes with `path=`:
+<!-- skip: next "the two lines are before/after snapshots of the same dir — they can't both hold at once" -->
 ```python
 d.compare(['feature-x@agent'], path='worktrees', recursive=False)  # exactly one worktree, no human
 d.compare(path='worktrees', expected=())                           # …emptied after goal finish
@@ -121,3 +138,8 @@ shorter than the equivalent `compare` (e.g. one path among an otherwise-noisy tr
 - `repo('log', ...)` — run raw git commands (instance is callable)
 - dep: `giterator>=1.0.0` (PyPI)
 - conftest fixture pattern: `with TempDir() as d: yield Repo.make(d.path / 'repo')`
+
+<!-- invisible-code-block: python
+d.cleanup()
+-->
+

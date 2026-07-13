@@ -4,4 +4,4 @@ set -euo pipefail
 uv run ruff check src tests
 uv run ruff format --check src tests
 uv run ty check src tests
-uv run pytest --cov --cov-fail-under=100 tests/ docs/
+uv run pytest --cov --cov-fail-under=100 tests/ docs/ agent-docs/
