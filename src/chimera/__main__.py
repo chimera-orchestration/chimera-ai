@@ -1510,6 +1510,7 @@ def agent_resume(
     )
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
+        typer.echo(f'session: {native}' if native else 'session: (no archived id — by name)')
         _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
 
 

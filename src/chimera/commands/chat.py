@@ -80,6 +80,8 @@ def chat(
     live = any(session.name == name for session in spec.agent.live())
     if live and not dry.on:
         raise ChatAlreadyLiveError(name)
+    # cast, not an annotation: ty narrows the local back to the start|resume union at the
+    # call site, and the union's ParamSpec join trips over resume's extra kw-only `id`
     launch = cast(Launch, spec.agent.resume if resume else spec.agent.start)
     dry(
         launch,

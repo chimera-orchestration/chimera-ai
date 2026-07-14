@@ -545,14 +545,13 @@ def test_stop_is_keyed_by_worktree_so_a_rename_cannot_hide_a_session(
     renamed = Session('uuid-1', 'renamed in the UI', 'idle', worktree, None, pid=int(pid.stdout))
     replace.on_class(Claude.live, lambda self, cwd=None: [renamed] if cwd == worktree else [])
     try:
+        # stop() itself proves the kill: it waits for the pid to die and raises otherwise
         compare(stop(worktree), expected=[renamed])
     finally:
         try:
             os.kill(int(pid.stdout), signal.SIGKILL)
         except ProcessLookupError:
             pass
-    with ShouldRaise(ProcessLookupError):
-        os.kill(int(pid.stdout), 0)
 
 
 def test_agents_aggregates_registered_harnesses(replace: Replacer) -> None:
@@ -1220,6 +1219,7 @@ def test_agent_resume_cli_dry_without_context(
         output='\n'.join(
             [
                 f'Would resume agent in {expected_wt}',
+                'session: (no archived id — by name)',
                 'harness: claude',
                 'role: agent (scope: myproject@g)',
                 'prompt: (interactive)',
