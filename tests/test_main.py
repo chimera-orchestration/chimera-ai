@@ -183,23 +183,23 @@ class TestStripToRole:
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
-            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain'},
+            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain', 'watch'},
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'hook')).commands),
-            expected={'session-start', 'session-end'},
+            expected={'session-start', 'session-end', 'deliver'},
         )
 
-    def test_agent_tree_is_help_prime_errand_mail_and_capture_hooks(self) -> None:
+    def test_agent_tree_is_help_prime_errand_mail_and_hooks(self) -> None:
         tree = _role_tree(ROLE_AGENT)
         compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg', 'hook'})
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
-            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain'},
+            expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain', 'watch'},
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'hook')).commands),
-            expected={'session-start', 'session-end'},
+            expected={'session-start', 'session-end', 'deliver'},
         )
 
     def test_synonyms_survive_iff_their_canonical_does(self) -> None:

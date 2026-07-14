@@ -26,16 +26,25 @@ ROLE_CAPTAIN, ROLE_MANAGER, ROLE_AGENT = 'captain', 'manager', 'agent'
 ROLE_ENV_VAR = 'CHIMERA_ROLE'
 ROLE_SCOPE_ENV_VAR = 'CHIMERA_ROLE_SCOPE'  # '<project>' or '<project>@<goal>'
 
-# The inter-agent mail commands — every actor (manager and agent alike) sends, reads and
-# retires its own mail, so both role trees carry the whole set.
+# The inter-agent mail commands — every actor (manager and agent alike) sends, reads,
+# watches and retires its own mail, so both role trees carry the whole set.
 _MSG_COMMANDS = frozenset(
-    {'msg ls', 'msg send', 'msg inbox', 'msg thread', 'msg ack', 'msg defer', 'msg drain'}
+    {
+        'msg ls',
+        'msg send',
+        'msg inbox',
+        'msg thread',
+        'msg ack',
+        'msg defer',
+        'msg drain',
+        'msg watch',
+    }
 )
 
-# The capture hooks — installed user-wide, so they fire inside chimera-launched sessions too,
-# where the role strip would otherwise reach them. They record to the archive; harmless as
-# capability, and the hook process (not the agent) is what actually invokes them.
-_HOOK_COMMANDS = frozenset({'hook session-start', 'hook session-end'})
+# The harness hooks — installed user-wide, so they fire inside chimera-launched sessions too,
+# where the role strip would otherwise reach them. They record to the archive and deliver
+# mail; harmless as capability, and the hook process (not the agent) is what invokes them.
+_HOOK_COMMANDS = frozenset({'hook session-start', 'hook session-end', 'hook deliver'})
 
 # Per-role command allowlists (canonical leaf paths). A role's session sees only these —
 # the rest of the tree is stripped (see __main__._strip_to_role), never admonished about.

@@ -32,6 +32,12 @@ The loop:
   locally; its branches stay until the PR lands.
 - `ch goal finish <goal>` — sweep a goal's branches and worktrees without landing them.
 
+Mail: incoming messages are injected at each turn start until acked — `ch msg ack <id>`
+when handled. `ch msg send <address> "<subject>" "<body>"` reaches any actor
+(`{persona}`, `<project>@manager`, `<project>@<goal>@agent`). While idle, keep
+`ch msg watch` running under a background monitor so an arriving message wakes you —
+it is read-only and claims nothing.
+
 Context here layers the workspace's `roles/captain/` and `principles/`; every project's
 `knowledge/` is indexed to read on demand — save workspace-wide learnings to `knowledge/`.
 
@@ -57,6 +63,12 @@ The loop:
   locally; its branches stay until the PR lands.
 - `ch goal finish <goal>` — sweep a goal's branches and worktrees without landing them.
 
+Mail: incoming messages are injected at each turn start until acked — `ch msg ack <id>`
+when handled. `ch msg send <address> "<subject>" "<body>"` reaches your agents
+(`{project}@<goal>@agent`) and the captain. While idle, keep `ch msg watch` running
+under a background monitor so an arriving message wakes you — it is read-only and
+claims nothing.
+
 Context layers workspace then project — `roles/manager/` and `principles/` inline whole;
 {project}'s `knowledge/` is indexed to read on demand — save what you learn there.
 
@@ -73,6 +85,12 @@ it from their side — none of that happens from here.
 
 Facts from another project are an errand away: `ch errand <project> "<question>"` runs a
 one-shot read-only agent there and returns its report.
+
+Mail: messages from your manager are injected at each turn start until acked —
+`ch msg ack <id>` when handled. Reply or escalate with
+`ch msg send <address> "<subject>" "<body>"`. While idle, keep `ch msg watch` running
+under a background monitor so an arriving message wakes you — it is read-only and
+claims nothing.
 
 Context layers workspace then project — `roles/agent/` and `principles/` inline whole;
 {project}'s `knowledge/` is indexed to read on demand — save what you learn there.

@@ -6,15 +6,21 @@ actors (captain, managers, goal agents). So it is deliberately **not** the archi
 SQLite: a mailbox wants atomic delivery and single-consumer claim, which a Maildir
 gives lockless and dependency-free — it runs even with no archive, and any number of
 agents can send at once without a writer lock (the honest fit for chimera's
-*Independence* principle). Nothing here is wired into a command yet.
+*Independence* principle).
 
 Layout — one mailbox per address, four states, transitions are atomic renames::
 
     <root>/<address>/
         tmp/    # being written (rename into new/ on completion)
-        new/    # delivered, never yet drained
-        cur/    # drained (injected ≥once), awaiting disposition
+        new/    # delivered to the mailbox, never yet claimed
+        cur/    # claimed (drained ≥once, by whoever), awaiting disposition
         done/   # disposed — handled, deferred or expired
+        seen/   # per-session delivery ledgers: one file per session, the ids it was shown
+
+A claim (``new/`` → ``cur/``) is *not* completion: any process may drain a mailbox, so a
+message stays surfaced to its recipient's sessions (:meth:`Comms.deliver`) until it is
+disposed — the ``seen/`` ledgers only stop the *same* session being shown the *same*
+message twice.
 
 Addresses are the ontology chimera already mints — ``pegasus``,
 ``<project>@manager``, ``<project>@<goal>@<actor>`` — so a mailbox name *is* a
@@ -164,7 +170,8 @@ class Comms:
         """Claim every undrained message for ``address`` (``new/`` → ``cur/``), returning them.
 
         The rename *is* the claim: if two drainers race, each message is claimed exactly once
-        (the loser's rename fails and is skipped). This is what the delivery hook calls per turn.
+        (the loser's rename fails and is skipped). A claim is delivery, not completion — an
+        undisposed message keeps reaching the recipient's sessions via :meth:`deliver`.
         """
         new_dir = self._root / address / 'new'
         if not new_dir.is_dir():
@@ -181,6 +188,28 @@ class Comms:
             _log('receive', message)
             claimed.append(message)
         return claimed
+
+    def deliver(self, address: str, session: str) -> list[Message]:
+        """Every undisposed message for ``address`` that ``session`` hasn't seen, oldest first.
+
+        The turn-boundary injection. Undrained mail is claimed on the way through (so
+        ``cur/`` stays "delivered at least once"), but the surfaced set is *all* of ``cur/``
+        minus what this session was already shown — so a message another process drained is
+        still delivered here, every turn-start of every session, until ``dispose`` retires
+        it. The session's ``seen/`` ledger (appended before returning) is what stops the
+        same message re-injecting into its every prompt.
+        """
+        self.drain(address)
+        ledger = self._root / address / 'seen' / session
+        seen = set(ledger.read_text().split()) if ledger.exists() else set()
+        fresh = [m for m in self._collect(address, ('cur',)) if m.id not in seen]
+        if fresh:
+            ledger.parent.mkdir(parents=True, exist_ok=True)
+            with ledger.open('a') as file:
+                file.writelines(f'{message.id}\n' for message in fresh)
+            for message in fresh:
+                logger.bind(session=session, **message.log_fields()).info('comms: deliver')
+        return fresh
 
     def dispose(self, address: str, message_id: str) -> None:
         """Retire a message (``new/`` or ``cur/`` → ``done/``). No-op if already gone (idempotent).

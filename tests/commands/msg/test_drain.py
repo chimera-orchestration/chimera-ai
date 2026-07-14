@@ -51,7 +51,8 @@ def test_as_context_renders_a_block(tmpdir: TempDir) -> None:
     ws = tmpdir.path
     _seed(ws, 'me@g@agent', 'm1', subject='hi')
     assert as_context(drain(ws, 'me@g@agent')) == (
-        'You have new inter-agent mail:\n- from p@manager [message] hi: .'
+        'You have inter-agent mail; once a message is handled, `ch msg ack <id>` it:\n'
+        '- m1 from p@manager [message] hi: .'
     )
 
 
@@ -75,7 +76,10 @@ def test_msg_drain_cli_inject_formats_a_block(
     _seed(ws, 'p@g@agent', 'm1')
     start, end = action_logs('msg drain', DRAIN, {'address': 'p@g@agent', 'inject': True})
     command.run('msg', 'drain', 'p@g@agent', '--inject').check(
-        output='You have new inter-agent mail:\n- from p@manager [message] ping: .',
+        output=(
+            'You have inter-agent mail; once a message is handled, `ch msg ack <id>` it:\n'
+            '- m1 from p@manager [message] ping: .'
+        ),
         logging=[start, RECEIVED, end],
     )
 

@@ -840,9 +840,11 @@ class ClaudeHooksCheck:
     """Chimera's capture + delivery hooks are installed in the user's Claude settings.
 
     User-wide (``~/.claude/settings.json``), so they fire for every session: SessionStart/End
-    feed the archive, UserPromptSubmit drains mail into the turn. ``--fix`` merges them in
-    idempotently, preserving any existing hooks. It is the machine's Claude config, not the
-    workspace's — so doctor *is* the installer (there is no ``ch hook install`` to forget).
+    feed the archive, UserPromptSubmit delivers mail into the turn. ``--fix`` merges them in
+    idempotently, preserving any existing hooks while sweeping superseded chimera spellings
+    (a stale ``ch msg drain --inject`` would double-inject beside ``ch hook deliver``). It is
+    the machine's Claude config, not the workspace's — so doctor *is* the installer (there is
+    no ``ch hook install`` to forget).
     """
 
     name = 'claude-hooks'
@@ -851,9 +853,13 @@ class ClaudeHooksCheck:
         path = hook_install.settings_path()
         settings = hook_install.read(path)
         missing = hook_install.missing_hooks(settings)
-        if not missing:
+        stale = hook_install.stale_hooks(settings)
+        if not missing and not stale:
             return
-        message = f'{path} missing chimera hooks: {", ".join(missing)}'
+        parts = [f'missing chimera hooks: {", ".join(missing)}'] if missing else []
+        if stale:
+            parts.append(f'superseded chimera hooks: {", ".join(stale)}')
+        message = f'{path} {"; ".join(parts)}'
         fixing = fix and not exclude.matches(self.name, message)
         if fixing:
             hook_install.write(path, hook_install.merge(settings))
