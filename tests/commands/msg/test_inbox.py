@@ -39,9 +39,16 @@ def test_msg_inbox_cli_lists(tmpdir: TempDir, command: Command, replace: Replace
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     _seed(ws, 'p@g@agent', '01', 'ping')
+    start, end = action_logs('msg inbox', INBOX, {'address': 'p@g@agent', 'unread': False})
+    found = {  # the one-shot's outcome line: whose inbox, how much found
+        'level': 'INFO',
+        'message': 'comms: inbox p@g@agent (1)',
+        'address': 'p@g@agent',
+        'unread_only': False,
+        'count': 1,
+    }
     command.run('msg', 'inbox', 'p@g@agent').check(
-        output='01  p@manager  [message] ping',
-        logging=action_logs('msg inbox', INBOX, {'address': 'p@g@agent', 'unread': False}),
+        output='01  p@manager  [message] ping', logging=[start, found, end]
     )
 
 
@@ -49,7 +56,14 @@ def test_msg_inbox_cli_empty(tmpdir: TempDir, command: Command, replace: Replace
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    start, end = action_logs('msg inbox', INBOX, {'address': 'nobody@x@agent', 'unread': False})
+    found = {
+        'level': 'INFO',
+        'message': 'comms: inbox nobody@x@agent (0)',
+        'address': 'nobody@x@agent',
+        'unread_only': False,
+        'count': 0,
+    }
     command.run('msg', 'inbox', 'nobody@x@agent').check(
-        output='No messages',
-        logging=action_logs('msg inbox', INBOX, {'address': 'nobody@x@agent', 'unread': False}),
+        output='No messages', logging=[start, found, end]
     )

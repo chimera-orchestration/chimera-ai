@@ -7,6 +7,10 @@ is the contract. The inbox (``new/`` + ``cur/``) is polled each ``interval`` sec
 mailbox is two small directories, so this stays cheap without a filesystem-watch
 dependency, and a message another process drains mid-watch is still noticed (and never
 repeated — ids are remembered, not states).
+
+An arrival is the outcome, so each emitted message lands one INFO line (``comms: watch``,
+via :func:`chimera.comms.log_action`); a quiet poll logs nothing at all — a watch polls
+every few seconds forever, so even a DEBUG line per poll would bury the log.
 """
 
 import time
@@ -14,7 +18,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from chimera.commands.msg.store import mail
-from chimera.comms import Message
+from chimera.comms import Message, log_action
 
 
 def line(message: Message) -> str:
@@ -41,5 +45,6 @@ def watch(
         for message in box.inbox(address):
             if message.id not in seen:
                 seen.add(message.id)
+                log_action('watch', message)
                 yield message
         (sleep or time.sleep)(interval)

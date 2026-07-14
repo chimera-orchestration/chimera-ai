@@ -87,7 +87,7 @@ def test_hook_deliver_cli_injects_a_block(
     start, end = action_logs('hook deliver', DELIVER, {})
     delivered = {
         'level': 'INFO',
-        'message': 'comms: deliver',
+        'message': 'comms: deliver p@manager -> p@g@agent [message] ping (m1)',
         'session': 'uuid-1',
         'msg_id': 'm1',
         'sender': 'p@manager',
