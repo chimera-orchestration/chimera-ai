@@ -144,6 +144,18 @@ END;
 """
 
 
+_INSERT_SESSION = """
+INSERT INTO sessions
+    (platform, native_id, status, started_at, manager, model, name, ended_at,
+     cwd, transcript, summary, input_tokens, output_tokens, cost_usd,
+     workspace, project, goal, actor)
+VALUES
+    (:platform, :native_id, :status, :started_at, :manager, :model, :name, :ended_at,
+     :cwd, :transcript, :summary, :input_tokens, :output_tokens, :cost_usd,
+     :workspace, :project, :goal, :actor)
+"""
+
+
 class Archive:
     """A connection to the archive database. Open one per process; share the file, not this.
 
@@ -179,15 +191,8 @@ class Archive:
         """
         self._db.execute(
             'record_session',
-            """
-            INSERT INTO sessions
-                (platform, native_id, status, started_at, manager, model, name, ended_at,
-                 cwd, transcript, summary, input_tokens, output_tokens, cost_usd,
-                 workspace, project, goal, actor)
-            VALUES
-                (:platform, :native_id, :status, :started_at, :manager, :model, :name, :ended_at,
-                 :cwd, :transcript, :summary, :input_tokens, :output_tokens, :cost_usd,
-                 :workspace, :project, :goal, :actor)
+            f"""
+            {_INSERT_SESSION}
             ON CONFLICT(platform, native_id) DO UPDATE SET
                 status=excluded.status, manager=excluded.manager,
                 model=excluded.model, name=excluded.name, ended_at=excluded.ended_at,
@@ -198,6 +203,20 @@ class Archive:
             """,
             _session_params(session),
         )
+
+    def record_session_if_absent(self, session: Session) -> bool:
+        """Insert ``session`` unless ``(platform, native_id)`` is already known; report which.
+
+        The atomic single-statement variant of check-then-:meth:`record_session`, for a
+        writer that must never clobber an existing row (``ch archive backfill``) even
+        against a hook recording the same session concurrently.
+        """
+        cursor = self._db.execute(
+            'record_session_if_absent',
+            f'{_INSERT_SESSION} ON CONFLICT(platform, native_id) DO NOTHING',
+            _session_params(session),
+        )
+        return cursor.rowcount == 1
 
     def end_session(
         self, platform: str, native_id: str, at: datetime, status: str = 'ended'

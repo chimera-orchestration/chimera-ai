@@ -151,6 +151,14 @@ def test_rerecording_reopens_an_ended_session(archive: Archive) -> None:
     assert stored.status == 'resume'
 
 
+def test_record_if_absent_never_clobbers_an_existing_row(archive: Archive) -> None:
+    first = make_session('s1', status='running')
+    assert archive.record_session_if_absent(first)
+    assert not archive.record_session_if_absent(make_session('s1', status='backfilled'))
+    assert archive.session('claude', 's1') == first
+    assert archive.sessions() == [first]  # skipped, not duplicated
+
+
 def test_ending_a_session_stamps_when_and_how_it_finished(archive: Archive) -> None:
     archive.record_session(make_session('s1', status='running'))
     archive.end_session('claude', 's1', at=NOON + timedelta(hours=2), status='done')

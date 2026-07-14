@@ -35,6 +35,8 @@ from chimera.commands.agent import agents, resume_target, scope_line, scoped, sh
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
 from chimera.commands.agent import stop as _agent_stop
+from chimera.commands.archive.backfill import CLAUDE_PROJECTS
+from chimera.commands.archive.backfill import backfill as _archive_backfill
 from chimera.commands.chat import chat as _chat
 from chimera.commands.chat import chat_target
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
@@ -1728,6 +1730,29 @@ def msg_watch(
             typer.echo(_msg_line(message))
     except KeyboardInterrupt:
         pass  # the normal way a watch ends — a clean exit, so the end frame still logs
+
+
+archive_app = typer.Typer(help='The session archive at state/archive.db.')
+app.add_typer(archive_app, name='archive')
+
+
+@archive_app.command(
+    'backfill',
+    cls=LoggingCommand,
+    help="Import claude's pre-hook transcripts into the archive.",
+)
+@logs(_archive_backfill)
+def archive_backfill(
+    projects: Annotated[
+        Path,
+        typer.Option('--projects', help="Claude's transcript store to scan"),
+    ] = CLAUDE_PROJECTS,
+) -> None:
+    result = _archive_backfill(projects)
+    typer.echo(
+        f'Imported {result.imported} (already archived: {result.present}, '
+        f'outside any workspace: {result.outside}, unplaceable: {result.unplaced})'
+    )
 
 
 hook_app = typer.Typer(help='Hooks chimera installs into the harness (invoked by it, not you).')
