@@ -1715,7 +1715,7 @@ def msg_watch(
     ] = None,
     interval: Annotated[
         float, typer.Option('--interval', help='Seconds between inbox polls')
-    ] = 1.0,
+    ] = 15.0,
 ) -> None:
     who = address if address is not None else _msg_caller(Path.cwd())
     feed = _msg_watch(resolve_workspace(Path.cwd()), who, interval=interval)
