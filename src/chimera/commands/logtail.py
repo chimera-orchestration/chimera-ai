@@ -25,14 +25,15 @@ ID_WIDTH = 32
 
 # fblog's handlebars main-line format, tuned to chimera's fields: the fixed-width session id
 # (who ran it — guarded, since lines predating the field would otherwise fail to render),
-# then command + phase for the frame lines whose message is empty; durations and errors ride
-# the end frames. Tracebacks are deliberately left out of the tail view — `--dump` is the
-# post-mortem surface.
+# then command + the goal a goal-scoped action carries + phase for the frame lines whose
+# message is empty; durations and errors ride the end frames. Tracebacks are deliberately
+# left out of the tail view — `--dump` is the post-mortem surface.
 FORMAT = (
     '{{bold(fixed_size 19 fblog_timestamp)}} '
     '{{level_style (fixed_size 5 fblog_level)}} '
     '{{#if session}}{{fixed_size %(width)d session}}{{else}}%(pad)s{{/if}} '
     '{{#if command}}{{bold(cyan command)}} {{/if}}'
+    '{{#if goal}}{{yellow goal}} {{/if}}'
     '{{#if phase}}[{{phase}}] {{/if}}'
     '{{fblog_message}}'
     '{{#if duration_ms}} ({{duration_ms}}ms){{/if}}'

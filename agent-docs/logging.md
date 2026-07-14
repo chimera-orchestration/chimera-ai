@@ -8,7 +8,9 @@ Every line carries `session` — the address of whoever ran the command (the cap
 persona, `<project>@manager`, `<project>@<goal>@agent`; `chimera.context.caller`), bound as
 loguru's default extra by `configure()` so no call site has to know. Best-effort: a
 workspace too broken to resolve it (doctor's territory) logs unattributed rather than not
-at all.
+at all. An action given a goal (`goal start`/`finish`, `worktree add`, an explicit `-g`)
+likewise carries `goal` on every line of its run — `LoggingCommand` contextualizes it over
+the whole invoke, so the frames and everything logged between them grep by goal.
 
 ## Observability: the log alone must be enough to debug a run
 
@@ -37,7 +39,7 @@ line (`fixable`/`resolved` bound) — ERROR while unresolved, INFO once fixed.
 from every AI session's tree (captain included), since a blocking follow is a dead end for an
 agent, which reads the JSONL directly. It pipes `tail -F` through `fblog` (a doctor check
 verifies it's installed; `--fix` brew-installs it) with a main-line format tuned to the fields
-above — a fixed-width `session` column (who ran it), then `command`, `phase`,
+above — a fixed-width `session` column (who ran it), then `command`, `goal`, `phase`,
 `duration_ms`, `error` — since the frame lines carry an empty `message`
 that a generic JSON viewer would render blank. `-n N` sets the initial line count,
 `--no-follow` takes one look and exits, and `-d/--dump` is the post-mortem surface: every

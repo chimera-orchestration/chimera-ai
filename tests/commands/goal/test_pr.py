@@ -469,6 +469,7 @@ def test_goal_pr_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command
             start,
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/agent',
                 'candidates': ['g/agent'],
                 'message': 'goal pr: source',
@@ -520,6 +521,7 @@ def test_goal_pr_cli_reports_an_open_pr(
             )[0],
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/agent',
                 'candidates': ['g/agent'],
                 'message': 'goal pr: source',
@@ -582,6 +584,7 @@ def test_goal_pr_cli_dry_previews_title_and_body(
             start,
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/agent',
                 'candidates': ['g/agent'],
                 'message': 'goal pr: source',

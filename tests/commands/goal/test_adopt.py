@@ -384,6 +384,7 @@ def test_goal_adopt_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
             {
                 'level': 'INFO',
                 'command': 'goal adopt',
+                'goal': 'feature',
                 'phase': 'start',
                 'function': 'chimera.commands.goal.adopt.adopt',
                 'params': {
@@ -404,7 +405,7 @@ def test_goal_adopt_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
                 'git': {'before': {'feature': tip}, 'after': {'feature': tip}},
                 'worktree': str(worktree),
             },
-            {'level': 'INFO', 'command': 'goal adopt', 'phase': 'end'},
+            {'level': 'INFO', 'command': 'goal adopt', 'goal': 'feature', 'phase': 'end'},
         ],
     )
     assert not (project / 'worktrees').exists()  # nothing created

@@ -56,8 +56,10 @@ def action_logs(
 ) -> list[dict[str, object]]:
     """The start/end log pair a CLI action emits, as the general capture reduces it — for
     smoke assertions. Pass ``error`` for a UserError end line (ERROR + message); a crash's
-    error/traceback ride the exception, not extra, so they don't appear here."""
-    end: dict[str, object] = {'level': 'INFO', 'command': command, 'phase': 'end'}
+    error/traceback ride the exception, not extra, so they don't appear here. A goal in
+    ``params`` rides both frames, as ``LoggingCommand`` contextualizes it."""
+    goal = {'goal': params['goal']} if params.get('goal') else {}
+    end: dict[str, object] = {'level': 'INFO', 'command': command, 'phase': 'end', **goal}
     if error is not None:
         end['level'] = 'ERROR'
         end['error'] = error
@@ -68,6 +70,7 @@ def action_logs(
             'phase': 'start',
             'function': function,
             'params': params,
+            **goal,
         },
         end,
     ]

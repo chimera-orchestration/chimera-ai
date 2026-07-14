@@ -457,6 +457,7 @@ def test_goal_merge_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> No
             start,
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/agent',
                 'candidates': ['g/agent'],
                 'message': 'goal merge: source',
@@ -506,6 +507,7 @@ def test_goal_merge_cli_already_contained(
             start,
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/agent',
                 'candidates': ['g/agent'],
                 'message': 'goal merge: source',
@@ -552,6 +554,7 @@ def test_goal_merge_cli_dry_previews(
             start,
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/agent',
                 'candidates': ['g/agent'],
                 'message': 'goal merge: source',
@@ -599,6 +602,7 @@ def test_goal_merge_cli_lands_a_plain_checkout(
             start,
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/human',
                 'candidates': ['g/agent', 'g/human'],
                 'message': 'goal merge: source',
@@ -612,6 +616,7 @@ def test_goal_merge_cli_lands_a_plain_checkout(
             },
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'worktree': str(checkout.resolve()),
                 'git': {'before': {'g/human': tip}, 'after': {'main': tip}},
                 'message': 'goal merge: refs',
@@ -659,6 +664,7 @@ def test_goal_merge_cli_refuses_a_diverged_base(
             start,
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/agent',
                 'candidates': ['g/agent'],
                 'message': 'goal merge: source',

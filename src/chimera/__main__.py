@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from loguru import logger
 from typer._click.core import Command, Context
 from typer._click.shell_completion import CompletionItem
 from typer.core import TyperCommand, TyperGroup
@@ -334,29 +335,35 @@ class LoggingCommand(TyperCommand):
     with the message but no traceback; a ``typer.Exit``/``Abort`` is normal control flow, so it
     still ends cleanly. Synonyms are already resolved to their canonical command by the time
     ``invoke`` is reached, so the logged name is always canonical.
+
+    An action given a goal (``goal start``/``finish``, ``worktree add``, an explicit ``-g``)
+    has it contextualized over the whole invoke, so the frames *and* every line logged in
+    between carry ``goal`` without any call site binding it.
     """
 
     def invoke(self, ctx: Context) -> object:
         logging.configure()
         command = _action(ctx)
-        started = logging.log_start(
-            command, getattr(ctx.command.callback, 'delegate'), dict(ctx.params)
-        )
-        try:
-            result = super().invoke(ctx)
-        except UserError as error:
-            typer.echo(f'Error: {error}', err=True)
-            logging.log_user_error(command, started, error)
-            raise typer.Exit(1) from error
-        except (typer.Exit, typer.Abort):
-            logging.log_finish(command, started)  # a non-zero exit is an outcome, not a crash
-            raise
-        except Exception:
-            logging.log_failure(command, started)
-            raise
-        else:
-            logging.log_finish(command, started)
-            return result
+        goal = ctx.params.get('goal')
+        with logger.contextualize(**({'goal': goal} if goal else {})):
+            started = logging.log_start(
+                command, getattr(ctx.command.callback, 'delegate'), dict(ctx.params)
+            )
+            try:
+                result = super().invoke(ctx)
+            except UserError as error:
+                typer.echo(f'Error: {error}', err=True)
+                logging.log_user_error(command, started, error)
+                raise typer.Exit(1) from error
+            except (typer.Exit, typer.Abort):
+                logging.log_finish(command, started)  # non-zero exit is an outcome, not a crash
+                raise
+            except Exception:
+                logging.log_failure(command, started)
+                raise
+            else:
+                logging.log_finish(command, started)
+                return result
 
 
 def _action(ctx: Context) -> str:

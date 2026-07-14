@@ -488,6 +488,7 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
             {
                 'level': 'INFO',
                 'command': 'agent resume',
+                'goal': 'g',
                 'phase': 'start',
                 'function': 'chimera.commands.agent.resume',
                 'params': {
@@ -503,6 +504,7 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
             },
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
@@ -518,7 +520,7 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
                 'actor': 'agent',
                 'message': 'agent resume: archived session',
             },
-            {'level': 'INFO', 'command': 'agent resume', 'phase': 'end'},
+            {'level': 'INFO', 'command': 'agent resume', 'goal': 'g', 'phase': 'end'},
         ],
     )
     claude_cmd = [
@@ -1008,6 +1010,7 @@ def test_agent_start_cli_model_from_workspace_config(
             {
                 'level': 'INFO',
                 'command': 'agent start',
+                'goal': 'g',
                 'phase': 'start',
                 'function': 'chimera.commands.agent.agent',
                 'params': {
@@ -1023,13 +1026,14 @@ def test_agent_start_cli_model_from_workspace_config(
             },
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
                 'sources': context_sources(ws, 'agent', pinned=project.resolve()),
                 'message': 'context: rendered',
             },
-            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+            {'level': 'INFO', 'command': 'agent start', 'goal': 'g', 'phase': 'end'},
         ],
     )
     claude_cmd = [
@@ -1113,6 +1117,7 @@ def test_agent_start_cli_injects_rendered_context(
             {
                 'level': 'INFO',
                 'command': 'agent start',
+                'goal': 'g',
                 'phase': 'start',
                 'function': 'chimera.commands.agent.agent',
                 'params': {
@@ -1128,13 +1133,14 @@ def test_agent_start_cli_injects_rendered_context(
             },
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
                 'sources': sources,
                 'message': 'context: rendered',
             },
-            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+            {'level': 'INFO', 'command': 'agent start', 'goal': 'g', 'phase': 'end'},
         ],
     )
     compare(context.read_text(), expected=text)
@@ -1181,6 +1187,7 @@ def test_agent_start_cli_dry_previews_without_launching(
             {
                 'level': 'INFO',
                 'command': 'agent start',
+                'goal': 'g',
                 'phase': 'start',
                 'function': 'chimera.commands.agent.agent',
                 'params': {
@@ -1196,13 +1203,14 @@ def test_agent_start_cli_dry_previews_without_launching(
             },
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
                 'sources': sources,
                 'message': 'context: rendered',
             },
-            {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
+            {'level': 'INFO', 'command': 'agent start', 'goal': 'g', 'phase': 'end'},
         ],
     )
     compare(calls, expected=[])  # nothing launched
