@@ -4,7 +4,8 @@ from testfixtures import Replacer, compare
 
 import os
 
-from chimera.agents import Session, _distrusted
+from chimera.agents import Agent, Session, _distrusted
+from chimera.agents.claude import Claude
 
 
 def test_short_is_the_leading_block_of_a_full_id() -> None:
@@ -50,3 +51,9 @@ def test_an_already_marked_session_is_not_probed(replace: Replacer) -> None:
     replace.in_module(os.kill, _dead, module=os)
     session = Session('i', 'n', 'idle', Path('/w'), None, pid=999999, stale='registry remnant')
     compare(_distrusted(session), expected=session)
+
+
+def test_credentials_default_is_none() -> None:
+    # the ABC's default: a harness with no readable credential store stays invisible
+    # to the auth check rather than falsely healthy or falsely broken
+    assert Agent.credentials(Claude()) is None

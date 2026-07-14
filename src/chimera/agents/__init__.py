@@ -59,6 +59,47 @@ class Session:
         return '~' + cwd[len(home) :] if cwd.startswith(home) else cwd
 
 
+@dataclass(frozen=True)
+class Credentials:
+    """A harness's locally-stored OAuth credential expiries — read, never validated online.
+
+    ``source`` names where they were read (a keychain item, a file path) so a finding
+    can say which store it trusted. Either expiry is ``None`` when the store doesn't
+    record it. Timestamps are timezone-aware; interpretation (grace periods, what
+    counts as an outage) is policy and lives with the consumer
+    (``chimera.commands.doctor.auth``), not here.
+    """
+
+    source: str
+    access_expires: datetime | None = None
+    refresh_expires: datetime | None = None
+
+
+@dataclass(frozen=True)
+class NoCredentials:
+    """Definitively logged out: every local store the harness keeps says so.
+
+    ``detail`` names what was checked, so the finding tells the human where a
+    ``/login`` would have written.
+    """
+
+    detail: str
+
+
+@dataclass(frozen=True)
+class UnreadableCredentials:
+    """The stores couldn't answer (locked keychain, malformed JSON) — absence unproven.
+
+    The local analogue of a network blip: *cannot tell* is never *not authorized*, so
+    consumers report it but must not treat it as an auth failure.
+    """
+
+    detail: str
+
+
+AnyCredentials = Credentials | NoCredentials | UnreadableCredentials
+
+
 class Launch(Protocol):
     """The call shape :meth:`Agent.start` and :meth:`Agent.resume` share.
 
@@ -192,6 +233,16 @@ class Agent(ABC):
         ``Claude.reported``) with a ``stale`` reason.
         """
         ...
+
+    def credentials(self) -> AnyCredentials | None:
+        """The harness's locally-stored OAuth credential state; ``None`` when it keeps none.
+
+        Local reads only — never a network round-trip, never a model call: this is the
+        cheap probe ``ch doctor``'s harness-auth check runs on every invocation. The
+        default ``None`` keeps a harness with no readable credential store invisible
+        to that check rather than falsely healthy or falsely broken.
+        """
+        return None
 
     def checked(self, cwd: Path | None = None) -> list[Session]:
         """:meth:`reported` with the generic distrust applied: every claim, corpses marked.

@@ -1,7 +1,9 @@
+import json
 import os
 import subprocess
+import sys
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
@@ -10,13 +12,16 @@ from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.popen import MockPopen
 
 from chimera.agent_env import ROLE_CAPTAIN, role_env
-from chimera.agents import Session
+from chimera.agents import Credentials, NoCredentials, Session, UnreadableCredentials
 from chimera.agents.claude import (
+    CREDENTIALS_SERVICE,
     READONLY_TOOLS,
     Claude,
+    KeychainUnavailable,
     _print_args,
     _session_args,
     _warn_missing_binary,
+    read_keychain,
     session_summary,
 )
 
@@ -577,3 +582,155 @@ def test_sessions_skips_enrichment_when_the_registry_had_no_cwd(replace: Replace
     lonely = Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
     replace.on_class(Claude.checked, lambda self, cwd=None: [lonely])
     compare(Claude().sessions(), expected=[lonely])
+
+
+# Two round millisecond epochs whose UTC datetimes are known exactly, so the
+# ms→datetime conversion is pinned against literals, never re-derived.
+_ACCESS_MS, _ACCESS = 1_700_000_000_000, datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
+_REFRESH_MS, _REFRESH = 1_700_000_100_000, datetime(2023, 11, 14, 22, 15, 0, tzinfo=timezone.utc)
+
+_KEYCHAIN_SOURCE = f'keychain item {CREDENTIALS_SERVICE!r}'
+
+
+def _oauth(expires: object = _ACCESS_MS, refresh: object = _REFRESH_MS) -> str:
+    return json.dumps({'claudeAiOauth': {'expiresAt': expires, 'refreshTokenExpiresAt': refresh}})
+
+
+def _keychain_unavailable() -> NoReturn:
+    raise KeychainUnavailable('keychain locked')
+
+
+class TestCredentials:
+    def test_keychain_wins(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_module(read_keychain, lambda: _oauth())
+        tmpdir.write('creds.json', 'never read')
+        compare(
+            Claude(credentials_file=tmpdir / 'creds.json').credentials(),
+            expected=Credentials(
+                source=_KEYCHAIN_SOURCE, access_expires=_ACCESS, refresh_expires=_REFRESH
+            ),
+        )
+
+    def test_file_when_keychain_has_no_item(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_module(read_keychain, lambda: None)
+        tmpdir.write('creds.json', _oauth())
+        compare(
+            Claude(credentials_file=tmpdir / 'creds.json').credentials(),
+            expected=Credentials(
+                source=str(tmpdir / 'creds.json'),
+                access_expires=_ACCESS,
+                refresh_expires=_REFRESH,
+            ),
+        )
+
+    def test_file_when_keychain_unavailable(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_module(read_keychain, _keychain_unavailable)
+        tmpdir.write('creds.json', _oauth())
+        compare(
+            Claude(credentials_file=tmpdir / 'creds.json').credentials(),
+            expected=Credentials(
+                source=str(tmpdir / 'creds.json'),
+                access_expires=_ACCESS,
+                refresh_expires=_REFRESH,
+            ),
+        )
+
+    def test_absent_everywhere_is_definitive(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_module(read_keychain, lambda: None)
+        file = tmpdir / 'creds.json'
+        compare(
+            Claude(credentials_file=file).credentials(),
+            expected=NoCredentials(f'no {_KEYCHAIN_SOURCE} and no {file}'),
+        )
+
+    def test_keychain_unavailable_and_no_file_is_unreadable(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        replace.in_module(read_keychain, _keychain_unavailable)
+        file = tmpdir / 'creds.json'
+        compare(
+            Claude(credentials_file=file).credentials(),
+            expected=UnreadableCredentials(f'keychain unavailable (keychain locked) and no {file}'),
+        )
+
+    def test_not_json_is_unreadable(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_module(read_keychain, lambda: 'not json')
+        compare(
+            Claude(credentials_file=tmpdir / 'creds.json').credentials(),
+            expected=UnreadableCredentials(f'{_KEYCHAIN_SOURCE} is not valid JSON'),
+        )
+
+    def test_no_oauth_block_is_logged_out(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # claude keeps unrelated state (mcpOAuth) in the same store — its presence
+        # alone doesn't mean logged in
+        replace.in_module(read_keychain, lambda: json.dumps({'mcpOAuth': {}}))
+        compare(
+            Claude(credentials_file=tmpdir / 'creds.json').credentials(),
+            expected=NoCredentials(f'{_KEYCHAIN_SOURCE} has no claudeAiOauth block'),
+        )
+
+    def test_missing_expiries_parse_to_none(self, tmpdir: TempDir, replace: Replacer) -> None:
+        replace.in_module(read_keychain, lambda: json.dumps({'claudeAiOauth': {'scopes': []}}))
+        compare(
+            Claude(credentials_file=tmpdir / 'creds.json').credentials(),
+            expected=Credentials(
+                source=_KEYCHAIN_SOURCE, access_expires=None, refresh_expires=None
+            ),
+        )
+
+    def test_default_file_honours_claude_config_dir(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        replace.in_module(read_keychain, lambda: None)
+        replace.in_environ('CLAUDE_CONFIG_DIR', str(tmpdir / 'cfg'))
+        tmpdir.write('cfg/.credentials.json', _oauth())
+        compare(
+            Claude().credentials(),
+            expected=Credentials(
+                source=str(tmpdir / 'cfg' / '.credentials.json'),
+                access_expires=_ACCESS,
+                refresh_expires=_REFRESH,
+            ),
+        )
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='the keychain path only runs on macOS')
+class TestReadKeychain:
+    def test_secret(self, replace: Replacer) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_default(stdout=b'{"claudeAiOauth": {}}\n')
+        compare(read_keychain(), expected='{"claudeAiOauth": {}}\n')
+        compare(
+            Popen.all_calls[0].args[0],
+            expected=['security', 'find-generic-password', '-s', CREDENTIALS_SERVICE, '-w'],
+        )
+
+    def test_no_such_item_is_none(self, replace: Replacer) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_default(returncode=44, stderr=b'The specified item could not be found')
+        assert read_keychain() is None
+
+    def test_any_other_failure_is_unavailable(self, replace: Replacer) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_default(returncode=36, stderr=b'User interaction is not allowed.')
+        with ShouldRaise(KeychainUnavailable, match='User interaction is not allowed'):
+            read_keychain()
+
+
+def test_read_keychain_off_darwin_is_absent(replace: Replacer) -> None:
+    # no keychain platform → the file store is authoritative, so "no item" is the honest answer
+    replace(target=sys.platform, container=sys, name='platform', replacement='linux')
+    assert read_keychain() is None
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='the keychain path only runs on macOS')
+def test_read_keychain_no_security_binary_is_unavailable(replace: Replacer) -> None:
+    def missing(*args: object, **kw: object) -> NoReturn:
+        raise FileNotFoundError('security')
+
+    replace(target=subprocess.run, container=subprocess, name='run', replacement=missing)
+    with ShouldRaise(KeychainUnavailable, match='security'):
+        read_keychain()

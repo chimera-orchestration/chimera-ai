@@ -4,15 +4,23 @@ import json
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from functools import cache
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
-from chimera.agents import Agent, Session
+from chimera.agents import (
+    Agent,
+    AnyCredentials,
+    Credentials,
+    NoCredentials,
+    Session,
+    UnreadableCredentials,
+)
 
 # claude only makes bypass-permissions mode reachable via shift-tab when launched with this;
 # availability is fixed at launch, so it must ride on the very command that starts the session.
@@ -42,20 +50,116 @@ READONLY_TOOLS = (
 )
 
 
+# The keychain item claude keeps its OAuth credentials in on macOS — the live store,
+# refreshed in place; ~/.claude/.credentials.json is its fallback twin and can go stale.
+CREDENTIALS_SERVICE = 'Claude Code-credentials'
+
+# `security`'s exit code for errSecItemNotFound — the keychain answering "no such item",
+# as opposed to failing to answer (locked keychain, no session), which must never be
+# read as logged-out.
+_KEYCHAIN_MISSING = 44
+
+
+class KeychainUnavailable(Exception):
+    """The keychain couldn't answer (locked, no ``security`` binary) — absence unproven."""
+
+
+def read_keychain(service: str = CREDENTIALS_SERVICE) -> str | None:
+    """The keychain item's secret; ``None`` when no such item exists.
+
+    ``None`` covers both the keychain definitively answering "not there" and a platform
+    with no keychain at all (non-macOS) — on either, whatever file store remains is
+    authoritative. Anything else the keychain does (locked, interaction required, no
+    ``security`` on a mac) raises :class:`KeychainUnavailable`: *cannot tell*, which
+    callers must keep distinct from *logged out*.
+    """
+    if sys.platform != 'darwin':
+        return None
+    try:
+        result = subprocess.run(
+            ['security', 'find-generic-password', '-s', service, '-w'],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except FileNotFoundError as error:
+        raise KeychainUnavailable(str(error)) from error
+    except subprocess.CalledProcessError as error:
+        if error.returncode == _KEYCHAIN_MISSING:
+            return None
+        raise KeychainUnavailable(error.stderr.strip() or f'exit {error.returncode}') from error
+    return result.stdout
+
+
+def _ms_epoch(value: object) -> datetime | None:
+    """A millisecond epoch (how claude records expiries) as an aware datetime; else None."""
+    if isinstance(value, int | float):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+    return None
+
+
+def _parse_credentials(text: str, source: str) -> AnyCredentials:
+    """``source``'s credential JSON as a state: its ``claudeAiOauth`` block's expiries.
+
+    A store that holds JSON but no ``claudeAiOauth`` block is a logged-out store, not a
+    broken one — claude keeps unrelated state (``mcpOAuth``) in the same file.
+    """
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return UnreadableCredentials(f'{source} is not valid JSON')
+    oauth = data.get('claudeAiOauth') if isinstance(data, dict) else None
+    if not isinstance(oauth, dict):
+        return NoCredentials(f'{source} has no claudeAiOauth block')
+    return Credentials(
+        source=source,
+        access_expires=_ms_epoch(oauth.get('expiresAt')),
+        refresh_expires=_ms_epoch(oauth.get('refreshTokenExpiresAt')),
+    )
+
+
 class Claude(Agent):
     """The claude-code harness (the ``claude`` CLI).
 
     ``projects`` is where claude keeps its per-cwd transcript folders (default
     ``~/.claude/projects``) — session summaries are read from there; tests point it
-    at a scratch tree.
+    at a scratch tree. ``credentials_file`` overrides the OAuth fallback store
+    (default ``$CLAUDE_CONFIG_DIR/.credentials.json``, ``~/.claude`` when unset) the
+    same way.
     """
 
     platform = 'claude'
 
     restricted = _BYPASS_FLAGS
 
-    def __init__(self, projects: Path | None = None) -> None:
+    def __init__(self, projects: Path | None = None, credentials_file: Path | None = None) -> None:
         self.projects = projects
+        self.credentials_file = credentials_file
+
+    def credentials(self) -> AnyCredentials:
+        """Claude's OAuth state: the keychain item on macOS, else the credentials file.
+
+        The keychain is the live store — claude refreshes it in place — so a readable
+        entry always wins. The file is a fallback twin that can go stale, consulted
+        only when the keychain has no entry or can't answer; "logged out" is only
+        definitive when *every* store says so, and an unanswerable keychain with no
+        file degrades to :class:`UnreadableCredentials`, never to logged-out.
+        """
+        file = self.credentials_file
+        if file is None:
+            config = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+            file = config / '.credentials.json'
+        try:
+            secret = read_keychain()
+        except KeychainUnavailable as error:
+            if file.exists():
+                return _parse_credentials(file.read_text(), str(file))
+            return UnreadableCredentials(f'keychain unavailable ({error}) and no {file}')
+        if secret is not None:
+            return _parse_credentials(secret, f'keychain item {CREDENTIALS_SERVICE!r}')
+        if file.exists():
+            return _parse_credentials(file.read_text(), str(file))
+        return NoCredentials(f'no keychain item {CREDENTIALS_SERVICE!r} and no {file}')
 
     def start(
         self,
