@@ -5,6 +5,11 @@ object ``{time, pid, command?, level, message?, **extra}`` — everything bound 
 included (only the ``line`` scratch is dropped), so any ``logger.bind(...)`` anywhere in the
 codebase surfaces without touching this format.
 
+Every line also carries ``session`` — the address of whoever is running ``ch``
+(:func:`chimera.context.caller`: the captain's persona, ``<project>@manager``,
+``<project>@<goal>@agent``), bound as loguru's default extra by :func:`configure` so frames,
+domain events and the git trace are all attributed without any call site knowing.
+
 A CLI action frames itself with a start/end pair sharing a ``pid`` (one process per
 invocation, so ``pid`` ties them — and any lines logged in between — together):
 
@@ -28,7 +33,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from chimera.config import NotInWorkspaceError
-from chimera.context import resolve_workspace
+from chimera.context import caller, resolve_workspace
 
 if TYPE_CHECKING:
     from loguru import Record
@@ -75,13 +80,30 @@ def configure() -> None:
     persists alongside the action frames. Outside any workspace (e.g. ``ch init`` before one
     exists) there's no log file: the sinks are still cleared — loguru's default stderr sink
     would otherwise spew the DEBUG trace at the console — and nothing is logged anywhere.
+
+    The session identity is resolved *before* the sink is added, so its own git probe (repo
+    matching in ``resolve_project``) never lands a stray trace line.
     """
     logger.remove()
     try:
         workspace = resolve_workspace(Path.cwd())
     except NotInWorkspaceError:
         return
+    logger.configure(extra=_identity(Path.cwd()))
     logger.add(log_path(workspace), format=_format, level='DEBUG')
+
+
+def _identity(cwd: Path) -> dict[str, str]:
+    """The ``session`` every line carries: the address of whoever is running ``ch`` here.
+
+    Best-effort — identity must never take logging (and with it the command) down: in a
+    workspace broken enough that the caller can't be resolved (a malformed config is
+    doctor's to report, and doctor must still run there) lines just go unattributed.
+    """
+    try:
+        return {'session': caller(cwd)}
+    except Exception:
+        return {}
 
 
 def log_start(command: str, function: str, params: dict[str, object]) -> float:

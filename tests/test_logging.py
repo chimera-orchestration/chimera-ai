@@ -10,7 +10,9 @@ from loguru import logger
 from testfixtures import LogCapture, OutputCapture, Replacer, TempDir, compare
 from testfixtures.mock import Mock
 
+import chimera.logging
 from chimera.commands.init import init
+from chimera.context import caller
 from chimera.git import Git
 from chimera.logging import (
     configure,
@@ -33,11 +35,13 @@ def frozen_clock(replace: Replacer) -> None:
 @pytest.fixture()
 def sink(tmpdir: TempDir, replace: Replacer) -> Path:
     """A real workspace with the file sink isolated: configure() writes here, and loguru's
-    handlers are restored afterwards so the sink doesn't leak into other tests."""
+    handlers and default extra (the session identity) are restored afterwards so neither
+    leaks into other tests."""
     ws = init(tmpdir / 'ws')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     core = getattr(logger, '_core')  # no typed helper fits an instance attribute
     replace(target=core.handlers, container=core, name='handlers', replacement={})
+    replace(target=core.extra, container=core, name='extra', replacement={})
     return ws
 
 
@@ -127,6 +131,7 @@ class TestFileSink:
                     'pid': os.getpid(),
                     'command': 'init',
                     'level': 'INFO',
+                    'session': 'captain',  # cwd is neither a project nor a repo → captain
                     'phase': 'start',
                     'function': FUNC,
                     'params': {'path': '/ws'},
@@ -136,6 +141,7 @@ class TestFileSink:
                     'pid': os.getpid(),
                     'command': 'init',
                     'level': 'INFO',
+                    'session': 'captain',
                     'phase': 'end',
                     'duration_ms': 0.0,
                 },
@@ -184,6 +190,23 @@ class TestFileSink:
         log_finish('init', log_start('init', FUNC, {}))
         compare(len(log_path(sink).read_text().splitlines()), expected=2)
 
+    def test_a_stamped_session_attributes_every_line(self, sink: Path, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_SESSION', 'proj@g@agent')
+        configure()
+        logger.info('hello')
+        compare(
+            json.loads(log_path(sink).read_text())['session'],
+            expected='proj@g@agent',
+        )
+
+    def test_unresolvable_identity_still_logs(self, sink: Path, replace: Replacer) -> None:
+        replace.in_module(caller, Mock(side_effect=RuntimeError('boom')), module=chimera.logging)
+        configure()
+        logger.info('hello')
+        line = json.loads(log_path(sink).read_text())
+        assert 'session' not in line
+        compare(line['message'], expected='hello')
+
     def test_a_git_trace_line_lands_at_debug(self, sink: Path) -> None:
         configure()
         Git(sink)('rev-parse', '--git-dir')
@@ -194,6 +217,7 @@ class TestFileSink:
             expected={
                 'pid': os.getpid(),
                 'level': 'DEBUG',
+                'session': 'captain',  # even the trace says who ran the command
                 'message': 'git rev-parse --git-dir',
                 'git_cwd': str(sink),
             },
