@@ -18,7 +18,7 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.agent_env import session_role
-from chimera.archive import Archive, Event, Session
+from chimera.archive import Event, Session, archive
 from chimera.config import NotInWorkspaceError
 from chimera.context import caller, resolve_scope
 from chimera.worktrees import SEP, session_name
@@ -30,11 +30,6 @@ PRINT_ENTRYPOINT = 'sdk-cli'
 gets ``cli``). Undocumented but field-verified: claude stamps it into its own process
 per-mode, so a ``-p`` spawned from inside a session never inherits the parent's value.
 See ``knowledge/claude-session-type-signals.md`` for the full signal matrix."""
-
-
-def archive(workspace: Path) -> Archive:
-    """The workspace's session archive, at ``state/archive.db``."""
-    return Archive.open(workspace / 'state' / 'archive.db')
 
 
 def addressed(agent_type: str | None, entrypoint: str | None) -> bool:

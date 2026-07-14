@@ -23,8 +23,7 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.agent_env import ROLE_MANAGER
-from chimera.archive import Archive, Session
-from chimera.commands.hook.capture import archive
+from chimera.archive import Archive, Session, archive
 from chimera.config import (
     NotInWorkspaceError,
     ProjectConfig,
