@@ -56,6 +56,12 @@ are never asserted.
 - Bind structured data with `logger.bind(key=value)` — never f-string it into the message.
   Bound keys serialise as fields on the JSON line (like `params`).
 - The message is the canonical command path (`'worktree rm'`), not a sentence.
+- Exception: `ch logtail`'s main line renders only the message, so a line whose point *is*
+  the live tail also carries its key facts in the text — the mail lines are the model
+  (`comms: send <sender> -> <to> [<kind>] <subject> (<id>)`, one `_log` helper in
+  `chimera.comms` so no site drifts) — with the same data still bound structured. Keep the
+  text bounded: elide anything long (comms elides subjects past 60 chars, and bodies never
+  enter the text at all) — the bound field carries the whole value.
 
 ## Ref safety (mandatory)
 

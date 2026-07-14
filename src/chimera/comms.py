@@ -24,9 +24,12 @@ directory listing is FIFO.
 The store models the message *lifecycle*; *why* a message was disposed (handled vs
 deferred, and the deferral reason) is audit metadata for the log, not the mailbox —
 the same log-is-truth split the archive keeps. Each send, receive (drain) and disposal
-logs at INFO, binding :meth:`Message.log_fields` — source, destination, party identifiers
-and content — so a message's whole journey is traceable from the log alone; the read-only
-peeks (inbox/thread) stay silent. Timestamps must be timezone-aware.
+logs at INFO through :func:`_log`: routing in the message text (who -> whom, kind,
+subject, id — what a live tail shows) and :meth:`Message.log_fields` bound structured —
+so a message's whole journey is traceable from the log alone; the read-only
+peeks (inbox/thread/messages) trace at DEBUG — below triage, like the git command
+trace — naming what was peeked and how much was found. Timestamps must be
+timezone-aware.
 """
 
 import os
@@ -77,7 +80,8 @@ class Message(BaseModel):
 
         Source, destination, the identifiers of all parties and the message, and the content —
         so a message's whole journey is reconstructable from the log alone and no site (send,
-        drain, dispose, delivery) can forget a field. Bind with ``logger.bind(**msg.log_fields())``.
+        drain, dispose, delivery) can forget a field. The store's own sites bind them via
+        :func:`_log`; anywhere else, ``logger.bind(**msg.log_fields())``.
         """
         return {
             'msg_id': self.id,
@@ -144,13 +148,17 @@ class Comms:
         tmp = mailbox / 'tmp' / name
         tmp.write_text(message.model_dump_json())
         os.replace(tmp, mailbox / 'new' / name)
-        logger.bind(**message.log_fields()).info('comms: send')
+        _log('send', message)
         return message
 
     def inbox(self, address: str, *, unread_only: bool = False) -> list[Message]:
         """The messages awaiting ``address``, oldest first: undrained plus (by default) undisposed."""
         states = ('new',) if unread_only else ('new', 'cur')
-        return self._collect(address, states)
+        found = self._collect(address, states)
+        logger.bind(address=address, unread_only=unread_only, count=len(found)).debug(
+            f'comms: inbox {address} ({len(found)})'
+        )
+        return found
 
     def drain(self, address: str) -> list[Message]:
         """Claim every undrained message for ``address`` (``new/`` → ``cur/``), returning them.
@@ -170,7 +178,7 @@ class Comms:
             except FileNotFoundError:
                 continue  # another drainer claimed it first
             message = _read(destination)
-            logger.bind(**message.log_fields()).info('comms: receive')
+            _log('receive', message)
             claimed.append(message)
         return claimed
 
@@ -188,7 +196,7 @@ class Comms:
             if source.exists():
                 message = _read(source)
                 os.replace(source, done / name)
-                logger.bind(**message.log_fields()).info('comms: dispose')
+                _log('dispose', message)
                 return
 
     def thread(self, address: str, thread: str) -> list[Message]:
@@ -197,11 +205,15 @@ class Comms:
         ``thread`` is the root message's id; a message belongs to it when it *is* the root or
         carries the root as its ``thread``.
         """
-        return [
+        found = [
             message
             for message in self._collect(address, ('new', 'cur', 'done'))
             if thread in (message.id, message.thread)
         ]
+        logger.bind(address=address, thread=thread, count=len(found)).debug(
+            f'comms: thread {thread} {address} ({len(found)})'
+        )
+        return found
 
     def messages(self) -> list[tuple[str, Message]]:
         """Every message across all mailboxes, oldest first, as ``(state, message)``.
@@ -210,11 +222,11 @@ class Comms:
         or ``done`` (disposed, awaiting cleanup) — the whole picture, for a captain to inspect.
         """
         found: list[tuple[str, Message]] = []
-        if not self._root.is_dir():
-            return found
-        for mailbox in sorted(self._root.iterdir()):
-            for state in ('new', 'cur', 'done'):
-                found.extend((state, _read(path)) for path in (mailbox / state).glob('*.json'))
+        if self._root.is_dir():
+            for mailbox in sorted(self._root.iterdir()):
+                for state in ('new', 'cur', 'done'):
+                    found.extend((state, _read(path)) for path in (mailbox / state).glob('*.json'))
+        logger.bind(count=len(found)).debug(f'comms: messages ({len(found)})')
         return sorted(found, key=lambda item: item[1].id)
 
     def _ensure(self, address: str) -> Path:
@@ -230,6 +242,27 @@ class Comms:
             if directory.is_dir():
                 paths.extend(directory.glob('*.json'))
         return [_read(path) for path in sorted(paths, key=lambda p: p.name)]
+
+
+_SUBJECT_LIMIT = 60
+
+
+def _log(action: str, message: Message) -> None:
+    """Land ``action`` on ``message`` at INFO — the one log site for every mailbox mutation.
+
+    The text carries the routing (``comms: send <sender> -> <to> [<kind>] <subject> (<id>)``)
+    because that's all a live tail shows; :meth:`Message.log_fields` rides bound, so the
+    structured record stays whole. One helper, so no site can drift from either half. A
+    subject past :data:`_SUBJECT_LIMIT` is elided in the text only — the bound field, like
+    the body (which never enters the text), stays whole.
+    """
+    subject = message.subject
+    if len(subject) > _SUBJECT_LIMIT:
+        subject = subject[: _SUBJECT_LIMIT - 3] + '...'
+    logger.bind(**message.log_fields()).info(
+        f'comms: {action} {message.sender} -> {message.to} '
+        f'[{message.kind}] {subject} ({message.id})'
+    )
 
 
 def _new_id(ts: datetime) -> str:

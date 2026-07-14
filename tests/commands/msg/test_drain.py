@@ -12,7 +12,7 @@ NOON = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
 DRAIN = 'chimera.commands.msg.drain.drain'
 RECEIVED = {  # the store's INFO line for the received (seeded m1) message
     'level': 'INFO',
-    'message': 'comms: receive',
+    'message': 'comms: receive p@manager -> p@g@agent [message] ping (m1)',
     'msg_id': 'm1',
     'sender': 'p@manager',
     'to': 'p@g@agent',

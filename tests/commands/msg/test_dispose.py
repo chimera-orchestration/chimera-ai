@@ -13,7 +13,7 @@ NOON = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
 DISPOSE = 'chimera.commands.msg.dispose.dispose'
 DISPOSED = {  # the store's INFO line for a disposed message (the seeded m1)
     'level': 'INFO',
-    'message': 'comms: dispose',
+    'message': 'comms: dispose p@manager -> p@g@agent [request] do (m1)',
     'msg_id': 'm1',
     'sender': 'p@manager',
     'to': 'p@g@agent',
