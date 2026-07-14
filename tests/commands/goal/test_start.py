@@ -358,6 +358,7 @@ def test_goal_start_cli_dry_role_leads_the_context(
             {
                 'level': 'INFO',
                 'command': 'goal start',
+                'goal': 'g',
                 'phase': 'start',
                 'function': 'chimera.commands.goal.start.start',
                 'params': {
@@ -374,13 +375,14 @@ def test_goal_start_cli_dry_role_leads_the_context(
             },
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'session': 'proj@g@agent',
                 'path': str(context),
                 'sha256': digest,
                 'sources': sources,
                 'message': 'context: rendered',
             },
-            {'level': 'INFO', 'command': 'goal start', 'phase': 'end'},
+            {'level': 'INFO', 'command': 'goal start', 'goal': 'g', 'phase': 'end'},
         ],
     )
     assert not (ws / 'proj' / 'worktrees').exists()  # nothing created

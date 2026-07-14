@@ -25,6 +25,7 @@ def _clear_workspace_env(replace: Replacer) -> None:
     replace.in_environ('CLAUDE_CODE_ENTRYPOINT', not_there)  # …whose entrypoint must not leak in
     replace.in_environ('CHIMERA_ROLE', not_there)  # …possibly one chimera itself launched
     replace.in_environ('CHIMERA_ROLE_SCOPE', not_there)
+    replace.in_environ('CHIMERA_SESSION', not_there)  # …whose address must not attribute logs
 
 
 @pytest.fixture()
