@@ -1741,6 +1741,8 @@ def hook_session_start() -> None:
         str(payload['session_id']),
         str(payload['transcript_path']),
         str(payload.get('source') or ''),
+        agent_type=str(agent_type) if (agent_type := payload.get('agent_type')) else None,
+        entrypoint=os.environ.get('CLAUDE_CODE_ENTRYPOINT'),
     )
 
 
