@@ -18,7 +18,8 @@ from chimera.agents.registry import AGENTS
 from chimera.commands.doctor import CHECKS
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.project.ls import projects
-from chimera.context import resolve_scope, resolve_workspace
+from chimera.context import resolve_project, resolve_scope, resolve_workspace
+from chimera.git import Git
 from chimera.worktrees import ACTORS
 
 
@@ -56,6 +57,15 @@ def complete_goal(ctx: Context, incomplete: str) -> list[str]:
 def complete_actor(incomplete: str) -> list[str]:
     """Actor names matching the typed prefix."""
     return [actor for actor in ACTORS if actor.startswith(incomplete)]
+
+
+def complete_remote(ctx: Context, incomplete: str) -> list[str]:
+    """The resolved project's git remotes matching the typed prefix."""
+    try:
+        project = resolve_project(Path.cwd(), _typed_project(ctx))
+        return [r for r in Git(project.repo)('remote').split() if r.startswith(incomplete)]
+    except Exception:
+        return []
 
 
 def complete_check(incomplete: str) -> list[str]:

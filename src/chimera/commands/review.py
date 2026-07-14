@@ -14,7 +14,7 @@ from chimera.commands.agent import agent
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
 from chimera.dry import Dry
-from chimera.git import Git
+from chimera.git import Git, remote_slug, repo_slug
 from chimera.worktrees import (
     ACTORS,
     AGENT,
@@ -142,7 +142,7 @@ def _pr_argument(git: Git, pr: str, project: str) -> str:
         origin = git('remote', 'get-url', 'origin').strip()
     except GitError:
         origin = ''
-    if not (have := _origin_slug(origin)):
+    if not (have := remote_slug(origin)):
         raise UserError(
             f"project '{project}' has no github origin to match {pr} against — "
             f'pass the PR number instead.'
@@ -197,30 +197,14 @@ def _check_pr_repo(git: Git, url: object, project: str) -> None:
     except GitError:
         return  # no origin to compare against — the fetch itself will surface any problem
     if (
-        (want := _repo_slug(urlsplit(str(url)).path))
-        and (have := _origin_slug(origin))
+        (want := repo_slug(urlsplit(str(url)).path))
+        and (have := remote_slug(origin))
         and want != have
     ):
         raise UserError(
             f"PR is on {want}, but project '{project}' tracks {have} — "
             f'run ch review from the project tracking {want} (or pass -p).'
         )
-
-
-def _repo_slug(path: str) -> str:
-    """``owner/repo`` (lowercased) from a URL path like ``/owner/repo/pull/<n>``; '' if too short."""
-    parts = path.strip('/').split('/')
-    return '/'.join(parts[:2]).lower() if len(parts) >= 2 else ''
-
-
-def _origin_slug(url: str) -> str:
-    """``owner/repo`` from a github-style origin (https/ssh/scp); '' for a bare local path."""
-    text = url.removesuffix('.git')
-    if '://' in text:
-        return _repo_slug(urlsplit(text).path)
-    if ':' in text and '/' not in text.split(':', 1)[0]:  # scp-like git@host:owner/repo
-        return _repo_slug(text.split(':', 1)[1])
-    return ''  # a local-path origin has no remote identity to compare
 
 
 def _wire_upstream(git: Git, number: int, head_oid: str, tracking: str) -> str:

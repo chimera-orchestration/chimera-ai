@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from giterator.testing import Repo
 from testfixtures import TempDir, compare
 from typer._click.shell_completion import get_completion_class
 from typer.completion import completion_init
@@ -128,3 +129,23 @@ def test_complete_harness_directly() -> None:
 def test_complete_check_directly() -> None:
     compare(complete_check(''), expected=[check.name for check in CHECKS])
     compare(complete_check('git'), expected=['gitignore'])
+
+
+def test_remote_option_value(tmpdir: TempDir, workspace_with_env: Path) -> None:
+    repo = Repo.make(tmpdir / 'repo')
+    repo('remote', 'add', 'origin', str(tmpdir / 'o'))
+    repo('remote', 'add', 'fork', str(tmpdir / 'f'))
+    tmpdir.dump(
+        workspace_with_env / 'proj' / 'config.yaml',
+        {'kind': 'project', 'repo': str(repo.path)},
+    )
+    compare(_complete(['-p', 'proj', 'goal', 'pr', 'g', '--to']), expected=['fork', 'origin'])
+    compare(_complete(['-p', 'proj', 'goal', 'pr', 'g', '--to'], 'or'), expected=['origin'])
+
+
+def test_remote_without_a_repo_is_silent(tmpdir: TempDir, workspace_with_env: Path) -> None:
+    tmpdir.dump(
+        workspace_with_env / 'proj' / 'config.yaml',
+        {'kind': 'project', 'repo': str(tmpdir / 'ghost')},  # repo path doesn't exist
+    )
+    compare(_complete(['-p', 'proj', 'goal', 'pr', 'g', '--to']), expected=[])
