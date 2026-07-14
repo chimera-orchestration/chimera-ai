@@ -6,6 +6,7 @@ from pathlib import Path
 
 from testfixtures import Replacer, TempDir
 
+from chimera.commands.hook.capture import session_start
 from chimera.commands.hook.deliver import deliver
 from chimera.commands.msg.dispose import dispose
 from chimera.commands.msg.drain import drain
@@ -64,6 +65,19 @@ def test_deliver_does_not_respam_a_session_but_stops_only_at_ack(
     assert [m.id for m in deliver(ws, 'uuid-2')] == ['m1']  # unacked → a fresh session still does
     dispose(ws, ADDRESS, 'm1')
     assert deliver(ws, 'uuid-3') == []  # acked → surfacing over
+
+
+def test_deliver_skips_a_session_archived_without_an_address(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # a one-shot -p run shares its cwd with real conversations: caller(cwd) would hand it
+    # their mail, so the archive's no-address fact (capture.addressed) is what gates here
+    ws = _ws(tmpdir, replace)
+    replace.in_environ('CHIMERA_ROLE', '')
+    session_start(ws, 'uuid-p', '/t.jsonl', 'startup', entrypoint='sdk-cli')
+    _seed(ws, 'm1')
+    assert deliver(ws, 'uuid-p') == []
+    assert [m.id for m in deliver(ws, 'uuid-chat')] == ['m1']  # the real session still gets it
 
 
 def test_deliver_outside_a_workspace_is_a_noop(tmpdir: TempDir, replace: Replacer) -> None:
