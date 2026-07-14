@@ -777,6 +777,7 @@ def _pushed_logs(
         start,
         {
             'level': 'INFO',
+            'goal': 'g',
             'source': 'g/agent',
             'candidates': ['g/agent'],
             'message': 'goal pr: source',
@@ -914,6 +915,7 @@ def test_goal_pr_cli_dry_previews_the_remote_and_head(
             start,
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'source': 'g/agent',
                 'candidates': ['g/agent'],
                 'message': 'goal pr: source',
