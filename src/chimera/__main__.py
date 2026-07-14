@@ -83,6 +83,7 @@ from chimera.completions import (
     complete_goal,
     complete_harness,
     complete_project,
+    complete_remote,
 )
 from chimera.config import NotInWorkspaceError, UserError, workspace_config
 from chimera.context import (
@@ -206,6 +207,15 @@ MergeDryOpt = Annotated[
     typer.Option('--dry', help='Preview the merge, agent stop and sweep; change nothing'),
 ]
 DraftOpt = Annotated[bool, typer.Option('--draft', help='Open the PR as a draft')]
+PrToOpt = Annotated[
+    str | None,
+    typer.Option(
+        '--to',
+        help='Remote to push the goal branch to (default: config pr.remote, then origin); '
+        'the PR still targets the base on origin, so a non-origin remote opens a cross-repo PR',
+        autocompletion=complete_remote,
+    ),
+]
 PrDryOpt = Annotated[
     bool,
     typer.Option('--dry', help='Preview the push and PR, title and body included; change nothing'),
@@ -440,6 +450,22 @@ def _spec(project: Project, harness: str | None, model: str | None) -> AgentSpec
     except NotInWorkspaceError:
         workspace = None
     return resolve_spec(harness, model, project.config.agent, workspace)
+
+
+def _pr_remote(project: Project, to: str | None) -> str | None:
+    """The remote ``goal pr`` pushes to: the flag, then the project's ``pr:``, then the
+    workspace's — :func:`_spec`'s cascade shape. None (no level set) leaves the pure
+    function's own origin default in charge; a project standing alone (no workspace)
+    just loses the workspace level.
+    """
+    if to is not None:
+        return to
+    if project.config.pr.remote is not None:
+        return project.config.pr.remote
+    try:
+        return workspace_config(resolve_workspace(Path.cwd())).pr.remote
+    except NotInWorkspaceError:
+        return None
 
 
 def _agent_intro(project: str, goal: str) -> str:
@@ -1395,21 +1421,36 @@ def goal_pr(
     goal: ExistingGoalArg,
     into: IntoOpt = None,
     draft: DraftOpt = False,
+    to: PrToOpt = None,
     offline: OfflineOpt = False,
     dry: PrDryOpt = False,
     project: ProjectOpt = None,
 ) -> None:
     p = _project(ctx, project)
     dry_run = Dry(dry)
-    result = _goal_pr(p.repo, p.name, p.prompts, goal, into, draft, fetch=not offline, dry=dry_run)
+    result = _goal_pr(
+        p.repo,
+        p.name,
+        p.prompts,
+        goal,
+        into,
+        draft,
+        to=_pr_remote(p, to),
+        fetch=not offline,
+        dry=dry_run,
+    )
+    for ref in result.cleared:
+        typer.echo(f'{dry_run.verb("Cleared", "Would clear")} stale {ref}')
     verb = dry_run.verb('Pushed', 'Would push')
-    typer.echo(f'{verb} {result.source} to origin as {result.remote_branch} ({result.sha})')
+    typer.echo(
+        f'{verb} {result.source} to {result.remote} as {result.remote_branch} ({result.sha})'
+    )
     if result.created:
         typer.echo(f'Opened PR: {result.url}')
     elif result.url is not None:
         typer.echo(f'PR already open: {result.url}')
     else:
-        typer.echo(f'Would open a PR against {result.base}:')
+        typer.echo(f'Would open a PR against {result.base} (head {result.head}):')
         typer.echo(f'title: {result.title}')
         if result.body:
             typer.echo(result.body)

@@ -444,13 +444,27 @@ half-done landing finds the work contained and carries on with the cleanup. `--d
 the whole landing — merge, checkout moves, agent stops, sweep — changing nothing. The source
 choice lands `goal merge: source`; the base move `goal merge: refs`.
 
-`ch goal pr <goal> [--into <branch>] [--draft]` is `goal merge`'s remote-review sibling: the
-same source selection, but the source's tip is pushed to `origin` as branch `<goal>` (the
-actor suffix is local plumbing; the goal name is the publication) and a PR opened via `gh`
-against `--into` (default: the repo's default branch). The base must already be on origin —
-the PR targets origin's branch, and the goal's commits are counted against origin's view of
-it — so a local-only base refuses (push it first) rather than failing server-side after the
-push. Nothing local is deleted or stopped —
+`ch goal pr <goal> [--into <branch>] [--draft] [--to <remote>]` is `goal merge`'s
+remote-review sibling: the same source selection, but the source's tip is pushed to `--to`
+(default: the config cascade's `pr: {remote: …}` — project, then workspace — then `origin`;
+must name an existing remote or it refuses) as branch `<goal>` (the actor suffix is local
+plumbing; the goal name is the publication) and a PR opened via `gh` against `--into`
+(default: the repo's default branch). The base must already be on origin whatever `--to`
+names — the PR always targets origin's branch, and the goal's commits are counted against
+origin's view of it — so a local-only base refuses (push it first) rather than failing
+server-side after the push. A non-origin `--to` is the fork workflow (origin readable but
+not writable): the PR opened is *cross-repo*, its head `<fork-owner>:<goal>` with the owner
+read from the remote's URL (a remote whose URL names no owner — a local path — refuses), and
+the already-open check filters by that owner so origin's own branch of the same name never
+shadows the fork's; `gh` itself is pinned to origin's repo (`--repo`, host-qualified) whenever
+origin's URL carries one, since with a second github remote around it refuses to infer a base
+repo. A stale `<goal>/<actor>` branch on the push remote (left from an earlier by-hand PR)
+would block creating `<goal>` — git can't hold `refs/heads/<goal>` beside
+`refs/heads/<goal>/*` — so one contained in the PR's base is deleted (sha logged for
+recovery) and one carrying unique work refuses, naming the exact ref. A push origin denies
+for lack of write access lands as a clean error hinting at `--to` and the repo's other
+remotes; the push always runs from the project repo, never an agent worktree, so
+HEAD-sensitive pre-push hooks see the repo itself. Nothing local is deleted or stopped —
 the goal keeps working until the PR lands, after which `goal merge` (or `goal finish`) cleans
 up as usual. Title and body: a single-commit branch reuses its subject and body verbatim —
 the same content GitHub itself prefills from a lone commit, computed locally so `--dry` can
@@ -469,9 +483,10 @@ words (`goal pr: description` logs the path, key and whether it was reused; `goa
 sweeps the cache with the goal's other transient markers). Idempotent: a re-run re-pushes
 (git refuses a non-fast-forward, e.g. after a rebase — resolve by hand) and reports an
 already-open PR instead of duplicating it — found *before* any composing, so no model run is
-spent on a description the open PR already carries. The pushed remote-tracking ref rides
-`goal pr: refs`; the PR lands `goal pr: opened`/`goal pr: existing`. `--dry` resolves
-everything — source, commits, title, body — and pushes and opens nothing.
+spent on a description the open PR already carries; both respect `--to`. The pushed
+remote-tracking ref rides `goal pr: refs`; the PR lands `goal pr: opened`/`goal pr:
+existing`. `--dry` resolves everything — source, commits, remote and head spec, title,
+body — and pushes and opens nothing.
 
 `ch agent stop [-g <goal>] [-a <actor>]` stops the live agent session in a goal's worktree:
 SIGTERM to its pid, waiting (10s) for it to exit — never SIGKILL; a session that won't die,

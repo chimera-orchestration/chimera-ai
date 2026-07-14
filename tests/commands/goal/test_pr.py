@@ -4,11 +4,12 @@ from pathlib import Path
 from subprocess import CalledProcessError, CompletedProcess
 from typing import Any
 
+from giterator import GitError
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.commands.goal.pr import PrResult, pr
+from chimera.commands.goal.pr import PrResult, _head, pr
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
 from chimera.dry import Dry
@@ -85,6 +86,17 @@ def _pr(tmpdir: TempDir, repo_path: Path, goal: str = 'g', **kw: Any) -> PrResul
     return pr(repo_path, 'proj', tmpdir / 'prompts', goal, **kw)
 
 
+def _fork(tmpdir: TempDir, git_repo: Repo, url: str = 'git@github.com:Me/r.git') -> Path:
+    """A second remote 'fork': a github-style fetch URL (whose owner the cross-repo head
+    spec is derived from) over a local bare push URL, so the push stays real and observable."""
+    fork = tmpdir / 'fork'
+    Git(tmpdir.path)('init', '--bare', '-b', 'main', str(fork))
+    git = Git(git_repo.path)
+    git('remote', 'add', 'fork', url)
+    git('remote', 'set-url', '--push', 'fork', str(fork))
+    return fork
+
+
 def test_single_commit_titles_and_bodies_from_its_message(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
@@ -98,6 +110,8 @@ def test_single_commit_titles_and_bodies_from_its_message(
         result,
         expected=PrResult(
             'g/agent',
+            'origin',
+            'g',
             'g',
             'main',
             _short(git_repo.path, 'g/agent'),
@@ -273,6 +287,8 @@ def test_dry_resolves_everything_but_pushes_and_opens_nothing(
         result,
         expected=PrResult(
             'g/agent',
+            'origin',
+            'g',
             'g',
             'main',
             _short(git_repo.path, 'g/agent'),
@@ -328,7 +344,9 @@ def test_refuses_a_base_missing_from_origin(
 def test_refuses_without_an_origin(tmpdir: TempDir, git_repo: Repo) -> None:
     add(git_repo.path, tmpdir / 'worktrees', goal='g')
     with ShouldRaise(
-        UserError('no origin to push g to — publish the project first: ch project push <url>')
+        UserError(
+            'no origin to propose g against — publish the project first: ch project push <url>'
+        )
     ):
         _pr(tmpdir, git_repo.path)
 
@@ -458,6 +476,7 @@ def test_goal_pr_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command
             'goal': 'g',
             'into': None,
             'draft': False,
+            'to': None,
             'offline': False,
             'dry': False,
             'project': None,
@@ -513,6 +532,7 @@ def test_goal_pr_cli_reports_an_open_pr(
                     'goal': 'g',
                     'into': None,
                     'draft': False,
+                    'to': None,
                     'offline': False,
                     'dry': False,
                     'project': None,
@@ -547,6 +567,7 @@ def test_goal_pr_cli_reports_an_open_pr(
                     'goal': 'g',
                     'into': None,
                     'draft': False,
+                    'to': None,
                     'offline': False,
                     'dry': False,
                     'project': None,
@@ -569,12 +590,20 @@ def test_goal_pr_cli_dry_previews_title_and_body(
     start, end = action_logs(
         'goal pr',
         'chimera.commands.goal.pr.pr',
-        {'goal': 'g', 'into': None, 'draft': False, 'offline': False, 'dry': True, 'project': None},
+        {
+            'goal': 'g',
+            'into': None,
+            'draft': False,
+            'to': None,
+            'offline': False,
+            'dry': True,
+            'project': None,
+        },
     )
     command.run('goal', 'pr', 'g', '--dry').check(
         output=(
             f'Would push g/agent to origin as g ({tip_short})\n'
-            f'Would open a PR against main:\n'
+            f'Would open a PR against main (head g):\n'
             f'title: Do the thing\n'
             f'Because reasons.'
         ),
@@ -589,3 +618,474 @@ def test_goal_pr_cli_dry_previews_title_and_body(
             end,
         ],
     )
+
+
+def test_to_pushes_to_the_named_remote_and_opens_a_cross_repo_pr(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    origin = _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content(
+        'work', message='Do the thing\n\nBecause reasons.'
+    )
+    calls = _outside(replace)
+    result = _pr(tmpdir, git_repo.path, to='fork')
+    compare(
+        result,
+        expected=PrResult(
+            'g/agent',
+            'fork',
+            'g',
+            'me:g',  # the owner from the remote's URL, lowercased
+            'main',
+            _short(git_repo.path, 'g/agent'),
+            'Do the thing',
+            'Because reasons.',
+            PR_URL,
+            True,
+        ),
+    )
+    compare(_full(fork, 'g'), expected=_full(git_repo.path, 'g/agent'))
+    assert not Git(origin).ref_exists('refs/heads/g')  # origin never sees the branch
+    created = _created_with(calls)
+    assert created is not None
+    compare(created[created.index('--head') + 1], expected='me:g')
+    compare(created[created.index('--base') + 1], expected='main')
+
+
+def test_to_existing_pr_check_matches_only_the_forks(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    calls = _outside(
+        replace,
+        open_prs='[{"url": "https://github.com/o/r/pull/3", '
+        '"headRepositoryOwner": {"login": "other"}}, '
+        '{"url": "https://github.com/o/r/pull/4", "headRepositoryOwner": {"login": "Me"}}]',
+    )
+    result = _pr(tmpdir, git_repo.path, to='fork')
+    compare(result.url, expected='https://github.com/o/r/pull/4')
+    assert not result.created
+    assert _created_with(calls) is None
+    listed = next(args for args, _ in calls if args[:3] == ['gh', 'pr', 'list'])
+    compare(listed[listed.index('--head') + 1], expected='g')  # the bare branch, never owner:g
+    compare(listed[listed.index('--json') + 1], expected='url,headRepositoryOwner')
+    compare(_full(fork, 'g'), expected=_full(git_repo.path, 'g/agent'))  # push still updates
+
+
+def test_to_anothers_pr_on_the_same_branch_name_does_not_shadow(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    calls = _outside(
+        replace,
+        open_prs='[{"url": "https://github.com/o/r/pull/3", '
+        '"headRepositoryOwner": {"login": "other"}}]',
+    )
+    result = _pr(tmpdir, git_repo.path, to='fork')
+    assert result.created
+    assert _created_with(calls) is not None
+
+
+def test_to_refuses_an_unknown_remote(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    _published(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    _outside(replace)
+    with ShouldRaise(UserError("no remote 'fork' to push g to (remotes: origin)")):
+        _pr(tmpdir, git_repo.path, to='fork')
+
+
+def test_to_refuses_a_remote_whose_url_names_no_owner(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    fork = tmpdir / 'fork'
+    Git(tmpdir.path)('init', '--bare', '-b', 'main', str(fork))
+    Git(git_repo.path)('remote', 'add', 'fork', str(fork))
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    _outside(replace)
+    with ShouldRaise(
+        UserError(
+            f"can't tell whose fork fork is — its URL ({fork}) names no owner "
+            f'to qualify the cross-repo PR head with'
+        )
+    ):
+        _pr(tmpdir, git_repo.path, to='fork')
+    assert not Git(fork).ref_exists('refs/heads/g')  # refused before any push
+
+
+def test_a_denied_push_hints_at_to(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    origin = _published(tmpdir, git_repo)
+    _fork(tmpdir, git_repo)
+    hook = tmpdir / 'deny-hooks' / 'pre-receive'
+    hook.parent.mkdir()
+    hook.write_text('#!/bin/sh\necho "Permission to o/r.git denied" >&2\nexit 1\n')
+    hook.chmod(0o755)
+    # local hooksPath so the hook fires even where a global core.hooksPath is set
+    Git(origin)('config', 'core.hooksPath', str(hook.parent))
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work', message='Do the thing')
+    _outside(replace)
+    with ShouldRaise(
+        UserError,
+        match=r'(?s)origin denied the push:\n.*Permission to o/r\.git denied.*'
+        r'no write access\? push via a writable remote: '
+        r'ch goal pr g --to <remote> \(this repo also has: fork\)',
+    ):
+        _pr(tmpdir, git_repo.path)
+
+
+def test_a_non_fast_forward_push_raises_as_itself(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    agent = Repo(tmpdir / 'worktrees' / 'g@agent')
+    agent.commit_content('work')
+    _outside(replace, open_prs=f'[{{"url": "{PR_URL}"}}]')
+    _pr(tmpdir, git_repo.path)  # lands origin/g
+    agent('reset', '--hard', 'main')
+    agent.commit_content('rewritten')  # diverged from what was pushed
+    with ShouldRaise(GitError, match='rejected'):
+        _pr(tmpdir, git_repo.path)
+
+
+def _pushed_logs(
+    to: str | None, remote: str, tip: str, project: str | None = None
+) -> list[dict[str, object]]:
+    """The log lines of a CLI run that pushes goal 'g' (one 'Do the thing' commit) and
+    opens its PR."""
+    start, end = action_logs(
+        'goal pr',
+        'chimera.commands.goal.pr.pr',
+        {
+            'goal': 'g',
+            'into': None,
+            'draft': False,
+            'to': to,
+            'offline': False,
+            'dry': False,
+            'project': project,
+        },
+    )
+    return [
+        start,
+        {
+            'level': 'INFO',
+            'source': 'g/agent',
+            'candidates': ['g/agent'],
+            'message': 'goal pr: source',
+        },
+        {
+            'level': 'INFO',
+            'goal': 'g',
+            'source': 'g/agent',
+            'git': {'before': {}, 'after': {f'{remote}/g': tip}},
+            'message': 'goal pr: refs',
+        },
+        {
+            'level': 'INFO',
+            'url': PR_URL,
+            'title': 'Do the thing',
+            'goal': 'g',
+            'message': 'goal pr: opened',
+        },
+        end,
+    ]
+
+
+def test_goal_pr_cli_to(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work', message='Do the thing')
+    _outside(replace)
+    tip_short, tip = _short(git_repo.path, 'g/agent'), _full(git_repo.path, 'g/agent')
+    command.run('goal', 'pr', 'g', '--to', 'fork').check(
+        output=f'Pushed g/agent to fork as g ({tip_short})\nOpened PR: {PR_URL}',
+        logging=_pushed_logs('fork', 'fork', tip),
+    )
+    compare(_full(fork, 'g'), expected=tip)
+
+
+def test_goal_pr_cli_config_names_the_remote(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    tmpdir.dump(
+        'config.yaml',
+        {'kind': 'project', 'repo': str(git_repo.path), 'pr': {'remote': 'fork'}},
+    )
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work', message='Do the thing')
+    _outside(replace)
+    tip_short, tip = _short(git_repo.path, 'g/agent'), _full(git_repo.path, 'g/agent')
+    command.run('goal', 'pr', 'g').check(
+        output=f'Pushed g/agent to fork as g ({tip_short})\nOpened PR: {PR_URL}',
+        logging=_pushed_logs(None, 'fork', tip),
+    )
+    compare(_full(fork, 'g'), expected=tip)
+
+
+def test_goal_pr_cli_to_flag_wins_over_config(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    tmpdir.dump(
+        'config.yaml',
+        {'kind': 'project', 'repo': str(git_repo.path), 'pr': {'remote': 'fork'}},
+    )
+    origin = _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work', message='Do the thing')
+    _outside(replace)
+    tip_short, tip = _short(git_repo.path, 'g/agent'), _full(git_repo.path, 'g/agent')
+    command.run('goal', 'pr', 'g', '--to', 'origin').check(
+        output=f'Pushed g/agent to origin as g ({tip_short})\nOpened PR: {PR_URL}',
+        logging=_pushed_logs('origin', 'origin', tip),
+    )
+    compare(_full(origin, 'g'), expected=tip)
+    assert not Git(fork).ref_exists('refs/heads/g')
+
+
+def test_goal_pr_cli_workspace_config_names_the_remote(
+    tmpdir: TempDir,
+    git_repo: Repo,
+    replace: Replacer,
+    command: Command,
+    workspace_with_env: Path,
+) -> None:
+    config = workspace_with_env / 'config.yaml'
+    config.write_text(config.read_text() + 'pr:\n  remote: fork\n')
+    tmpdir.dump(
+        workspace_with_env / 'proj' / 'config.yaml',
+        {'kind': 'project', 'repo': str(git_repo.path)},
+    )
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work', message='Do the thing')
+    _outside(replace)
+    tip_short, tip = _short(git_repo.path, 'g/agent'), _full(git_repo.path, 'g/agent')
+    command.run('goal', 'pr', 'g', '-p', 'proj').check(
+        output=f'Pushed g/agent to fork as g ({tip_short})\nOpened PR: {PR_URL}',
+        logging=_pushed_logs(None, 'fork', tip, project='proj'),
+    )
+    compare(_full(fork, 'g'), expected=tip)
+
+
+def test_goal_pr_cli_dry_previews_the_remote_and_head(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content(
+        'work', message='Do the thing\n\nBecause reasons.'
+    )
+    _outside(replace)
+    tip_short = _short(git_repo.path, 'g/agent')
+    start, end = action_logs(
+        'goal pr',
+        'chimera.commands.goal.pr.pr',
+        {
+            'goal': 'g',
+            'into': None,
+            'draft': False,
+            'to': 'fork',
+            'offline': False,
+            'dry': True,
+            'project': None,
+        },
+    )
+    command.run('goal', 'pr', 'g', '--to', 'fork', '--dry').check(
+        output=(
+            f'Would push g/agent to fork as g ({tip_short})\n'
+            f'Would open a PR against main (head me:g):\n'
+            f'title: Do the thing\n'
+            f'Because reasons.'
+        ),
+        logging=[
+            start,
+            {
+                'level': 'INFO',
+                'source': 'g/agent',
+                'candidates': ['g/agent'],
+                'message': 'goal pr: source',
+            },
+            end,
+        ],
+    )
+    assert not Git(fork).ref_exists('refs/heads/g')
+
+
+def test_a_github_origin_pins_ghs_base_repo(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    origin = _published(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    # github fetch URL (identity) over the local bare push URL, as _fork arranges
+    git('remote', 'set-url', 'origin', 'https://github.com/O/R.git')
+    git('remote', 'set-url', '--push', 'origin', str(origin))
+    _fork(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    calls = _outside(replace)
+    _pr(tmpdir, git_repo.path, to='fork', fetch=False)  # offline: the fetch URL is fake
+    listed = next(args for args, _ in calls if args[:3] == ['gh', 'pr', 'list'])
+    created = _created_with(calls)
+    assert created is not None
+    for args in (listed, created):
+        compare(args[args.index('--repo') + 1], expected='github.com/o/r')
+
+
+def test_a_local_origin_leaves_gh_to_infer_the_repo(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    calls = _outside(replace)
+    _pr(tmpdir, git_repo.path)
+    assert all('--repo' not in args for args, _ in calls if args[0] == 'gh')
+
+
+def test_a_stale_merged_actor_branch_on_the_target_is_cleared(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    git('push', 'fork', 'main:refs/heads/g/agent')  # leftover from an earlier landed round
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work', message='Do the thing')
+    _outside(replace)
+    stale_tip, tip = _full(git_repo.path, 'main'), _full(git_repo.path, 'g/agent')
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        result = _pr(tmpdir, git_repo.path, to='fork')
+    compare(result.cleared, expected=('fork/g/agent',))
+    assert not Git(fork).ref_exists('refs/heads/g/agent')
+    compare(_full(fork, 'g'), expected=tip)
+    log.check(
+        ('goal pr: source', {'source': 'g/agent', 'candidates': ['g/agent']}),
+        (
+            'goal pr: refs',
+            {
+                'remote': 'fork',
+                'goal': 'g',
+                'git': {'before': {'fork/g/agent': stale_tip}, 'after': {}},
+            },
+        ),
+        (
+            'goal pr: refs',
+            {
+                'goal': 'g',
+                'source': 'g/agent',
+                'git': {'before': {}, 'after': {'fork/g': tip}},
+            },
+        ),
+        ('goal pr: opened', {'url': PR_URL, 'title': 'Do the thing', 'goal': 'g'}),
+    )
+
+
+def test_a_stale_actor_branch_with_unique_work_refuses(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    git('push', 'fork', 'g/agent:refs/heads/g/agent')  # work origin/main doesn't contain
+    _outside(replace)
+    with ShouldRaise(
+        UserError(
+            'g/agent on fork blocks creating branch g and has work origin/main does not '
+            '— delete or rename it on fork, then re-run'
+        )
+    ):
+        _pr(tmpdir, git_repo.path, to='fork')
+    assert Git(fork).ref_exists('refs/heads/g/agent')  # left standing
+    assert not Git(fork).ref_exists('refs/heads/g')  # nothing pushed
+
+
+def test_dry_previews_the_stale_clear(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    Git(git_repo.path)('push', 'fork', 'main:refs/heads/g/agent')
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    _outside(replace)
+    result = _pr(tmpdir, git_repo.path, to='fork', dry=Dry(True))
+    compare(result.cleared, expected=('fork/g/agent',))
+    assert Git(fork).ref_exists('refs/heads/g/agent')  # nothing deleted
+
+
+def test_head_a_triangular_origin_is_a_fork_push(tmpdir: TempDir, git_repo: Repo) -> None:
+    _published(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    git('remote', 'set-url', 'origin', 'https://github.com/O/R.git')
+    git('remote', 'set-url', '--push', 'origin', 'git@github.com:Me/r.git')
+    compare(_head(git, 'origin', 'g'), expected=('me:g', 'me'))
+
+
+def test_head_an_alternate_transport_pushurl_stays_same_repo(
+    tmpdir: TempDir, git_repo: Repo
+) -> None:
+    _published(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    git('remote', 'set-url', 'origin', 'https://github.com/O/R.git')
+    git('remote', 'set-url', '--push', 'origin', 'ssh://git@github.com/o/r.git')
+    compare(_head(git, 'origin', 'g'), expected=('g', None))
+
+
+def test_a_strangers_fork_pr_does_not_shadow_the_origin_push(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    origin = _published(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    git('remote', 'set-url', 'origin', 'https://github.com/O/R.git')
+    git('remote', 'set-url', '--push', 'origin', str(origin))
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work')
+    calls = _outside(
+        replace,
+        open_prs='[{"url": "https://github.com/o/r/pull/3", "headRepositoryOwner": null}, '
+        '{"url": "https://github.com/o/r/pull/5", "headRepositoryOwner": {"login": "other"}}]',
+    )
+    result = _pr(tmpdir, git_repo.path, fetch=False)  # offline: the fetch URL is fake
+    assert result.created  # neither the deleted-fork PR nor the stranger's is ours
+    assert _created_with(calls) is not None
+
+
+def test_goal_pr_cli_reports_the_stale_clear(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    tmpdir.dump('config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
+    _published(tmpdir, git_repo)
+    fork = _fork(tmpdir, git_repo)
+    git = Git(git_repo.path)
+    git('push', 'fork', 'main:refs/heads/g/agent')
+    Repo(tmpdir / 'worktrees' / 'g@agent').commit_content('work', message='Do the thing')
+    _outside(replace)
+    stale_tip = _full(git_repo.path, 'main')
+    tip_short, tip = _short(git_repo.path, 'g/agent'), _full(git_repo.path, 'g/agent')
+    start, source, refs, opened, end = _pushed_logs('fork', 'fork', tip)
+    command.run('goal', 'pr', 'g', '--to', 'fork').check(
+        output=(
+            f'Cleared stale fork/g/agent\n'
+            f'Pushed g/agent to fork as g ({tip_short})\n'
+            f'Opened PR: {PR_URL}'
+        ),
+        logging=[
+            start,
+            source,
+            {
+                'level': 'INFO',
+                'remote': 'fork',
+                'goal': 'g',
+                'git': {'before': {'fork/g/agent': stale_tip}, 'after': {}},
+                'message': 'goal pr: refs',
+            },
+            refs,
+            opened,
+            end,
+        ],
+    )
+    assert not Git(fork).ref_exists('refs/heads/g/agent')

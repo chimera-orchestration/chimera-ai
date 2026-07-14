@@ -21,6 +21,7 @@ import shlex
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from giterator import Git as GiteratorGit
 from giterator import GitError
@@ -43,6 +44,44 @@ def completing() -> bool:
     below goes quiet under it, and ``__main__.main`` swaps its unknown-role failure for a
     silent empty completion — a completer must never raise or print."""
     return any(var in os.environ for var in _COMPLETION_VARS)
+
+
+def repo_slug(path: str) -> str:
+    """``owner/repo`` (lowercased) from a URL path like ``/owner/repo/pull/<n>``; '' if too short."""
+    parts = path.strip('/').split('/')
+    return '/'.join(parts[:2]).lower() if len(parts) >= 2 else ''
+
+
+def remote_slug(url: str) -> str:
+    """``owner/repo`` from a github-style remote URL (https/ssh/scp); '' for a bare local path.
+
+    A ``://`` URL must carry a host (``file:///…`` has none — its path is a filesystem
+    path, never an owner/repo pair).
+    """
+    text = url.removesuffix('.git')
+    if '://' in text:
+        split = urlsplit(text)
+        return repo_slug(split.path) if split.netloc else ''
+    if ':' in text and '/' not in text.split(':', 1)[0]:  # scp-like git@host:owner/repo
+        return repo_slug(text.split(':', 1)[1])
+    return ''  # a local-path remote has no hosted identity to compare
+
+
+def remote_repo(url: str) -> str:
+    """``host/owner/repo`` from a github-style remote URL; '' when it has no hosted identity.
+
+    The form ``gh --repo`` wants: without the host, gh assumes github.com, silently
+    aiming a GitHub-Enterprise remote's owner/repo at the wrong service.
+    """
+    slug = remote_slug(url)
+    if not slug:
+        return ''
+    text = url.removesuffix('.git')
+    if '://' in text:
+        host = urlsplit(text).netloc.rpartition('@')[2]
+    else:
+        host = text.split(':', 1)[0].rpartition('@')[2]
+    return f'{host}/{slug}' if host else ''
 
 
 def _env(base: Mapping[str, str], caller: dict[str, str] | None) -> dict[str, str]:

@@ -4,7 +4,7 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.git import HTTP_TIMEOUTS, SSH_COMMAND, Git, _env
+from chimera.git import HTTP_TIMEOUTS, SSH_COMMAND, Git, _env, remote_repo, remote_slug
 
 
 def _trace() -> LogCapture:
@@ -162,3 +162,21 @@ class TestRefLog:
                     git('branch', 'twig')
                     raise RuntimeError('boom')
         log.check(('demo: refs', {'git': {'before': {}, 'after': {'twig': sha}}}))
+
+
+def test_remote_slug_shapes() -> None:
+    compare(remote_slug('git@github.com:Owner/Repo.git'), expected='owner/repo')
+    compare(remote_slug('https://github.com/Owner/Repo'), expected='owner/repo')
+    compare(remote_slug('ssh://git@github.com/Owner/Repo.git'), expected='owner/repo')
+    compare(remote_slug('file:///Users/me/repos/fork.git'), expected='')  # a path, not an owner
+    compare(remote_slug('/Users/me/repos/fork'), expected='')
+
+
+def test_remote_repo_shapes() -> None:
+    compare(remote_repo('git@github.com:Owner/Repo.git'), expected='github.com/owner/repo')
+    compare(
+        remote_repo('https://ghe.corp.example/Team/Proj.git'),
+        expected='ghe.corp.example/team/proj',
+    )
+    compare(remote_repo('/Users/me/repos/fork'), expected='')
+    compare(remote_repo(':Owner/Repo'), expected='')  # slug but no host: nothing to pin

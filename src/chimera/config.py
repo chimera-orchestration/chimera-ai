@@ -16,6 +16,17 @@ class AgentConfig(BaseModel):
     model: str | None = None
 
 
+class PrConfig(BaseModel):
+    """A level of the ``goal pr`` cascade: which remote the goal branch is pushed to.
+
+    Unset means ``origin``. A fork workflow — origin readable but not writable — names
+    its writable remote here so every ``goal pr`` needn't pass ``--to``; the flag still
+    wins, and resolution takes the nearest level that sets it (project, then workspace).
+    """
+
+    remote: str | None = None
+
+
 class CaptainConfig(AgentConfig):
     """The workspace's captain: its persona name, plus harness/model overrides.
 
@@ -36,12 +47,14 @@ class WorkspaceConfig(BaseModel):
     kind: Literal['workspace']
     agent: AgentConfig = AgentConfig()
     captain: Annotated[CaptainConfig, BeforeValidator(_name_shorthand)] = CaptainConfig()
+    pr: PrConfig = PrConfig()
 
 
 class ProjectConfig(BaseModel):
     kind: Literal['project']
     repo: Path
     agent: AgentConfig = AgentConfig()
+    pr: PrConfig = PrConfig()
 
 
 AnyConfig = Annotated[WorkspaceConfig | ProjectConfig, Field(discriminator='kind')]
