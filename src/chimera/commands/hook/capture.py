@@ -22,7 +22,7 @@ from chimera.archive import Archive, Event, Session
 from chimera.commands.msg.store import caller
 from chimera.config import NotInWorkspaceError
 from chimera.context import resolve_scope
-from chimera.worktrees import AGENT
+from chimera.worktrees import SEP, session_name
 
 _Axes = tuple[Path, str | None, str | None, str | None]
 
@@ -77,6 +77,14 @@ def session_start(
         logger.bind(session_id=session_id, agent_type=agent_type, entrypoint=entrypoint).info(
             'hook session-start: not a conversation, recording without a mail address'
         )
+    if not mail:
+        name = None
+    elif project and goal and actor:
+        # in a goal worktree the name follows the *actual* actor (what `agent start -a`
+        # would have named it), never caller()'s agent default — resume keys on these axes
+        name = session_name(project, goal, actor)
+    else:
+        name = caller(cwd)
     now = datetime.now(timezone.utc)
     with archive(workspace) as store:
         store.record_session(
@@ -86,7 +94,7 @@ def session_start(
                 status=source or 'running',
                 started_at=now,
                 manager='chimera' if session_role() is not None else 'none',
-                name=caller(cwd) if mail else None,
+                name=name,
                 cwd=cwd,
                 transcript=Path(transcript),
                 workspace=workspace.name,
@@ -121,14 +129,20 @@ def session_end(cwd: Path, session_id: str, reason: str) -> None:
 def _axes(cwd: Path) -> _Axes | None:
     """``(workspace, project, goal, actor)`` resolved from cwd, or ``None`` outside a workspace.
 
-    A goal worktree resolves all four (its actor is ``agent``); a project dir has no goal or
-    actor (a manager chat); the bare workspace has none (the captain). The address that
+    A goal worktree resolves all four — the actor read from the ``<goal>@<actor>`` dir
+    itself, never assumed: a reviewer's session archived as the agent's would hand
+    ``agent resume`` the wrong conversation. A project dir has no goal or actor (a
+    manager chat); the bare workspace has none (the captain). The address that
     distinguishes captain from manager rides the session's ``name`` (see :func:`caller`).
     """
     try:
         scope = resolve_scope(cwd)
     except NotInWorkspaceError:
         return None
-    project = scope.project.name if scope.project is not None else None
-    actor = AGENT if scope.goal is not None else None
-    return scope.workspace, project, scope.goal, actor
+    if scope.project is None or scope.goal is None:
+        project = scope.project.name if scope.project is not None else None
+        return scope.workspace, project, scope.goal, None
+    # the goal was pinned by physically standing in worktrees/<goal>@<actor> (see
+    # goal_from_worktree), so the head segment always splits on the separator
+    head = cwd.resolve().relative_to(scope.project.worktrees.resolve()).parts[0]
+    return scope.workspace, scope.project.name, scope.goal, head.split(SEP, 1)[1]

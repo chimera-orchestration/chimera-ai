@@ -45,6 +45,25 @@ def test_session_start_in_a_goal_worktree_sets_the_axes(tmpdir: TempDir, replace
     assert session.name == 'proj@g@agent'
 
 
+def test_session_start_in_a_reviewer_worktree_records_the_true_actor(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # the actor comes from the <goal>@<actor> dir, never assumed: a reviewer session
+    # archived as the agent's would hand `agent resume` the wrong conversation
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
+    worktree = tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@reviewer'
+    worktree.mkdir(parents=True)
+    # the goal is known through its agent worktree (see worktrees.goals); the reviewer's
+    # sits alongside, as `ch worktree add --actor` leaves things
+    (tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@agent').mkdir()
+    replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
+    session_start(worktree, 'uuid-r', '/t.jsonl', 'startup')
+    [session] = _archived(tmpdir.path / 'ws')
+    assert (session.project, session.goal, session.actor) == ('proj', 'g', 'reviewer')
+    assert session.name == 'proj@g@reviewer'
+
+
 def test_session_start_marks_manager_chimera_under_a_role_stamp(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
