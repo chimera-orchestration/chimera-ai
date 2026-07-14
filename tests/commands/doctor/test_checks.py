@@ -477,6 +477,16 @@ class TestCaptain:
         (ws / 'roles' / 'captain').mkdir()
         compare(_run(CaptainCheck(), ws), expected=[_no_directives(ws)])
 
+    def test_directives_only_in_a_subdir_still_reported(self, tmpdir: TempDir) -> None:
+        # The launch render reads roles dirs non-recursively, so a nested *.md
+        # injects nothing — the check must not count it as a directive.
+        ws = _ws(tmpdir)
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
+        drafts = ws / 'roles' / 'captain' / 'drafts'
+        drafts.mkdir(parents=True)
+        (drafts / 'old.md').write_text('# stale\n')
+        compare(_run(CaptainCheck(), ws), expected=[_no_directives(ws)])
+
     def test_named_captain_with_directives_is_silent(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)
         tmpdir.dump('lycia/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})

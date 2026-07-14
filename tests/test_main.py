@@ -125,9 +125,8 @@ class TestMain:
     ) -> None:
         replace.in_environ('CLAUDECODE', '1')
         _argv(replace, 'logtail')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(2)):
             main()
-        compare(excinfo.value.code, expected=2)
         assert 'No such command' in capsys.readouterr().err
 
     def test_logtail_recognized_without_agent_context(
@@ -135,9 +134,8 @@ class TestMain:
     ) -> None:
         replace.in_environ('CLAUDECODE', not_there)
         _argv(replace, 'logtail', '--help')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(0)):
             main()
-        compare(excinfo.value.code, expected=0)
         assert 'Initial lines to show' in capsys.readouterr().out
 
     def test_force_unrecognized_under_agent_context(
@@ -145,9 +143,8 @@ class TestMain:
     ) -> None:
         replace.in_environ('CLAUDECODE', '1')
         _argv(replace, 'worktree', 'rm', 'somegoal', '--force')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(2)):
             main()
-        compare(excinfo.value.code, expected=2)
         # Rich styles "--force" as separate colored spans, splitting the literal
         # substring — assert on the unstyled lead-in text instead.
         assert 'No such option' in capsys.readouterr().err
@@ -157,9 +154,8 @@ class TestMain:
     ) -> None:
         replace.in_environ('CLAUDECODE', not_there)
         _argv(replace, 'worktree', 'rm', '--help')
-        with pytest.raises(SystemExit) as excinfo:
+        with ShouldRaise(SystemExit(0)):
             main()
-        compare(excinfo.value.code, expected=0)
         # same styling caveat as above — assert on the help text, not the flag itself.
         assert 'Skip the live-agent check' in capsys.readouterr().out
 

@@ -21,7 +21,7 @@ class CaptainConfig(AgentConfig):
 
     The captain is the workspace-level agent chatted with to direct all work (see
     AGENTS.md core concepts); ``name`` is what the workspace calls its own instance
-    (lycia's captain is *pegasus*) and doubles as the chat session name.
+    (*pegasus*, say) and doubles as the chat session name.
     """
 
     name: str = 'captain'

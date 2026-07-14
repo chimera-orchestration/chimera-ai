@@ -6,7 +6,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
 ~/lycia/                        # git repo — tracks everything except gitignored dirs
   .gitignore                    # ignores: */repo/ */worktrees/
   config.yaml                   # `kind: workspace` — marks the workspace root
-  processes/                    # workspace-wide process definitions
+  processes/                    # workspace-wide processes (agent runbooks — see AGENTS.md core concepts)
   roles/                        # workspace-level role directives: roles/{role}/*.md (e.g. roles/captain/)
   principles/                   # workspace-wide principles
   knowledge/                    # workspace-wide extracted knowledge (plain markdown)
@@ -17,7 +17,7 @@ The workspace is the project working space for Chimera (default name: `lycia`).
     principles/                 # project-specific principles (tracked)
     processes/                  # project-specific processes (tracked)
     roles/                      # project-level role directives, layered after the workspace's (tracked)
-    repo/                       # gitignored — bare clone managed by Chimera (ch project add only)
+    repo/                       # gitignored — bare repo managed by Chimera (ch project add / new)
     worktrees/                  # gitignored — one worktree per goal (agent only)
       {goal}@agent/             # git worktree on branch {goal}/agent
                                 # {goal}/human (and any reviewer/pr) is materialised on demand
@@ -45,7 +45,7 @@ Commands resolve four axes (see `chimera.context`), each with an explicit overri
   against each project's `repo:`.
 - **goal** — `-g/--goal`, else inferred from a managed worktree dir (`<goal>@<actor>`) or, in a
   checkout, from the branch *only* when it is exactly `<goal>/<actor>` for an existing goal; else required.
-- **actor** — `-a/--actor`, else inferred from the same dir/branch token; defaults to `agent`.
+- **actor** — `-a/--actor`; defaults to `agent`.
 
 `config.yaml` `kind` is the only on-disk marker; depth/naming is never assumed. The branch is
 trusted for goal/actor only when it matches the `<goal>/<actor>` shape — never for a review or
@@ -245,6 +245,12 @@ add/retire via the `CHECKS` tuple). Current checks:
 - **workspace-dirs** — every directory the current workspace template ships (`processes/`,
   `roles/`, …) exists; derived from the template itself so it can't drift. `--fix` creates the
   dir with a `.gitkeep` (matching `ch init`), which workspace-clean then commits
+- **captain** — the workspace names its captain persona (`captain:` in the workspace
+  `config.yaml`) and `roles/captain/` holds at least one top-level `*.md` directive for it
+  (nested files don't count — the launch render reads roles dirs non-recursively). `--fix` writes
+  the literal default (`captain: captain`) onto a config that predates the feature — it never
+  invents a unique persona name, that stays a human's call. Missing directives are only ever
+  reported, and only once a captain is actually named, so an unnamed captain isn't flagged twice
 - **gitignore** — the workspace `.gitignore` carries every entry the current template ships
   (`state/`, `*/repo/`, …); `--fix` appends any missing ones, preserving existing/custom lines.
   Reconciles workspaces created before a template entry was added
@@ -360,7 +366,7 @@ checking out `main` somewhere to work in directly.
 
 Both paths:
 1. Create the project directory structure in the workspace
-   (`knowledge/`, `prompts/`, `principles/`, `processes/`)
+   (`knowledge/`, `prompts/`, `principles/`, `processes/`, `roles/`)
 2. Write `{project}/config.yaml` (`kind: project` + the repo location)
 
 `ch project rm <name>` removes a project directory. It refuses while the project
@@ -389,7 +395,7 @@ non-human actors:
 
 Only the agent is created up front. The `human` branch (and any ad-hoc `reviewer`/`pr`) is **lazy** — materialised on demand by `ch goal sync`, so a short-lived spike never accrues a dead branch. Naming actors explicitly (`ch worktree add --goal <goal> --actor human --actor agent`) still creates them: `human` gets a bare branch (`git branch --no-track {goal}/human <base>`, checked out where the human likes), every other named actor gets a worktree.
 
-`<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out), falling back to `HEAD` if neither exists. Branches are created with no upstream tracking.
+`<base>` is the start point for all branches: `--from <ref>` if given, else the most recently committed of local `main` and `origin/main` (NOT whatever the repo currently has checked out); with neither present the add refuses — pass `--from <ref>`. Branches are created with no upstream tracking.
 
 **Ad-hoc mode**: `ch worktree add <branch> <path>` checks `<branch>` out as a plain worktree at
 `<path>`, which must sit outside the project's `worktrees/` — that tree is reserved for the
@@ -407,7 +413,7 @@ checkout of `main` next to (not managed by) chimera's goal worktrees.
   auto-tracking behaviour — unlike a goal actor branch, it isn't forced `--no-track`, since it
   isn't meant to be managed by `ch goal sync`.
 
-`ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background when a `[prompt]` positional is given). `ch goal adopt <branch>` is the same orchestrator for *existing* work: it takes a branch already carrying commits and restructures it into the `{branch}/{human,agent}` pair (renaming `{branch}` to `{branch}/human` — git can't hold `refs/heads/{branch}` beside `refs/heads/{branch}/*`, and the rename carries any checkout's HEAD along — then splitting `{branch}/agent` off that tip), creates the agent worktree, and launches the agent. Unlike `start`, the base is the adopted branch's own tip, not main. It is idempotent: the restructure is skipped once both actor branches exist, and the worktree is reused if already checked out, so a re-run only (re)launches the agent. `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches. It sweeps **every** actor in the goal's namespace, not just the default human/agent pair: any `{goal}/{actor}` branch and any `{goal}@{actor}` worktree is discovered (see `goal_actors`) and, if the same cleanup rules hold (clean, merged), removed. It refuses while an agent session — from *any* registered harness (`chimera.commands.agent.live`, pid-verified via `Agent.live`) — is live in any of the goal's worktrees, reporting each session's pid/kind/status/start/name (sessions can be invisible — see `research/claude-session-registration.md`); `--force` bypasses the liveness check as well as discarding unsaved work. `ch project rm --force` never bypasses it. `--dry` (on `worktree rm`/`goal finish`, and `project rm`) runs every discovery and safety check but deletes nothing, reporting what *would* go — pair with `--force` to preview a forced teardown. It shares the real code path (`chimera.dry.Dry` guards each mutation), so the preview can't drift from the actual run.
+`ch goal start <goal>` is the high-level orchestrator: it runs `worktree add` then launches the goal's agent (foreground, or background when a `[prompt]` positional is given). `ch goal adopt <branch>` is the same orchestrator for *existing* work: it takes a branch already carrying commits and restructures it into the `{branch}/{human,agent}` pair (renaming `{branch}` to `{branch}/human` — git can't hold `refs/heads/{branch}` beside `refs/heads/{branch}/*`, and the rename carries any checkout's HEAD along — then splitting `{branch}/agent` off that tip), creates the agent worktree, and launches the agent. Unlike `start`, the base is the adopted branch's own tip, not main. It is idempotent: the restructure is skipped once both actor branches exist, and the worktree is reused if already checked out, so a re-run only (re)launches the agent. `ch goal finish <goal>` is the lifecycle name for `worktree rm` — it removes the goal's worktrees and branches. It sweeps **every** actor in the goal's namespace, not just the default human/agent pair: any `{goal}/{actor}` branch and any `{goal}@{actor}` worktree is discovered (see `goal_actors`) and, if the same cleanup rules hold (clean, merged), removed. It refuses while an agent session — from *any* registered harness (`chimera.commands.agent.live`, pid-verified via `Agent.live`) — is live in any of the goal's worktrees, reporting each session's pid/kind/status/start/name (sessions can be invisible to the registry); `--force` bypasses the liveness check as well as discarding unsaved work. `ch project rm --force` never bypasses it. `--dry` (on `worktree rm`/`goal finish`, and `project rm`) runs every discovery and safety check but deletes nothing, reporting what *would* go — pair with `--force` to preview a forced teardown. It shares the real code path (`chimera.dry.Dry` guards each mutation), so the preview can't drift from the actual run.
 
 `ch goal rename <old> <new>` (synonym: `goal mv`) renames a goal across everything local: every `{old}/{actor}` branch (`git branch -m`, which carries any checkout's HEAD *and* the branch's `branch.<name>.*` config section along), every registered `{old}@{actor}` worktree (`git worktree move`), and the goal's sync state — watermark refs and append markers. It refuses while an agent is live in any of the goal's worktrees, on a collision (an actor branch/worktree already under `<new>`, or a bare branch `<new>` blocking the `new/*` namespace — `ch goal adopt` that first), and on a name git or the `@` separator can't hold. Remote branches are **never touched**: a `<remote>/{old}/{actor}` ref, and an upstream still tracking the old name on the remote, are each warned about — renaming the remote side is the human's call. Idempotent: each actor's branch/worktree moves only while still under the old name, so a rename that died half-way completes on re-run. The renamed refs are logged before/after (`goal rename: refs`), the worktree moves on `goal rename: worktrees`; an unregistered dir under `worktrees/` is left in place with a warning (doctor's problem). When your cwd was inside a moved worktree, the new path is printed to `cd` back into.
 
@@ -482,7 +488,7 @@ Everything after a `--` on any of the launchers (the list under "Choosing the ha
 The `--dangerous` flag (on every launcher except `errand`, whose headless print mode has no interactive permission cycle to make the mode reachable in) adds `--allow-dangerously-skip-permissions` so bypass-permissions mode is reachable with shift-tab — it only *enables* the mode, never activates it (the autonomous run keeps its resolved mode). It is **opt-in and off by default**: passing the flag *displaces* auto-accept from claude's shift-tab cycle (`normal → plan → bypass` instead of `normal → auto-accept → plan`), so the everyday default keeps auto-accept and only an explicit `--dangerous` pays that cost. **Agents must never pass `--dangerous` on their own — only when the user explicitly asks.** Under
 Claude Code specifically this is enforced at the CLI level, not just convention: `--dangerous` (and
 `--force`) are stripped from the command tree entirely, so passing them fails with "no such option"
-— see `agent-docs/commands.md`'s "Agent-restricted options". A `--bg` session is an attachable fork, not headless, and the mode's availability is fixed at *its* launch, so the flag rides on background launches too — you cycle after attaching (`claude agents attach` / `ch agent resume`). Not duplicated when a `--dangerously-skip-permissions`/`--allow-dangerously-skip-permissions` is already passed after `--`. Note: claude rejects a `--bg` launch carrying any dangerous-skip flag unless the bypass disclaimer has been accepted (`skipDangerousModePermissionPrompt` in claude settings, or accepting it once interactively). The `--` passthrough is fenced separately: it is split off before Click parses, so the Click-level strip can't see it — instead each harness declares its own bypass spellings (`Agent.restricted`, e.g. claude's `--dangerously-skip-permissions`) and every launcher refuses them at launch (`refuse_restricted`) when chimera is driven by an AI agent.
+— see `agent-docs/commands.md`'s "Agent-restricted options". A `--bg` session is an attachable fork, not headless, and the mode's availability is fixed at *its* launch, so the flag rides on background launches too — you cycle after attaching (via the harness's agent view, `claude agents`; `ch agent resume` revives *dead* sessions and refuses while one is live). Not duplicated when a `--dangerously-skip-permissions`/`--allow-dangerously-skip-permissions` is already passed after `--`. Note: claude rejects a `--bg` launch carrying any dangerous-skip flag unless the bypass disclaimer has been accepted (`skipDangerousModePermissionPrompt` in claude settings, or accepting it once interactively). The `--` passthrough is fenced separately: it is split off before Click parses, so the Click-level strip can't see it — instead each harness declares its own bypass spellings (`Agent.restricted`, e.g. claude's `--dangerously-skip-permissions`) and every launcher refuses them at launch (`refuse_restricted`) when chimera is driven by an AI agent.
 
 Refuses if the repo has no commits (nothing to branch from) — including bare repos.
 

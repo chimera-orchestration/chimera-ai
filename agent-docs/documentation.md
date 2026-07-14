@@ -1,2 +1,9 @@
-- agent-targeted docs go in @docs/{topic}.md and must be terse, optimised for clarity and using few tokens
+- agent-targeted docs go in @agent-docs/{topic}.md and must be terse, optimised for clarity and using few tokens
 - human docs go in @docs/{topic}.rst, Sphinx-formatted.
+- docs maintenance is a process: run @processes/docs-sweep.md when code and docs may have
+  drifted — agent docs audited first, then human docs written from them.
+- every example in any doc — human or agent — must be executed by the test suite via Sybil
+  (wired in the root @conftest.py): a hand-verified example is drift waiting to happen. A
+  genuinely unrunnable step (interactive session, network install) carries an explicit
+  skip directive with the reason beside it — `.. skip:` in .rst, `<!-- skip: ... -->` in
+  .md — never a silently untested block.
