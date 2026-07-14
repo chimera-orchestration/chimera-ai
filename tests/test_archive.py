@@ -130,6 +130,27 @@ def test_recording_the_same_identity_again_updates_in_place(archive: Archive) ->
     assert archive.sessions() == [stored]  # updated, not duplicated
 
 
+def test_rerecording_preserves_the_original_start_time(archive: Archive) -> None:
+    archive.record_session(make_session('s1', status='startup', started_at=NOON))
+    archive.record_session(
+        make_session('s1', status='resume', started_at=NOON + timedelta(hours=8))
+    )
+    stored = archive.session('claude', 's1')
+    assert stored is not None
+    assert stored.started_at == NOON  # first write wins — a resume is not a new run
+    assert stored.status == 'resume'
+
+
+def test_rerecording_reopens_an_ended_session(archive: Archive) -> None:
+    archive.record_session(make_session('s1', status='startup'))
+    archive.end_session('claude', 's1', at=NOON + timedelta(hours=1), status='other')
+    archive.record_session(make_session('s1', status='resume', ended_at=None))
+    stored = archive.session('claude', 's1')
+    assert stored is not None
+    assert stored.ended_at is None  # resumed — no longer ended
+    assert stored.status == 'resume'
+
+
 def test_ending_a_session_stamps_when_and_how_it_finished(archive: Archive) -> None:
     archive.record_session(make_session('s1', status='running'))
     archive.end_session('claude', 's1', at=NOON + timedelta(hours=2), status='done')
@@ -232,6 +253,75 @@ def test_live_session_for_is_none_when_the_address_has_no_live_session(archive: 
         )
     )
     assert archive.live_session_for('chimera', 'logs', 'agent') is None
+
+
+def test_latest_session_for_finds_the_newest_even_when_ended(archive: Archive) -> None:
+    archive.record_session(
+        make_session('old', project='chimera', goal='logs', actor='agent', started_at=NOON)
+    )
+    archive.record_session(
+        make_session(
+            'new',
+            project='chimera',
+            goal='logs',
+            actor='agent',
+            started_at=NOON + timedelta(hours=2),
+            ended_at=NOON + timedelta(hours=3),  # dead — resuming is how it's revived
+        )
+    )
+    latest = archive.latest_session_for('chimera', 'logs', 'agent')
+    assert latest is not None
+    assert latest.native_id == 'new'
+
+
+def test_latest_session_for_survives_a_registry_rename(archive: Archive) -> None:
+    # a UI rename mutates the registry name; the archive row still answers the address
+    archive.record_session(
+        make_session('s1', name='free-form rename', project='chimera', goal='logs', actor='agent')
+    )
+    latest = archive.latest_session_for('chimera', 'logs', 'agent')
+    assert latest is not None
+    assert latest.native_id == 's1'
+
+
+def test_latest_session_for_prefers_the_last_active_over_the_last_created(
+    archive: Archive,
+) -> None:
+    # started_at is first-write-wins, so creation order lies about activity: thread A,
+    # /clear -> thread B (abandoned), A resumed later — resume must pick A, not B
+    archive.record_session(
+        make_session('a', project='chimera', goal='logs', actor='agent', started_at=NOON)
+    )
+    archive.record_session(
+        make_session(
+            'b',
+            project='chimera',
+            goal='logs',
+            actor='agent',
+            started_at=NOON + timedelta(hours=1),
+        )
+    )
+    archive.record_event(
+        Event(at=NOON + timedelta(hours=2), kind='resume', platform='claude', native_id='a')
+    )
+    latest = archive.latest_session_for('chimera', 'logs', 'agent')
+    assert latest is not None
+    assert latest.native_id == 'a'
+
+
+def test_latest_session_for_narrows_by_platform(archive: Archive) -> None:
+    archive.record_session(
+        make_session('c', platform='codex', project='chimera', goal='logs', actor='agent')
+    )
+    assert archive.latest_session_for('chimera', 'logs', 'agent', platform='claude') is None
+    latest = archive.latest_session_for('chimera', 'logs', 'agent', platform='codex')
+    assert latest is not None
+    assert latest.native_id == 'c'
+
+
+def test_latest_session_for_is_none_for_an_unseen_address(archive: Archive) -> None:
+    archive.record_session(make_session('unaddressed', project='chimera', goal='logs', actor=None))
+    assert archive.latest_session_for('chimera', 'logs', 'agent') is None
 
 
 # --- events: the timeline that stitches logs to sessions ---------------------------

@@ -31,7 +31,7 @@ from chimera.agent_env import (
 from chimera.agents import Session
 from chimera.agents.context import Source, assemble, materialize
 from chimera.agents.registry import AgentSpec, resolve_spec
-from chimera.commands.agent import agents, scope_line, scoped, shown
+from chimera.commands.agent import agents, resume_target, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
 from chimera.commands.agent import stop as _agent_stop
@@ -1504,9 +1504,13 @@ def agent_resume(
         p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=g)
     )
     env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
-    _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
+    native = resume_target(Path.cwd(), spec.agent.platform, p.name, g, actor)
+    _resume(
+        worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run, native
+    )
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
+        typer.echo(f'session: {native}' if native else 'session: (no archived id — by name)')
         _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
 
 
@@ -1741,6 +1745,8 @@ def hook_session_start() -> None:
         str(payload['session_id']),
         str(payload['transcript_path']),
         str(payload.get('source') or ''),
+        agent_type=str(agent_type) if (agent_type := payload.get('agent_type')) else None,
+        entrypoint=os.environ.get('CLAUDE_CODE_ENTRYPOINT'),
     )
 
 

@@ -9,8 +9,9 @@ from loguru import logger
 from chimera.agent_env import ai_session
 from chimera.agents import Session
 from chimera.agents.registry import AGENTS, AgentSpec
-from chimera.config import UserError
-from chimera.context import Scope
+from chimera.commands.hook.capture import archive
+from chimera.config import NotInWorkspaceError, UserError
+from chimera.context import Scope, resolve_workspace
 from chimera.dry import Dry
 from chimera.worktrees import SEP
 
@@ -146,6 +147,30 @@ def agent(
     )
 
 
+def resume_target(cwd: Path, platform: str, project: str, goal: str, actor: str) -> str | None:
+    """The archived native session id ``agent resume`` reattaches by, else ``None``.
+
+    Session identity lives in the archive: the address ``(project, goal, actor)`` maps
+    to its newest session — live or dead, resuming is how a dead one is revived — and
+    that session's immutable native id is the resume target; the registry name is
+    display-only (a rename in the harness's UI must not orphan the session). ``None`` —
+    no workspace to hold an archive, or an address it has never seen — falls back to
+    resuming by name.
+    """
+    try:
+        workspace = resolve_workspace(cwd)
+    except NotInWorkspaceError:
+        return None
+    with archive(workspace) as store:
+        session = store.latest_session_for(project, goal, actor, platform=platform)
+    if session is None:
+        return None
+    logger.bind(
+        platform=platform, native_id=session.native_id, project=project, goal=goal, actor=actor
+    ).info('agent resume: archived session')
+    return session.native_id
+
+
 def resume(
     worktree: Path,
     name: str,
@@ -156,9 +181,11 @@ def resume(
     context: Path | None = None,
     env: Mapping[str, str] = {},
     dry: Dry = Dry(),
+    id: str | None = None,
 ) -> None:
-    """Reattach to ``spec``'s agent session named ``name`` (see ``Agent.resume``);
-    ``env`` as on :func:`agent`."""
+    """Reattach to ``spec``'s agent session — by archived ``id`` when the caller resolved
+    one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``); ``env`` as
+    on :func:`agent`."""
     refuse_restricted(spec, extra)
     dry(
         spec.agent.resume,
@@ -167,6 +194,7 @@ def resume(
         prompt,
         extra,
         dangerous,
+        id=id,
         model=spec.model,
         context=context,
         env=env,
