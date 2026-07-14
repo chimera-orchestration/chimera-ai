@@ -314,6 +314,22 @@ add/retire via the `CHECKS` tuple). Current checks:
   the mail it claimed itself — left in place it would double-inject beside the new hook).
   Machine config, not the workspace's, so doctor *is* the installer — there's no `ch hook
   install` to remember
+- **harness-auth** — every registered harness's OAuth credentials are live, read *locally*
+  (claude: the `Claude Code-credentials` keychain item on macOS, falling back to
+  `$CLAUDE_CONFIG_DIR/.credentials.json`) — no network, no model call on the everyday path,
+  so *cannot read* is never mistaken for *not authorized*: an unreadable store (locked
+  keychain) is reported but never alerts. Absent credentials or an expired refresh token are
+  definitive from the store alone and alert immediately. The one ambiguous state — access
+  token expired >1h with sessions live — is settled by a single haiku ping, not a guess
+  (auth-dead sessions stay resident-and-idle, so liveness alone can't distinguish dying from
+  idle): the ping succeeding proves auth (and refreshes the stale store); failing auth-shaped
+  ("Not logged in", "/login") is definitive death; failing any other way (network, timeout)
+  reports without paging. With no sessions live an expired access token is just idleness —
+  the next use heals it, not even a finding. Alerts are loud — a macOS notification plus
+  urgent escalation mail to the captain and every `<project>@manager` — and debounced by a
+  marker under `state/auth-alerts/` (the same outage re-alerts every 2h; a *changed* one
+  immediately; a healthy run clears the marker). Never auto-fixable: only a human running
+  `/login` in an interactive session heals OAuth, so the findings signpost that and stop
 - **workspace-clean** — the workspace's own git repo has no uncommitted or untracked content
   (skipped when the workspace isn't a git repo; `*/repo/` and `*/worktrees/` are gitignored, so
   only tracked workspace files count). Runs last, so it sweeps up the config/gitignore edits the

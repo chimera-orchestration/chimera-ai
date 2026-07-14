@@ -7,6 +7,7 @@ from pathlib import Path
 from giterator import GitError
 from loguru import logger
 
+from chimera.commands.doctor.auth import HarnessAuthCheck
 from chimera.commands.doctor.core import (
     Check,
     Exclusions,
@@ -947,5 +948,6 @@ CHECKS: tuple[Check, ...] = (
     ShellCompletionCheck(),
     FblogCheck(),
     ClaudeHooksCheck(),
+    HarnessAuthCheck(),
     WorkspaceCommitCheck(),
 )
