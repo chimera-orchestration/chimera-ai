@@ -27,8 +27,11 @@ def _states(replace: Replacer, **states: AnyCredentials) -> dict[str, AnyCredent
     return holder
 
 
-def _live(replace: Replacer, count: int) -> None:
-    replace.in_module(auth.live_sessions, lambda harness: count)
+def _live(replace: Replacer, count: int) -> list[int]:
+    """Pin the live-session count; mutate the returned holder to change it mid-test."""
+    holder = [count]
+    replace.in_module(auth.live_sessions, lambda harness: holder[0])
+    return holder
 
 
 def _notifications(replace: Replacer) -> list[str]:
@@ -37,16 +40,23 @@ def _notifications(replace: Replacer) -> list[str]:
     return sent
 
 
-def _probe(replace: Replacer, dead: bool | None, evidence: str) -> list[str]:
-    """Pin the confirmation probe's verdict; the returned list records who was probed."""
-    probed: list[str] = []
+class _Probe:
+    """The pinned confirmation-probe seam: its verdict (mutable) and who was probed."""
+
+    def __init__(self, dead: bool | None, evidence: str) -> None:
+        self.verdict = (dead, evidence)
+        self.probed: list[str] = []
+
+
+def _probe(replace: Replacer, dead: bool | None, evidence: str) -> _Probe:
+    seam = _Probe(dead, evidence)
 
     def fake(harness: str, workspace: Path) -> tuple[bool | None, str]:
-        probed.append(harness)
-        return dead, evidence
+        seam.probed.append(harness)
+        return seam.verdict
 
     replace.in_module(auth.probe_confirms_dead, fake)
-    return probed
+    return seam
 
 
 def _healthy(now: datetime) -> Credentials:
@@ -79,6 +89,15 @@ def _run(workspace: Path, exclude: Exclusions | None = None) -> list[Finding]:
 
 def _marker(workspace: Path) -> Path:
     return workspace / 'state' / 'auth-alerts' / 'claude.json'
+
+
+def _utc(moment: datetime) -> str:
+    """The timestamp form finding messages carry, built from the test's own inputs."""
+    return f'{moment:%Y-%m-%d %H:%M} UTC'
+
+
+def _finding(message: str) -> Finding:
+    return Finding('harness-auth', message, resolved=False, fixable=False)
 
 
 @pytest.fixture()
@@ -133,33 +152,44 @@ class TestHarnessAuthCheck:
 
     def test_refresh_token_expired_alerts(self, ws: Path, replace: Replacer) -> None:
         now = datetime.now(timezone.utc)
-        _states(replace, claude=_refresh_expired(now))
+        state = _refresh_expired(now)
+        _states(replace, claude=state)
         _live(replace, 0)  # even an idle fleet cannot re-auth once the refresh token is gone
-        probes = _probe(replace, None, '')
+        probe = _probe(replace, None, '')
         sent = _notifications(replace)
-        findings = _run(ws)
-        compare(len(findings), expected=1)
-        assert 'OAuth refresh token expired' in findings[0].message
-        assert 'cannot re-auth' in findings[0].message
+        assert state.refresh_expires is not None
+        compare(
+            _run(ws),
+            expected=[
+                _finding(
+                    f'claude: OAuth refresh token expired {_utc(state.refresh_expires)} (kc) '
+                    f'— the fleet cannot re-auth; {LOGIN}'
+                )
+            ],
+        )
         compare(len(sent), expected=1)
-        compare(probes, expected=[])  # already definitive locally — no turn spent confirming
+        compare(probe.probed, expected=[])  # already definitive locally — no turn spent confirming
 
     def test_access_expired_with_probe_confirming_alerts(self, ws: Path, replace: Replacer) -> None:
         now = datetime.now(timezone.utc)
-        _states(replace, claude=_access_expired(now))
+        state = _access_expired(now)
+        _states(replace, claude=state)
         _live(replace, 2)
-        probes = _probe(replace, True, 'Not logged in · Please run /login')
+        probe = _probe(replace, True, 'Not logged in · Please run /login')
         sent = _notifications(replace)
-        findings = _run(ws)
-        compare(len(findings), expected=1)
-        assert 'OAuth access token expired' in findings[0].message
-        assert '2 session(s) live' in findings[0].message
-        assert (
-            'a live probe confirmed auth is dead (Not logged in · Please run /login)'
-            in findings[0].message
+        assert state.access_expires is not None
+        compare(
+            _run(ws),
+            expected=[
+                _finding(
+                    f'claude: OAuth access token expired {_utc(state.access_expires)} (kc) '
+                    f'with 2 session(s) live — a live probe confirmed auth is dead '
+                    f'(Not logged in · Please run /login); {LOGIN}'
+                )
+            ],
         )
         compare(len(sent), expected=1)
-        compare(probes, expected=['claude'])
+        compare(probe.probed, expected=['claude'])
 
     def test_access_expired_but_probe_authenticates_is_healthy(
         self, ws: Path, replace: Replacer
@@ -178,28 +208,65 @@ class TestHarnessAuthCheck:
         self, ws: Path, replace: Replacer
     ) -> None:
         now = datetime.now(timezone.utc)
-        _states(replace, claude=_access_expired(now))
+        state = _access_expired(now)
+        _states(replace, claude=state)
         _live(replace, 2)
         _probe(replace, None, 'probe timed out after 120s')
         sent = _notifications(replace)
-        findings = _run(ws)
-        compare(len(findings), expected=1)
-        assert 'could not confirm (probe timed out after 120s) — not alerting' in (
-            findings[0].message
+        assert state.access_expires is not None
+        compare(
+            _run(ws),
+            expected=[
+                _finding(
+                    f'claude: OAuth access token expired {_utc(state.access_expires)} (kc) '
+                    f'with 2 session(s) live, but a live probe could not confirm '
+                    f'(probe timed out after 120s) — not alerting'
+                )
+            ],
         )
         compare(sent, expected=[])
         compare(mail(ws).inbox('bellerophon'), expected=[])
+
+    def test_uncountable_sessions_still_probe(
+        self, ws: Path, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        # a broken `claude agents` is part of the degraded state the check targets —
+        # it must not crash doctor, and it must not hide the outage: the probe decides
+        now = datetime.now(timezone.utc)
+        state = _access_expired(now)
+        _states(replace, claude=state)
+
+        def boom(harness: str) -> int:
+            raise subprocess.CalledProcessError(1, ['claude', 'agents'])
+
+        replace.in_module(auth.live_sessions, boom)
+        probe = _probe(replace, True, 'Not logged in')
+        sent = _notifications(replace)
+        assert state.access_expires is not None
+        compare(
+            _run(ws),
+            expected=[
+                _finding(
+                    f'claude: OAuth access token expired {_utc(state.access_expires)} (kc) '
+                    f'with live sessions uncountable — a live probe confirmed auth is dead '
+                    f'(Not logged in); {LOGIN}'
+                )
+            ],
+        )
+        compare(probe.probed, expected=['claude'])
+        compare(len(sent), expected=1)
+        assert 'could not count live sessions' in str(full_logs)
 
     def test_access_expired_while_idle_is_healthy(self, ws: Path, replace: Replacer) -> None:
         # nothing is running, so nothing is dying: the next use refreshes and heals
         now = datetime.now(timezone.utc)
         _states(replace, claude=_access_expired(now))
         _live(replace, 0)
-        probes = _probe(replace, True, 'never consulted')
+        probe = _probe(replace, True, 'never consulted')
         sent = _notifications(replace)
         compare(_run(ws), expected=[])
         compare(sent, expected=[])
-        compare(probes, expected=[])  # no live sessions → nothing dying → no turn spent
+        compare(probe.probed, expected=[])  # no live sessions → nothing dying → no turn spent
 
     def test_access_expired_within_grace_is_healthy(self, ws: Path, replace: Replacer) -> None:
         # refresh is lazy — a just-expired token only means no call happened yet
@@ -245,6 +312,51 @@ class TestHarnessAuthCheck:
         _run(ws)
         compare(len(sent), expected=1)
         compare(len(mail(ws).inbox('bellerophon')), expected=1)
+
+    def test_volatile_drift_within_one_outage_stays_suppressed(
+        self, ws: Path, replace: Replacer
+    ) -> None:
+        # the debounce identity is the outage (the expiry instant), not the message —
+        # a drifting live count or different probe output must not void the 2h promise
+        now = datetime.now(timezone.utc)
+        _states(replace, claude=_access_expired(now))
+        sent = _notifications(replace)
+        live = _live(replace, 3)
+        probe = _probe(replace, True, 'Not logged in · request id 111')
+        _run(ws)
+        live[0] = 2
+        probe.verdict = (True, 'Not logged in · request id 222')
+        _run(ws)
+        compare(len(sent), expected=1)
+        compare(len(mail(ws).inbox('bellerophon')), expected=1)
+
+    def test_failed_mail_leaves_no_marker_so_the_next_run_retries(
+        self, ws: Path, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        _states(replace, claude=NoCredentials('gone'))
+        sent = _notifications(replace)
+        (ws / 'state').mkdir(exist_ok=True)
+        (ws / 'state' / 'mail').write_text('')  # a file where the maildir belongs
+        _run(ws)  # delivery fails: logged, not raised, and nothing recorded as alerted
+        assert 'alert mail failed' in str(full_logs)
+        assert not _marker(ws).exists()
+        (ws / 'state' / 'mail').unlink()
+        _run(ws)
+        compare(len(sent), expected=2)  # the retry paged for real this time
+        compare(len(mail(ws).inbox('bellerophon')), expected=1)
+        assert _marker(ws).exists()
+
+    def test_unwritable_marker_still_alerts(
+        self, ws: Path, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        _states(replace, claude=NoCredentials('gone'))
+        sent = _notifications(replace)
+        (ws / 'state').mkdir(exist_ok=True)
+        (ws / 'state' / 'auth-alerts').write_text('')  # a file where the marker dir belongs
+        _run(ws)
+        compare(len(sent), expected=1)  # the alert still went out
+        compare(len(mail(ws).inbox('bellerophon')), expected=1)
+        assert 'could not record the alert marker' in str(full_logs)
 
     def test_realerts_once_stale(self, ws: Path, replace: Replacer) -> None:
         _states(replace, claude=NoCredentials('gone'))
@@ -311,13 +423,13 @@ class TestHarnessAuthCheck:
             ),
         )
         _live(replace, 1)
-        probes = _probe(replace, True, 'never consulted')
+        probe = _probe(replace, True, 'never consulted')
         sent = _notifications(replace)
         findings = _run(ws)
         compare(len(findings), expected=1)
         assert 'refresh token expired' in findings[0].message
         compare(len(sent), expected=1)
-        compare(probes, expected=[])
+        compare(probe.probed, expected=[])
 
     def test_storeless_harness_is_invisible(self, ws: Path, replace: Replacer) -> None:
         _states(replace)
@@ -392,11 +504,16 @@ class _FakeAgent:
     """Just enough Agent for the registry-facing seams."""
 
     def __init__(
-        self, state: AnyCredentials | None = None, live: int = 0, turn: Exception | None = None
+        self,
+        state: AnyCredentials | None = None,
+        live: int = 0,
+        turn: Exception | None = None,
+        reply: str = 'pong',
     ) -> None:
         self._state = state
         self._live = live
         self._turn = turn
+        self._reply = reply
         self.runs: list[tuple[Path, str, str]] = []
 
     def credentials(self) -> AnyCredentials | None:
@@ -409,7 +526,7 @@ class _FakeAgent:
         self.runs.append((cwd, name, prompt))
         if self._turn is not None:
             raise self._turn
-        return 'pong'
+        return self._reply
 
 
 def _agents(replace: Replacer, **agents: _FakeAgent) -> None:
@@ -455,10 +572,35 @@ class TestProbeConfirmsDead:
     def test_auth_signs_are_found_in_stderr_case_insensitively(
         self, tmpdir: TempDir, replace: Replacer
     ) -> None:
-        _agents(replace, fake=_FakeAgent(turn=_turn_failure(stderr='OAuth token has expired')))
+        _agents(replace, fake=_FakeAgent(turn=_turn_failure(stderr='ERROR: Invalid Bearer Token')))
         compare(
             auth.probe_confirms_dead('fake', tmpdir.path),
-            expected=(True, 'OAuth token has expired'),
+            expected=(True, 'ERROR: Invalid Bearer Token'),
+        )
+
+    def test_a_sign_early_in_long_output_still_classifies(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # the sign is matched on the whole capture; only the returned evidence is elided
+        noise = 'x' * 400
+        _agents(
+            replace,
+            fake=_FakeAgent(
+                turn=_turn_failure(stdout=f'Not logged in · Please run /login {noise}')
+            ),
+        )
+        dead, evidence = auth.probe_confirms_dead('fake', tmpdir.path)
+        assert dead is True
+        compare(len(evidence), expected=300)
+
+    def test_an_in_band_failure_on_a_clean_exit_is_definitive(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # a zero-exit run whose *reply* carries the failure must not read as healthy
+        _agents(replace, fake=_FakeAgent(reply='Not logged in · Please run /login'))
+        compare(
+            auth.probe_confirms_dead('fake', tmpdir.path),
+            expected=(True, 'Not logged in · Please run /login'),
         )
 
     def test_any_other_failure_cannot_tell(self, tmpdir: TempDir, replace: Replacer) -> None:
@@ -467,6 +609,14 @@ class TestProbeConfirmsDead:
             auth.probe_confirms_dead('fake', tmpdir.path),
             expected=(None, 'getaddrinfo ENOTFOUND api'),
         )
+
+    def test_a_transport_error_naming_an_auth_endpoint_cannot_tell(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # merely *mentioning* oauth must never classify as definitive death
+        error = 'could not reach https://console.anthropic.com/oauth/token: connection refused'
+        _agents(replace, fake=_FakeAgent(turn=_turn_failure(stderr=error)))
+        compare(auth.probe_confirms_dead('fake', tmpdir.path), expected=(None, error))
 
     def test_a_timeout_cannot_tell(self, tmpdir: TempDir, replace: Replacer) -> None:
         _agents(replace, fake=_FakeAgent(turn=subprocess.TimeoutExpired(['claude'], 120)))

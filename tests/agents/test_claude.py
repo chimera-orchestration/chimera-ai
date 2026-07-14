@@ -623,17 +623,21 @@ class TestCredentials:
             ),
         )
 
-    def test_file_when_keychain_unavailable(self, tmpdir: TempDir, replace: Replacer) -> None:
+    def test_keychain_unavailable_is_unreadable_even_with_a_file(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # the file is a stale twin: with the live store unanswerable it can neither
+        # prove a logout nor be trusted for expiries, so it is not even read
         replace.in_module(read_keychain, _keychain_unavailable)
+        file = tmpdir / 'creds.json'
         tmpdir.write('creds.json', _oauth())
-        compare(
-            Claude(credentials_file=tmpdir / 'creds.json').credentials(),
-            expected=Credentials(
-                source=str(tmpdir / 'creds.json'),
-                access_expires=_ACCESS,
-                refresh_expires=_REFRESH,
-            ),
+        expected = UnreadableCredentials(
+            f'keychain unavailable (keychain locked); '
+            f'the {file} fallback is untrusted while it cannot be cross-checked'
         )
+        compare(Claude(credentials_file=file).credentials(), expected=expected)
+        file.unlink()
+        compare(Claude(credentials_file=file).credentials(), expected=expected)
 
     def test_absent_everywhere_is_definitive(self, tmpdir: TempDir, replace: Replacer) -> None:
         replace.in_module(read_keychain, lambda: None)
@@ -643,14 +647,23 @@ class TestCredentials:
             expected=NoCredentials(f'no {_KEYCHAIN_SOURCE} and no {file}'),
         )
 
-    def test_keychain_unavailable_and_no_file_is_unreadable(
+    def test_unreadable_file_is_unreadable_not_a_crash(
         self, tmpdir: TempDir, replace: Replacer
     ) -> None:
-        replace.in_module(read_keychain, _keychain_unavailable)
-        file = tmpdir / 'creds.json'
+        replace.in_module(read_keychain, lambda: None)
+        file = tmpdir.write('creds.json', _oauth())
+        file.chmod(0)
+        state = Claude(credentials_file=file).credentials()
+        assert isinstance(state, UnreadableCredentials)
+        assert f'{file} unreadable' in state.detail
+
+    def test_non_object_json_is_unreadable(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # a crash mid-write can leave valid JSON that isn't an object — a broken
+        # store, never evidence of being logged out
+        replace.in_module(read_keychain, lambda: 'null')
         compare(
-            Claude(credentials_file=file).credentials(),
-            expected=UnreadableCredentials(f'keychain unavailable (keychain locked) and no {file}'),
+            Claude(credentials_file=tmpdir / 'creds.json').credentials(),
+            expected=UnreadableCredentials(f'{_KEYCHAIN_SOURCE} does not hold a JSON object'),
         )
 
     def test_not_json_is_unreadable(self, tmpdir: TempDir, replace: Replacer) -> None:

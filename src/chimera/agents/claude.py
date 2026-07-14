@@ -108,7 +108,11 @@ def _parse_credentials(text: str, source: str) -> AnyCredentials:
         data = json.loads(text)
     except json.JSONDecodeError:
         return UnreadableCredentials(f'{source} is not valid JSON')
-    oauth = data.get('claudeAiOauth') if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        # valid JSON that isn't an object is a broken store (a crash mid-write),
+        # never evidence of being logged out
+        return UnreadableCredentials(f'{source} does not hold a JSON object')
+    oauth = data.get('claudeAiOauth')
     if not isinstance(oauth, dict):
         return NoCredentials(f'{source} has no claudeAiOauth block')
     return Credentials(
@@ -140,10 +144,13 @@ class Claude(Agent):
         """Claude's OAuth state: the keychain item on macOS, else the credentials file.
 
         The keychain is the live store — claude refreshes it in place — so a readable
-        entry always wins. The file is a fallback twin that can go stale, consulted
-        only when the keychain has no entry or can't answer; "logged out" is only
-        definitive when *every* store says so, and an unanswerable keychain with no
-        file degrades to :class:`UnreadableCredentials`, never to logged-out.
+        entry always wins, and when the keychain *can't answer* (locked, no session)
+        the whole state is :class:`UnreadableCredentials`: the file is a fallback twin
+        that goes stale, so with the live store unanswerable it can neither prove a
+        logout nor be trusted for expiries (a months-old snapshot would page falsely).
+        The file is authoritative only when the keychain definitively has no entry
+        (or the platform has no keychain), and "logged out" is only definitive when
+        every consulted store says so.
         """
         file = self.credentials_file
         if file is None:
@@ -152,14 +159,17 @@ class Claude(Agent):
         try:
             secret = read_keychain()
         except KeychainUnavailable as error:
-            if file.exists():
-                return _parse_credentials(file.read_text(), str(file))
-            return UnreadableCredentials(f'keychain unavailable ({error}) and no {file}')
+            fallback = f'the {file} fallback is untrusted while it cannot be cross-checked'
+            return UnreadableCredentials(f'keychain unavailable ({error}); {fallback}')
         if secret is not None:
             return _parse_credentials(secret, f'keychain item {CREDENTIALS_SERVICE!r}')
-        if file.exists():
-            return _parse_credentials(file.read_text(), str(file))
-        return NoCredentials(f'no keychain item {CREDENTIALS_SERVICE!r} and no {file}')
+        if not file.exists():
+            return NoCredentials(f'no keychain item {CREDENTIALS_SERVICE!r} and no {file}')
+        try:
+            text = file.read_text()
+        except OSError as error:
+            return UnreadableCredentials(f'{file} unreadable ({error})')
+        return _parse_credentials(text, str(file))
 
     def start(
         self,

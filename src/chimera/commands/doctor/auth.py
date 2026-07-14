@@ -39,6 +39,7 @@ import os
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
 
 from loguru import logger
 
@@ -64,10 +65,17 @@ ambiguous expired-while-live state, never on a healthy run."""
 PROBE_TIMEOUT = 120.0
 """Seconds before the confirmation ping counts as *cannot tell* (never as dead)."""
 
-_AUTH_SIGNS = ('not logged in', '/login', 'authentication', 'oauth')
+_AUTH_SIGNS = (
+    'not logged in',
+    'please run /login',
+    'invalid bearer token',
+    'authentication_error',
+)
 """Case-insensitive fragments that mark a failed probe as auth-shaped — the 2026-07-13
-sessions saw 'Not logged in · Please run /login'. Anything else (DNS, timeouts, a full
-disk) must stay *cannot tell*."""
+sessions saw 'Not logged in · Please run /login'. Deliberately narrow: a bare 'oauth'
+or 'authentication' also appears in transport errors that merely *name* an auth
+endpoint, and a miss only degrades to the non-paging *cannot tell*, so precision beats
+recall here."""
 
 
 def credential_states() -> dict[str, AnyCredentials]:
@@ -93,13 +101,14 @@ def probe_confirms_dead(harness: str, workspace: Path) -> tuple[bool | None, str
     """One live :data:`PROBE_MODEL` turn: is ``harness`` actually able to authenticate?
 
     ``(False, '')`` — the turn ran, auth works (and the call itself refreshed the
-    store). ``(True, evidence)`` — the turn failed auth-shaped: definitive death.
+    store). ``(True, evidence)`` — the turn failed auth-shaped, on exit code or with
+    the failure reported in-band in an otherwise-clean reply: definitive death.
     ``(None, detail)`` — the turn failed some other way (network, timeout, no binary):
     *cannot tell*, which callers must never alert on.
     """
     agent = AGENTS[harness]
     try:
-        agent.run(
+        reply = agent.run(
             workspace,
             f'{HarnessAuthCheck.name}: probe',
             'Reply with exactly: pong',
@@ -111,11 +120,29 @@ def probe_confirms_dead(harness: str, workspace: Path) -> tuple[bool | None, str
     except FileNotFoundError as error:
         return None, f'probe could not run ({error})'
     except subprocess.CalledProcessError as error:
-        evidence = ' '.join(f'{error.stdout or ""} {error.stderr or ""}'.split())[-300:]
-        if any(sign in evidence.lower() for sign in _AUTH_SIGNS):
-            return True, evidence
-        return None, evidence
+        # match on the whole output, elide only what's *returned* — an auth sign at
+        # the start of a long capture must still classify
+        full = ' '.join(f'{error.stdout or ""} {error.stderr or ""}'.split())
+        return (True if _auth_shaped(full) else None), full[-300:]
+    if _auth_shaped(reply):  # a zero-exit run reporting the failure in-band
+        return True, ' '.join(reply.split())[-300:]
     return False, ''
+
+
+def _auth_shaped(text: str) -> bool:
+    return any(sign in text.lower() for sign in _AUTH_SIGNS)
+
+
+class Problem(NamedTuple):
+    """One alertable auth failure: its human-facing message plus a debounce identity.
+
+    ``key`` must be stable across successive doctor runs of the *same* outage — never
+    embed run-volatile data (a live session count, probe output) — or the marker's
+    signature changes every run and :data:`REALERT` never suppresses anything.
+    """
+
+    key: str
+    message: str
 
 
 class HarnessAuthCheck:
@@ -142,20 +169,20 @@ class HarnessAuthCheck:
             if not alertable and not unconfirmed:
                 _clear_marker(workspace, harness)  # fully healthy: the next outage alerts fresh
                 continue
-            paging = [p for p in alertable if not exclude.matches(self.name, p)]
+            paging = [p for p in alertable if not exclude.matches(self.name, p.message)]
             if paging:
                 _alert(workspace, harness, paging, now)
             findings.extend(
                 Finding(self.name, message, resolved=False, fixable=False)
-                for message in (*alertable, *unconfirmed)
+                for message in (*(p.message for p in alertable), *unconfirmed)
             )
         return findings
 
 
 def _assess(
     harness: str, state: Credentials | NoCredentials, workspace: Path, now: datetime
-) -> tuple[list[str], list[str]]:
-    """``state``'s auth failures as ``(alertable, unconfirmed)`` finding messages.
+) -> tuple[list[Problem], list[str]]:
+    """``state``'s auth failures as ``(alertable, unconfirmed messages)``.
 
     Alertable failures are definitive — absent credentials, an expired refresh token,
     or an expired access token whose live confirmation probe failed auth-shaped.
@@ -163,28 +190,44 @@ def _assess(
     Both empty means healthy.
     """
     if isinstance(state, NoCredentials):
-        return [f'{harness}: not logged in ({state.detail}) — {LOGIN}'], []
+        return [
+            Problem('not-logged-in', f'{harness}: not logged in ({state.detail}) — {LOGIN}')
+        ], []
     alertable = []
     if state.refresh_expires is not None and state.refresh_expires <= now:
         alertable.append(
-            f'{harness}: OAuth refresh token expired {_stamp(state.refresh_expires)} '
-            f'({state.source}) — the fleet cannot re-auth; {LOGIN}'
+            Problem(
+                f'refresh-expired:{state.refresh_expires.isoformat()}',
+                f'{harness}: OAuth refresh token expired {_stamp(state.refresh_expires)} '
+                f'({state.source}) — the fleet cannot re-auth; {LOGIN}',
+            )
         )
-    stale = state.access_expires is not None and state.access_expires <= now - GRACE
-    if not stale or alertable:
+    access = state.access_expires
+    if access is None or access > now - GRACE or alertable:
         return alertable, []  # fresh access token, or already definitive — nothing to confirm
-    live = live_sessions(harness)
-    if not live:
+    try:
+        live: int | None = live_sessions(harness)
+    except Exception as error:  # a degraded harness can't hide the outage it's part of
+        logger.bind(harness=harness, error=str(error)).warning(
+            f'{HarnessAuthCheck.name}: could not count live sessions, probing anyway'
+        )
+        live = None
+    if live == 0:
         return [], []  # idle, not dying: the next use refreshes and heals
+    sessions = f'{live} session(s) live' if live is not None else 'live sessions uncountable'
     expired = (
-        f'{harness}: OAuth access token expired {_stamp(state.access_expires)} '
-        f'({state.source}) with {live} session(s) live'
+        f'{harness}: OAuth access token expired {_stamp(access)} ({state.source}) with {sessions}'
     )
     dead, evidence = probe_confirms_dead(harness, workspace)
     if dead:
         # auth-dead sessions stay resident and idle (the 2026-07-13 mode), so the
         # probe's verdict, not liveness, is what makes this definitive
-        return [f'{expired} — a live probe confirmed auth is dead ({evidence}); {LOGIN}'], []
+        return [
+            Problem(
+                f'access-expired:{access.isoformat()}',
+                f'{expired} — a live probe confirmed auth is dead ({evidence}); {LOGIN}',
+            )
+        ], []
     if dead is None:
         return [], [f'{expired}, but a live probe could not confirm ({evidence}) — not alerting']
     logger.bind(harness=harness).info(
@@ -220,23 +263,28 @@ def _suppressed(marker: Path, signature: str, now: datetime) -> bool:
         return False
 
 
-def _alert(workspace: Path, harness: str, problems: list[str], now: datetime) -> None:
+def _alert(workspace: Path, harness: str, problems: list[Problem], now: datetime) -> None:
     """Page the humans: notification plus urgent mail to the captain and every manager.
 
-    Debounced by a marker under ``state/auth-alerts/`` keyed on the exact problem set,
-    so an unchanged outage re-alerts only every :data:`REALERT` while a *changed* one
-    (access-expired escalating to refresh-expired) alerts straight through.
+    Debounced by a marker under ``state/auth-alerts/`` keyed on the problems' stable
+    :attr:`Problem.key` set, so an unchanged outage re-alerts only every
+    :data:`REALERT` while a *changed* one (access-expired escalating to
+    refresh-expired) alerts straight through. The marker lands only once the mail —
+    the durable channel — is actually delivered: recording an alert that never went
+    out would silence the very outage being paged, so a failed delivery logs ERROR,
+    leaves no marker, and the next doctor run retries. The notification stays
+    best-effort either way.
     """
     marker = _marker(workspace, harness)
-    signature = '\n'.join(problems)
+    signature = '\n'.join(problem.key for problem in problems)
     if _suppressed(marker, signature, now):
         logger.bind(harness=harness).info(f'{HarnessAuthCheck.name}: alert suppressed (recent)')
         return
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(json.dumps({'signature': signature, 'alerted': now.isoformat()}))
     notify(f'{harness} auth is down — fleet agents will fail. {LOGIN}.')
     subject = f'{harness} auth is down — /login needed'
-    body = '\n'.join((*problems, '', f'Heal it: {LOGIN} on the fleet machine.'))
+    body = '\n'.join(
+        (*(problem.message for problem in problems), '', f'Heal it: {LOGIN} on the fleet machine.')
+    )
     # CHIMERA_SESSION when a launcher stamped this session's address, else the captain —
     # not chimera.context.caller, which needs a config too healthy for doctor to assume
     sender = os.environ.get('CHIMERA_SESSION') or _captain(workspace)
@@ -244,18 +292,32 @@ def _alert(workspace: Path, harness: str, problems: list[str], now: datetime) ->
     recipients = [_captain(workspace)] + [
         f'{project.name}@manager' for project in iter_project_dirs(workspace)
     ]
-    for to in recipients:
-        # even the sender's own address gets one — an alert skipped is an alert missed
-        store.send(
-            compose(
-                sender=sender,
-                to=to,
-                kind='escalation',
-                priority='urgent',
-                severity=1,
-                subject=subject,
-                body=body,
+    try:
+        for to in recipients:
+            # even the sender's own address gets one — an alert skipped is an alert missed
+            store.send(
+                compose(
+                    sender=sender,
+                    to=to,
+                    kind='escalation',
+                    priority='urgent',
+                    severity=1,
+                    subject=subject,
+                    body=body,
+                )
             )
+    except OSError as error:
+        logger.bind(harness=harness, error=str(error)).error(
+            f'{HarnessAuthCheck.name}: alert mail failed — will retry next run'
+        )
+        return
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({'signature': signature, 'alerted': now.isoformat()}))
+    except OSError as error:
+        # an unwritable marker just means re-alerting every run — loud, never silent
+        logger.bind(harness=harness, error=str(error)).warning(
+            f'{HarnessAuthCheck.name}: could not record the alert marker'
         )
     logger.bind(harness=harness, recipients=recipients).error(
         f'{HarnessAuthCheck.name}: alerted — {harness} auth is down'
