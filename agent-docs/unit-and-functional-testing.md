@@ -3,6 +3,9 @@
   see Testing in @agent-docs/commands.md (pytest itself is safe; only manual runs bite)
 - collect tests for a component in `test_{component}.py`
 - commands: test the pure function for logic, the CLI for wiring — see @agent-docs/commands.md
+- a test that plants a git hook must point the repo's *local* `core.hooksPath` at the hook's
+  dir — a user-global `core.hooksPath` (set on this machine) silently shadows per-repo
+  `hooks/`, so the hook never fires and the test quietly asserts nothing
 
 ## Grouping
 
