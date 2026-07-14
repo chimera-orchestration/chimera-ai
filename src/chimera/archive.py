@@ -169,7 +169,14 @@ class Archive:
         self.close()
 
     def record_session(self, session: Session) -> None:
-        """Insert ``session``, or update it in place if ``(platform, native_id)`` is known."""
+        """Insert ``session``, or update it in place if ``(platform, native_id)`` is known.
+
+        All but one column takes the new value: ``started_at`` is first-write-wins,
+        because a re-record of a known identity is a *resume* (or a late detail pass),
+        never a new run — the original start time is the one fact only the first firing
+        knew, and it must survive. ``ended_at`` does follow the new value, so a resume
+        (recording with ``ended_at=None``) reopens a session a SessionEnd had closed.
+        """
         self._db.execute(
             'record_session',
             """
@@ -182,7 +189,7 @@ class Archive:
                  :cwd, :transcript, :summary, :input_tokens, :output_tokens, :cost_usd,
                  :workspace, :project, :goal, :actor)
             ON CONFLICT(platform, native_id) DO UPDATE SET
-                status=excluded.status, started_at=excluded.started_at, manager=excluded.manager,
+                status=excluded.status, manager=excluded.manager,
                 model=excluded.model, name=excluded.name, ended_at=excluded.ended_at,
                 cwd=excluded.cwd, transcript=excluded.transcript, summary=excluded.summary,
                 input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,

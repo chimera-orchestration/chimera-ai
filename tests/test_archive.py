@@ -130,6 +130,27 @@ def test_recording_the_same_identity_again_updates_in_place(archive: Archive) ->
     assert archive.sessions() == [stored]  # updated, not duplicated
 
 
+def test_rerecording_preserves_the_original_start_time(archive: Archive) -> None:
+    archive.record_session(make_session('s1', status='startup', started_at=NOON))
+    archive.record_session(
+        make_session('s1', status='resume', started_at=NOON + timedelta(hours=8))
+    )
+    stored = archive.session('claude', 's1')
+    assert stored is not None
+    assert stored.started_at == NOON  # first write wins — a resume is not a new run
+    assert stored.status == 'resume'
+
+
+def test_rerecording_reopens_an_ended_session(archive: Archive) -> None:
+    archive.record_session(make_session('s1', status='startup'))
+    archive.end_session('claude', 's1', at=NOON + timedelta(hours=1), status='other')
+    archive.record_session(make_session('s1', status='resume', ended_at=None))
+    stored = archive.session('claude', 's1')
+    assert stored is not None
+    assert stored.ended_at is None  # resumed — no longer ended
+    assert stored.status == 'resume'
+
+
 def test_ending_a_session_stamps_when_and_how_it_finished(archive: Archive) -> None:
     archive.record_session(make_session('s1', status='running'))
     archive.end_session('claude', 's1', at=NOON + timedelta(hours=2), status='done')
