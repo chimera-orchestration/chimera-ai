@@ -19,9 +19,8 @@ from loguru import logger
 
 from chimera.agent_env import session_role
 from chimera.archive import Archive, Event, Session
-from chimera.commands.msg.store import caller
 from chimera.config import NotInWorkspaceError
-from chimera.context import resolve_scope
+from chimera.context import caller, resolve_scope
 from chimera.worktrees import SEP, session_name
 
 _Axes = tuple[Path, str | None, str | None, str | None]

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from giterator import GitError
 
+from chimera.agent_env import ROLE_MANAGER
 from chimera.config import (
     NotInWorkspaceError,
     ProjectConfig,
@@ -12,9 +13,10 @@ from chimera.config import (
     WorkspaceConfig,
     find_workspace,
     load_config,
+    workspace_config,
 )
 from chimera.git import Git
-from chimera.worktrees import SEP, goals, require_valid_goal
+from chimera.worktrees import AGENT, SEP, goals, require_valid_goal, session_name
 
 
 class CannotIdentifyProjectError(UserError):
@@ -183,6 +185,25 @@ def resolve_scope(
     if resolved is not None:
         pinned_goal = goal if goal is not None else goal_from_worktree(cwd, resolved)
     return Scope(workspace, resolved, pinned_goal)
+
+
+def caller(cwd: Path) -> str:
+    """The address of whoever is running ``ch`` here — one identity shared by mail (the
+    sender/inbox default) and the action log (each line's ``session``).
+
+    ``CHIMERA_SESSION`` if the launcher stamped it, else inferred from cwd like the listers:
+    the bare workspace → the captain's persona name, a project dir → ``<project>@manager``, a
+    goal worktree → ``<project>@<goal>@agent``. A non-agent actor on a goal (a reviewer, a
+    human) names itself with ``--from`` instead.
+    """
+    if stamped := os.environ.get('CHIMERA_SESSION'):
+        return stamped
+    scope = resolve_scope(cwd)
+    if scope.project is None:
+        return workspace_config(scope.workspace).captain.name
+    if scope.goal is None:
+        return f'{scope.project.name}{SEP}{ROLE_MANAGER}'
+    return session_name(scope.project.name, scope.goal, AGENT)
 
 
 def _match_repo(cwd: Path, workspace: Path) -> Project:

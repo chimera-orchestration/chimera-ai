@@ -12,6 +12,7 @@ from chimera.context import (
     Project,
     Scope,
     UnknownProjectError,
+    caller,
     goal_from_worktree,
     iter_projects,
     resolve_goal,
@@ -269,3 +270,28 @@ class TestResolveScope:
         )
         with ShouldRaise(UnknownProjectError('ghost', workspace_with_env)):
             resolve_scope(workspace_with_env, project='ghost', infer=False)
+
+
+class TestCaller:
+    def test_uses_the_chimera_session_stamp(self, replace: Replacer) -> None:
+        replace.in_environ('CHIMERA_SESSION', 'chimera@fix@agent')
+        assert caller(Path('/wherever')) == 'chimera@fix@agent'
+
+    def test_at_the_bare_workspace_is_the_captain(self, tmpdir: TempDir, replace: Replacer) -> None:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
+        replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
+        assert caller(tmpdir.path / 'ws') == 'pegasus'
+
+    def test_in_a_project_dir_is_the_manager(self, tmpdir: TempDir, replace: Replacer) -> None:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
+        replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
+        assert caller(tmpdir.path / 'ws' / 'proj') == 'proj@manager'
+
+    def test_in_a_goal_worktree_is_the_agent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
+        worktree = tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@agent'
+        worktree.mkdir(parents=True)
+        replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
+        assert caller(worktree) == 'proj@g@agent'

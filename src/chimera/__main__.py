@@ -61,7 +61,6 @@ from chimera.commands.msg.drain import drain as _msg_drain
 from chimera.commands.msg.inbox import inbox as _msg_inbox
 from chimera.commands.msg.ls import outstanding as _msg_outstanding
 from chimera.commands.msg.send import send as _msg_send
-from chimera.commands.msg.store import caller as _msg_caller
 from chimera.commands.msg.thread import thread as _msg_thread
 from chimera.commands.msg.watch import line as _msg_line
 from chimera.commands.msg.watch import watch as _msg_watch
@@ -86,6 +85,7 @@ from chimera.config import NotInWorkspaceError, UserError, workspace_config
 from chimera.context import (
     Project,
     Scope,
+    caller,
     resolve_goal,
     resolve_project,
     resolve_scope,
@@ -1608,7 +1608,7 @@ def msg_send(
         str | None, typer.Option('--re', help='Id of the message this replies to')
     ] = None,
 ) -> None:
-    sender = frm if frm is not None else _msg_caller(Path.cwd())
+    sender = frm if frm is not None else caller(Path.cwd())
     message = _msg_send(
         resolve_workspace(Path.cwd()),
         sender=sender,
@@ -1632,7 +1632,7 @@ def msg_inbox(
         bool, typer.Option('--unread', help='Only the undrained (new) messages')
     ] = False,
 ) -> None:
-    who = address if address is not None else _msg_caller(Path.cwd())
+    who = address if address is not None else caller(Path.cwd())
     messages = _msg_inbox(resolve_workspace(Path.cwd()), who, unread_only=unread)
     if not messages:
         typer.echo('No messages')
@@ -1648,7 +1648,7 @@ def msg_thread(
         str | None, typer.Argument(help='Whose mailbox (default: inferred from cwd)')
     ] = None,
 ) -> None:
-    who = address if address is not None else _msg_caller(Path.cwd())
+    who = address if address is not None else caller(Path.cwd())
     messages = _msg_thread(resolve_workspace(Path.cwd()), who, root)
     if not messages:
         typer.echo('No such thread')
@@ -1666,7 +1666,7 @@ def msg_ack(
         str | None, typer.Argument(help='Whose mailbox (default: inferred from cwd)')
     ] = None,
 ) -> None:
-    who = address if address is not None else _msg_caller(Path.cwd())
+    who = address if address is not None else caller(Path.cwd())
     _msg_dispose(resolve_workspace(Path.cwd()), who, message_id)
     typer.echo(f'Acked {message_id}')
 
@@ -1680,7 +1680,7 @@ def msg_defer(
         str | None, typer.Argument(help='Whose mailbox (default: inferred from cwd)')
     ] = None,
 ) -> None:
-    who = address if address is not None else _msg_caller(Path.cwd())
+    who = address if address is not None else caller(Path.cwd())
     _msg_dispose(resolve_workspace(Path.cwd()), who, message_id)
     typer.echo(f'Deferred {message_id}: {reason}')
 
@@ -1695,7 +1695,7 @@ def msg_drain(
         bool, typer.Option('--inject', help='Print as a context block for a turn-boundary hook')
     ] = False,
 ) -> None:
-    who = address if address is not None else _msg_caller(Path.cwd())
+    who = address if address is not None else caller(Path.cwd())
     claimed = _msg_drain(resolve_workspace(Path.cwd()), who)
     if inject:
         if claimed:
@@ -1721,7 +1721,7 @@ def msg_watch(
         float, typer.Option('--interval', help='Seconds between inbox polls')
     ] = 1.0,
 ) -> None:
-    who = address if address is not None else _msg_caller(Path.cwd())
+    who = address if address is not None else caller(Path.cwd())
     feed = _msg_watch(resolve_workspace(Path.cwd()), who, interval=interval)
     try:
         for message in feed:  # typer.echo flushes per line — the line-buffered contract

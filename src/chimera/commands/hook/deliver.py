@@ -19,10 +19,10 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.commands.hook.capture import archive
-from chimera.commands.msg.store import caller, mail
+from chimera.commands.msg.store import mail
 from chimera.comms import Message
 from chimera.config import NotInWorkspaceError
-from chimera.context import resolve_workspace
+from chimera.context import caller, resolve_workspace
 
 
 def deliver(cwd: Path, session: str) -> list[Message]:
