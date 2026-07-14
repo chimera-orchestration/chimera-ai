@@ -284,6 +284,31 @@ def test_latest_session_for_survives_a_registry_rename(archive: Archive) -> None
     assert latest.native_id == 's1'
 
 
+def test_latest_session_for_prefers_the_last_active_over_the_last_created(
+    archive: Archive,
+) -> None:
+    # started_at is first-write-wins, so creation order lies about activity: thread A,
+    # /clear -> thread B (abandoned), A resumed later — resume must pick A, not B
+    archive.record_session(
+        make_session('a', project='chimera', goal='logs', actor='agent', started_at=NOON)
+    )
+    archive.record_session(
+        make_session(
+            'b',
+            project='chimera',
+            goal='logs',
+            actor='agent',
+            started_at=NOON + timedelta(hours=1),
+        )
+    )
+    archive.record_event(
+        Event(at=NOON + timedelta(hours=2), kind='resume', platform='claude', native_id='a')
+    )
+    latest = archive.latest_session_for('chimera', 'logs', 'agent')
+    assert latest is not None
+    assert latest.native_id == 'a'
+
+
 def test_latest_session_for_narrows_by_platform(archive: Archive) -> None:
     archive.record_session(
         make_session('c', platform='codex', project='chimera', goal='logs', actor='agent')

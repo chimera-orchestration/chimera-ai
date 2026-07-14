@@ -278,21 +278,31 @@ class Archive:
     def latest_session_for(
         self, project: str, goal: str, actor: str, *, platform: str | None = None
     ) -> Session | None:
-        """The newest session ever recorded at a ``project@goal@actor`` address, else ``None``.
+        """The most recently *active* session at a ``project@goal@actor`` address, else ``None``.
 
         The resume resolver: registry names are mutable (a UI rename orphans the label),
         so ``agent resume`` looks the address up here and reattaches by the immutable
         ``native_id`` — dead sessions included, since resuming is how a dead session is
-        revived. ``platform`` narrows to the harness doing the resuming.
+        revived. Activity is the session's last lifecycle event (``started_at`` for a row
+        with none, e.g. a backfilled one) — never creation time, which is first-write-wins:
+        an old thread the user resumed yesterday must beat a fresher-created one abandoned
+        after a ``/clear``. ``platform`` narrows to the harness doing the resuming.
         """
-        clauses, params = 'project=? AND goal=? AND actor=?', [project, goal, actor]
+        clauses = 'sessions.project=? AND sessions.goal=? AND sessions.actor=?'
+        params = [project, goal, actor]
         if platform is not None:
-            clauses += ' AND platform=?'
+            clauses += ' AND sessions.platform=?'
             params.append(platform)
         row = self._db.execute(
             'latest_session_for',
-            f'SELECT * FROM sessions WHERE {clauses} '
-            f'ORDER BY started_at DESC, platform, native_id LIMIT 1',
+            f"""
+            SELECT sessions.*, COALESCE(MAX(events.at), sessions.started_at) AS last_active
+            FROM sessions LEFT JOIN events
+                ON events.platform = sessions.platform AND events.native_id = sessions.native_id
+            WHERE {clauses}
+            GROUP BY sessions.platform, sessions.native_id
+            ORDER BY last_active DESC, sessions.platform, sessions.native_id LIMIT 1
+            """,
             params,
         ).fetchone()
         return _row_to_session(row) if row is not None else None
