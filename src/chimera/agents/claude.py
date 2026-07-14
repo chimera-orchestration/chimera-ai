@@ -90,20 +90,25 @@ class Claude(Agent):
         extra: Sequence[str] = (),
         dangerous: bool = False,
         *,
+        id: str | None = None,
         model: str | None = None,
         context: Path | None = None,
         env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> subprocess.CompletedProcess[bytes]:
-        """Resume the claude session named ``name``, with cwd set to ``cwd``.
+        """Resume a claude session, with cwd set to ``cwd``.
 
-        The inverse of :meth:`start`: where that launches with ``--name <name>``, this
-        reattaches to the same label with ``--resume <name>``. The cwd is the key —
+        With ``id`` (the session's full UUID — ``--resume``'s documented argument) the
+        session is reattached by identity and ``--name`` re-asserts the canonical label,
+        exactly as :meth:`start` set it — so a rename in claude's own UI neither orphans
+        the session nor survives the reattach. Without one, ``--resume <name>`` leans on
+        claude's name-to-session DWIM, the pre-archive behaviour. The cwd is the key —
         claude has no ``--cwd``, so setting it here is what lets a dead session be
         revived in its worktree from anywhere. Interactive foreground by default; with
         ``prompt`` it resumes in the background (``--bg``) to keep working.
         """
-        args = _session_args(['--resume', name], prompt, extra, dangerous, model, context)
+        lead = ['--resume', id, '--name', name] if id is not None else ['--resume', name]
+        args = _session_args(lead, prompt, extra, dangerous, model, context)
         return self._launch(cwd, args, exclusive, env)
 
     def run(

@@ -255,6 +255,50 @@ def test_live_session_for_is_none_when_the_address_has_no_live_session(archive: 
     assert archive.live_session_for('chimera', 'logs', 'agent') is None
 
 
+def test_latest_session_for_finds_the_newest_even_when_ended(archive: Archive) -> None:
+    archive.record_session(
+        make_session('old', project='chimera', goal='logs', actor='agent', started_at=NOON)
+    )
+    archive.record_session(
+        make_session(
+            'new',
+            project='chimera',
+            goal='logs',
+            actor='agent',
+            started_at=NOON + timedelta(hours=2),
+            ended_at=NOON + timedelta(hours=3),  # dead — resuming is how it's revived
+        )
+    )
+    latest = archive.latest_session_for('chimera', 'logs', 'agent')
+    assert latest is not None
+    assert latest.native_id == 'new'
+
+
+def test_latest_session_for_survives_a_registry_rename(archive: Archive) -> None:
+    # a UI rename mutates the registry name; the archive row still answers the address
+    archive.record_session(
+        make_session('s1', name='free-form rename', project='chimera', goal='logs', actor='agent')
+    )
+    latest = archive.latest_session_for('chimera', 'logs', 'agent')
+    assert latest is not None
+    assert latest.native_id == 's1'
+
+
+def test_latest_session_for_narrows_by_platform(archive: Archive) -> None:
+    archive.record_session(
+        make_session('c', platform='codex', project='chimera', goal='logs', actor='agent')
+    )
+    assert archive.latest_session_for('chimera', 'logs', 'agent', platform='claude') is None
+    latest = archive.latest_session_for('chimera', 'logs', 'agent', platform='codex')
+    assert latest is not None
+    assert latest.native_id == 'c'
+
+
+def test_latest_session_for_is_none_for_an_unseen_address(archive: Archive) -> None:
+    archive.record_session(make_session('unaddressed', project='chimera', goal='logs', actor=None))
+    assert archive.latest_session_for('chimera', 'logs', 'agent') is None
+
+
 # --- events: the timeline that stitches logs to sessions ---------------------------
 
 

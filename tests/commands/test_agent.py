@@ -4,6 +4,7 @@ import subprocess
 import sys
 from hashlib import sha256
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
@@ -12,12 +13,15 @@ from chimera import __main__ as chimera_main
 from chimera.agents import Session
 from chimera.agents.claude import Claude
 from chimera.agents.registry import AgentSpec
+from chimera.archive import Archive
+from chimera.archive import Session as ArchiveSession
 from chimera.commands.agent import (
     agent,
     agents,
     in_goal,
     live,
     resume,
+    resume_target,
     scope_line,
     scoped,
     shown,
@@ -185,6 +189,62 @@ def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replace
 def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
     with ShouldRaise(FileNotFoundError(tmpdir / 'nope')):
         resume(tmpdir / 'nope', 'x')
+
+
+def test_resume_by_archived_id_reasserts_the_canonical_name(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace)
+    resume(worktree, 'proj@goal@agent', id='11111111-2222-3333-4444-555555555555')
+    expected = [
+        'claude',
+        '--resume',
+        '11111111-2222-3333-4444-555555555555',
+        '--name',
+        'proj@goal@agent',
+    ]
+    compare(calls, expected=[(expected, worktree, True)])
+
+
+def _address_archived(
+    workspace: Path, native_id: str, name: str, project: str = 'myproject'
+) -> None:
+    """A recorded session for ``<project>@g@agent`` — under whatever display name."""
+    with Archive.open(workspace / 'state' / 'archive.db') as store:
+        store.record_session(
+            ArchiveSession(
+                platform='claude',
+                native_id=native_id,
+                status='other',
+                started_at=datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc),
+                name=name,
+                project=project,
+                goal='g',
+                actor='agent',
+            )
+        )
+
+
+def test_resume_target_answers_from_the_archive_despite_a_rename(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    ws = tmpdir.makedir('ws')
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    _address_archived(ws, 'uuid-renamed', name='fun UI rename')  # canonical name long gone
+    assert resume_target(ws, 'claude', 'myproject', 'g', 'agent') == 'uuid-renamed'
+
+
+def test_resume_target_is_none_for_an_unseen_address(tmpdir: TempDir, replace: Replacer) -> None:
+    ws = tmpdir.makedir('ws')
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    assert resume_target(ws, 'claude', 'myproject', 'g', 'agent') is None
+
+
+def test_resume_target_is_none_outside_any_workspace(tmpdir: TempDir) -> None:
+    assert resume_target(tmpdir.path, 'claude', 'myproject', 'g', 'agent') is None
 
 
 def _project_with_worktree(tmpdir: TempDir) -> Path:
@@ -403,6 +463,96 @@ def test_agent_resume_cli_with_passthrough(
     )
     claude_cmd = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
     compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+def test_agent_resume_cli_resolves_the_session_through_the_archive(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    # the field failure this guards: a UI rename left the canonical name unfindable in
+    # the registry — the archive answers the address by immutable id instead
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(project)
+    _address_archived(ws, 'uuid-1234', name='renamed in the UI', project='proj')
+    calls = _stub(replace)
+    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    digest = sha256(AGENT_ROLE_TEXT.encode()).hexdigest()
+    context = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    command.run('agent', 'resume', '-g', 'g').check(
+        output=f'Resumed agent in {expected}',
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'agent resume',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.resume',
+                'params': {
+                    'prompt': None,
+                    'goal': 'g',
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': False,
+                },
+            },
+            {
+                'level': 'INFO',
+                'session': 'proj@g@agent',
+                'path': str(context),
+                'sha256': digest,
+                'sources': context_sources(ws, 'agent', pinned=project.resolve()),
+                'message': 'context: rendered',
+            },
+            {
+                'level': 'INFO',
+                'platform': 'claude',
+                'native_id': 'uuid-1234',
+                'project': 'proj',
+                'goal': 'g',
+                'actor': 'agent',
+                'message': 'agent resume: archived session',
+            },
+            {'level': 'INFO', 'command': 'agent resume', 'phase': 'end'},
+        ],
+    )
+    claude_cmd = [
+        'claude',
+        '--resume',
+        'uuid-1234',
+        '--name',
+        'proj@g@agent',
+        '--append-system-prompt-file',
+        str(context),
+    ]
+    compare(calls, expected=[(claude_cmd, expected, True)])
+
+
+def test_stop_is_keyed_by_worktree_so_a_rename_cannot_hide_a_session(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # stop never selects by name: liveness and pids come from the registry by cwd,
+    # so a session renamed in the UI is still found and stopped
+    worktree = tmpdir.makedir('wt')
+    pid = subprocess.run(
+        ['bash', '-c', 'sleep 60 & echo $!'], capture_output=True, text=True, check=True
+    )
+    renamed = Session('uuid-1', 'renamed in the UI', 'idle', worktree, None, pid=int(pid.stdout))
+    replace.on_class(Claude.live, lambda self, cwd=None: [renamed] if cwd == worktree else [])
+    try:
+        compare(stop(worktree), expected=[renamed])
+    finally:
+        try:
+            os.kill(int(pid.stdout), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    with ShouldRaise(ProcessLookupError):
+        os.kill(int(pid.stdout), 0)
 
 
 def test_agents_aggregates_registered_harnesses(replace: Replacer) -> None:

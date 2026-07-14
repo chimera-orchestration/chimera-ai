@@ -1,9 +1,11 @@
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 from loguru import logger
 
 from chimera.agent_env import ROLE_MANAGER
+from chimera.agents import Launch
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import refuse_restricted
 from chimera.config import UserError
@@ -78,7 +80,7 @@ def chat(
     live = any(session.name == name for session in spec.agent.live())
     if live and not dry.on:
         raise ChatAlreadyLiveError(name)
-    launch = spec.agent.resume if resume else spec.agent.start
+    launch = cast(Launch, spec.agent.resume if resume else spec.agent.start)
     dry(
         launch,
         cwd,

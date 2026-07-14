@@ -275,6 +275,28 @@ class Archive:
         ).fetchone()
         return _row_to_session(row) if row is not None else None
 
+    def latest_session_for(
+        self, project: str, goal: str, actor: str, *, platform: str | None = None
+    ) -> Session | None:
+        """The newest session ever recorded at a ``project@goal@actor`` address, else ``None``.
+
+        The resume resolver: registry names are mutable (a UI rename orphans the label),
+        so ``agent resume`` looks the address up here and reattaches by the immutable
+        ``native_id`` — dead sessions included, since resuming is how a dead session is
+        revived. ``platform`` narrows to the harness doing the resuming.
+        """
+        clauses, params = 'project=? AND goal=? AND actor=?', [project, goal, actor]
+        if platform is not None:
+            clauses += ' AND platform=?'
+            params.append(platform)
+        row = self._db.execute(
+            'latest_session_for',
+            f'SELECT * FROM sessions WHERE {clauses} '
+            f'ORDER BY started_at DESC, platform, native_id LIMIT 1',
+            params,
+        ).fetchone()
+        return _row_to_session(row) if row is not None else None
+
     def record_event(self, event: Event) -> None:
         """Append ``event`` to the timeline."""
         self._db.execute(

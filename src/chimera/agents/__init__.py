@@ -15,7 +15,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from subprocess import CompletedProcess
-from typing import ClassVar
+from typing import ClassVar, Protocol
 
 from loguru import logger
 
@@ -57,6 +57,29 @@ class Session:
         home = str(Path.home())
         cwd = str(self.cwd)
         return '~' + cwd[len(home) :] if cwd.startswith(home) else cwd
+
+
+class Launch(Protocol):
+    """The call shape :meth:`Agent.start` and :meth:`Agent.resume` share.
+
+    For code holding either as a value (chat's launch-or-revive dispatch): ``resume``'s
+    extra keyword-only ``id`` has a default, so both methods satisfy this — a caller
+    that resolved an id calls ``resume`` directly instead.
+    """
+
+    def __call__(
+        self,
+        cwd: Path,
+        name: str,
+        prompt: str | None = None,
+        extra: Sequence[str] = (),
+        dangerous: bool = False,
+        *,
+        model: str | None = None,
+        context: Path | None = None,
+        env: Mapping[str, str] = {},
+        exclusive: bool = True,
+    ) -> CompletedProcess[bytes]: ...
 
 
 class Agent(ABC):
@@ -109,12 +132,19 @@ class Agent(ABC):
         extra: Sequence[str] = (),
         dangerous: bool = False,
         *,
+        id: str | None = None,
         model: str | None = None,
         context: Path | None = None,
         env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> CompletedProcess[bytes]:
-        """Reattach to the session named ``name``, reviving it in ``cwd`` if dead."""
+        """Reattach to a session, reviving it in ``cwd`` if dead.
+
+        ``id`` is the harness-native session id to reattach by, re-asserting ``name``
+        as the display label — names are mutable (a rename in the harness's own UI
+        orphans them), so a caller that knows the id must pass it. Without one the
+        name is the only handle left (the pre-archive behaviour).
+        """
         ...
 
     @abstractmethod
