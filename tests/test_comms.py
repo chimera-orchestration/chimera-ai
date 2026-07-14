@@ -294,7 +294,12 @@ def test_delivering_a_message_is_logged_with_the_session(tmpdir: TempDir) -> Non
     comms.drain(TO)  # outside the capture: only the delivery itself is caught
     with _trace() as log:
         comms.deliver(TO, 'session-1')
-    log.check(('comms: deliver', {'session': 'session-1', **message.log_fields()}))
+    log.check(
+        (
+            f'comms: deliver {FROM} -> {TO} [message] hello (m1)',
+            {'session': 'session-1', **message.log_fields()},
+        )
+    )
 
 
 def test_disposing_a_message_is_logged(tmpdir: TempDir) -> None:
@@ -322,21 +327,14 @@ def test_the_logged_text_carries_the_kind_and_subject(tmpdir: TempDir) -> None:
     log.check((f'comms: send {FROM} -> {TO} [escalation] build is red (e1)', message.log_fields()))
 
 
-def test_the_read_only_peeks_trace_at_debug(tmpdir: TempDir) -> None:
+def test_the_read_only_peeks_trace_at_debug_except_the_poll(tmpdir: TempDir) -> None:
     comms = Comms(tmpdir.path)
     comms.send(a_message('m1'))
     with full_capture() as log:
-        comms.inbox(TO)
+        comms.inbox(TO)  # the watch's poll primitive — silent, or two watches flood the log
         comms.thread(TO, 'm1')
         comms.messages()
     log.check(
-        {
-            'level': 'DEBUG',
-            'message': f'comms: inbox {TO} (1)',
-            'address': TO,
-            'unread_only': False,
-            'count': 1,
-        },
         {
             'level': 'DEBUG',
             'message': f'comms: thread m1 {TO} (1)',

@@ -30,12 +30,12 @@ directory listing is FIFO.
 The store models the message *lifecycle*; *why* a message was disposed (handled vs
 deferred, and the deferral reason) is audit metadata for the log, not the mailbox —
 the same log-is-truth split the archive keeps. Each send, receive (drain) and disposal
-logs at INFO through :func:`_log`: routing in the message text (who -> whom, kind,
+logs at INFO through :func:`log_action`: routing in the message text (who -> whom, kind,
 subject, id — what a live tail shows) and :meth:`Message.log_fields` bound structured —
-so a message's whole journey is traceable from the log alone; the read-only
-peeks (inbox/thread/messages) trace at DEBUG — below triage, like the git command
-trace — naming what was peeked and how much was found. Timestamps must be
-timezone-aware.
+so a message's whole journey is traceable from the log alone. Of the read-only peeks,
+thread/messages trace at DEBUG (below triage, like the git command trace); inbox is
+silent — it is the watch's poll primitive (see :meth:`Comms.inbox`). Timestamps must
+be timezone-aware.
 """
 
 import os
@@ -87,7 +87,7 @@ class Message(BaseModel):
         Source, destination, the identifiers of all parties and the message, and the content —
         so a message's whole journey is reconstructable from the log alone and no site (send,
         drain, dispose, delivery) can forget a field. The store's own sites bind them via
-        :func:`_log`; anywhere else, ``logger.bind(**msg.log_fields())``.
+        :func:`log_action`; anywhere else, ``logger.bind(**msg.log_fields())``.
         """
         return {
             'msg_id': self.id,
@@ -154,17 +154,18 @@ class Comms:
         tmp = mailbox / 'tmp' / name
         tmp.write_text(message.model_dump_json())
         os.replace(tmp, mailbox / 'new' / name)
-        _log('send', message)
+        log_action('send', message)
         return message
 
     def inbox(self, address: str, *, unread_only: bool = False) -> list[Message]:
-        """The messages awaiting ``address``, oldest first: undrained plus (by default) undisposed."""
+        """The messages awaiting ``address``, oldest first: undrained plus (by default) undisposed.
+
+        Deliberately unlogged, even at DEBUG: this is ``ch msg watch``'s poll primitive, and
+        a quiet poll every few seconds is motion, not an outcome — callers with an outcome
+        to report (the one-shot ``ch msg inbox``, a watch's emission) log it themselves.
+        """
         states = ('new',) if unread_only else ('new', 'cur')
-        found = self._collect(address, states)
-        logger.bind(address=address, unread_only=unread_only, count=len(found)).debug(
-            f'comms: inbox {address} ({len(found)})'
-        )
-        return found
+        return self._collect(address, states)
 
     def drain(self, address: str) -> list[Message]:
         """Claim every undrained message for ``address`` (``new/`` → ``cur/``), returning them.
@@ -185,7 +186,7 @@ class Comms:
             except FileNotFoundError:
                 continue  # another drainer claimed it first
             message = _read(destination)
-            _log('receive', message)
+            log_action('receive', message)
             claimed.append(message)
         return claimed
 
@@ -208,7 +209,7 @@ class Comms:
             with ledger.open('a') as file:
                 file.writelines(f'{message.id}\n' for message in fresh)
             for message in fresh:
-                logger.bind(session=session, **message.log_fields()).info('comms: deliver')
+                log_action('deliver', message, session=session)
         return fresh
 
     def dispose(self, address: str, message_id: str) -> None:
@@ -225,7 +226,7 @@ class Comms:
             if source.exists():
                 message = _read(source)
                 os.replace(source, done / name)
-                _log('dispose', message)
+                log_action('dispose', message)
                 return
 
     def thread(self, address: str, thread: str) -> list[Message]:
@@ -276,19 +277,20 @@ class Comms:
 _SUBJECT_LIMIT = 60
 
 
-def _log(action: str, message: Message) -> None:
-    """Land ``action`` on ``message`` at INFO — the one log site for every mailbox mutation.
+def log_action(action: str, message: Message, **extra: object) -> None:
+    """Land ``action`` on ``message`` at INFO — the one log helper for message outcomes.
 
     The text carries the routing (``comms: send <sender> -> <to> [<kind>] <subject> (<id>)``)
-    because that's all a live tail shows; :meth:`Message.log_fields` rides bound, so the
-    structured record stays whole. One helper, so no site can drift from either half. A
-    subject past :data:`_SUBJECT_LIMIT` is elided in the text only — the bound field, like
-    the body (which never enters the text), stays whole.
+    because that's all a live tail shows; :meth:`Message.log_fields` rides bound (plus any
+    ``extra``, e.g. deliver's ``session``), so the structured record stays whole. One
+    helper, so no site — the store's own or a caller's like ``ch msg watch`` — can drift
+    from either half. A subject past :data:`_SUBJECT_LIMIT` is elided in the text only —
+    the bound field, like the body (which never enters the text), stays whole.
     """
     subject = message.subject
     if len(subject) > _SUBJECT_LIMIT:
         subject = subject[: _SUBJECT_LIMIT - 3] + '...'
-    logger.bind(**message.log_fields()).info(
+    logger.bind(**message.log_fields(), **extra).info(
         f'comms: {action} {message.sender} -> {message.to} '
         f'[{message.kind}] {subject} ({message.id})'
     )

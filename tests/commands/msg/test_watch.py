@@ -9,11 +9,23 @@ from chimera.commands.msg.drain import drain
 from chimera.commands.msg.store import mail
 from chimera.commands.msg.watch import line, watch
 from chimera.comms import Message
-from tests.cli import Command, action_logs
+from tests.cli import Command, action_logs, full_capture
 
 NOON = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
 WATCH = 'chimera.commands.msg.watch.watch'
 ADDRESS = 'p@g@agent'
+M1_FIELDS = {  # what _seed(ws, 'm1') binds on every store/watch log line
+    'msg_id': 'm1',
+    'sender': 'p@manager',
+    'to': ADDRESS,
+    'kind': 'message',
+    'priority': 'normal',
+    'thread': None,
+    're': None,
+    'severity': None,
+    'subject': 'ping',
+    'body': '.',
+}
 
 
 class Enough(Exception):
@@ -95,6 +107,32 @@ def test_line_carries_id_parties_kind_and_subject(tmpdir: TempDir) -> None:
     compare(line(message), expected='m1  p@manager → p@g@agent  [message] build red')
 
 
+def test_an_arrival_is_the_logged_outcome(tmpdir: TempDir) -> None:
+    ws = tmpdir.path
+    with full_capture() as log:
+        compare(_watch(ws, lambda: _seed(ws, 'm1')), expected=['m1'])
+    log.check(
+        {
+            'level': 'INFO',
+            'message': 'comms: send p@manager -> p@g@agent [message] ping (m1)',
+            **M1_FIELDS,
+        },
+        {
+            'level': 'INFO',
+            'message': 'comms: watch p@manager -> p@g@agent [message] ping (m1)',
+            **M1_FIELDS,
+        },
+    )
+
+
+def test_quiet_polls_log_nothing_at_all(tmpdir: TempDir) -> None:
+    ws = tmpdir.path
+    _seed(ws, 'm0')  # the baseline arrives before the capture starts
+    with full_capture() as log:
+        compare(_watch(ws, lambda: None, lambda: None), expected=[])
+    log.check()  # three polls, not a line — even DEBUG would flood at watch frequency
+
+
 def test_cli_streams_lines_until_interrupted(
     tmpdir: TempDir, command: Command, replace: Replacer
 ) -> None:
@@ -112,20 +150,16 @@ def test_cli_streams_lines_until_interrupted(
 
     replace(target=time.sleep, container=time, name='sleep', replacement=sleep)
     start, end = action_logs('msg watch', WATCH, {'address': ADDRESS, 'interval': 5.0})
-    sent = {  # m1's mid-watch send — the only store line: the watch itself logs no moves
+    sent = {  # m1's mid-watch send — the watch itself logs no moves, only its emission
         'level': 'INFO',
-        'message': 'comms: send',
-        'msg_id': 'm1',
-        'sender': 'p@manager',
-        'to': ADDRESS,
-        'kind': 'message',
-        'priority': 'normal',
-        'thread': None,
-        're': None,
-        'severity': None,
-        'subject': 'ping',
-        'body': '.',
+        'message': 'comms: send p@manager -> p@g@agent [message] ping (m1)',
+        **M1_FIELDS,
+    }
+    watched = {
+        'level': 'INFO',
+        'message': 'comms: watch p@manager -> p@g@agent [message] ping (m1)',
+        **M1_FIELDS,
     }
     command.run('msg', 'watch', ADDRESS, '--interval', '5').check(
-        output='m1  p@manager → p@g@agent  [message] ping', logging=[start, sent, end]
+        output='m1  p@manager → p@g@agent  [message] ping', logging=[start, sent, watched, end]
     )
