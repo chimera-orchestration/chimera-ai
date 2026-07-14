@@ -35,7 +35,7 @@ def frozen_clock(replace: Replacer) -> None:
 @pytest.fixture()
 def sink(tmpdir: TempDir, replace: Replacer) -> Path:
     """A real workspace with the file sink isolated: configure() writes here, and loguru's
-    handlers and default extra (the session identity) are restored afterwards so neither
+    handlers and default extra (the caller identity) are restored afterwards so neither
     leaks into other tests."""
     ws = init(tmpdir / 'ws')
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
@@ -131,7 +131,7 @@ class TestFileSink:
                     'pid': os.getpid(),
                     'command': 'init',
                     'level': 'INFO',
-                    'session': 'captain',  # cwd is neither a project nor a repo → captain
+                    'caller': 'captain',  # cwd is neither a project nor a repo → captain
                     'phase': 'start',
                     'function': FUNC,
                     'params': {'path': '/ws'},
@@ -141,7 +141,7 @@ class TestFileSink:
                     'pid': os.getpid(),
                     'command': 'init',
                     'level': 'INFO',
-                    'session': 'captain',
+                    'caller': 'captain',
                     'phase': 'end',
                     'duration_ms': 0.0,
                 },
@@ -195,16 +195,23 @@ class TestFileSink:
         configure()
         logger.info('hello')
         compare(
-            json.loads(log_path(sink).read_text())['session'],
+            json.loads(log_path(sink).read_text())['caller'],
             expected='proj@g@agent',
         )
+
+    def test_a_line_about_a_session_never_displaces_the_caller(self, sink: Path) -> None:
+        configure()
+        logger.bind(session='proj@g@agent').info('agent stop')  # the session acted *on*
+        line = json.loads(log_path(sink).read_text())
+        compare(line['caller'], expected='captain')
+        compare(line['session'], expected='proj@g@agent')
 
     def test_unresolvable_identity_still_logs(self, sink: Path, replace: Replacer) -> None:
         replace.in_module(caller, Mock(side_effect=RuntimeError('boom')), module=chimera.logging)
         configure()
         logger.info('hello')
         line = json.loads(log_path(sink).read_text())
-        assert 'session' not in line
+        assert 'caller' not in line
         compare(line['message'], expected='hello')
 
     def test_a_git_trace_line_lands_at_debug(self, sink: Path) -> None:
@@ -217,7 +224,7 @@ class TestFileSink:
             expected={
                 'pid': os.getpid(),
                 'level': 'DEBUG',
-                'session': 'captain',  # even the trace says who ran the command
+                'caller': 'captain',  # even the trace says who ran the command
                 'message': 'git rev-parse --git-dir',
                 'git_cwd': str(sink),
             },

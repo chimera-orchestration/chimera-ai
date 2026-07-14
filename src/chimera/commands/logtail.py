@@ -3,7 +3,7 @@
 
 The log is one-line JSON (see ``chimera.logging``) whose most important records — the
 start/end frames — carry an *empty* ``message``: their content rides bound fields
-(``session``, ``command``, ``phase``, ``duration_ms``, ``error``). So a raw ``tail -f`` is unreadable
+(``caller``, ``command``, ``phase``, ``duration_ms``, ``error``). So a raw ``tail -f`` is unreadable
 and a generic JSON viewer shows blank lines exactly where it matters. Rather than
 hand-rolling a renderer, ``tail`` is piped through `fblog <https://github.com/brocode/fblog>`_
 with a main-line format tuned to those fields; ``ch doctor`` checks fblog is installed
@@ -19,11 +19,11 @@ from chimera.logging import log_path
 
 FBLOG = 'fblog'
 
-# Width of the session id column: room for a typical `<project>@<goal>@agent` address; a
+# Width of the caller id column: room for a typical `<project>@<goal>@agent` address; a
 # longer one keeps its head (project and goal — the distinguishing bits) and loses the tail.
 ID_WIDTH = 32
 
-# fblog's handlebars main-line format, tuned to chimera's fields: the fixed-width session id
+# fblog's handlebars main-line format, tuned to chimera's fields: the fixed-width caller id
 # (who ran it — guarded, since lines predating the field would otherwise fail to render),
 # then command + the goal a goal-scoped action carries + phase for the frame lines whose
 # message is empty; durations and errors ride the end frames. Tracebacks are deliberately
@@ -31,7 +31,7 @@ ID_WIDTH = 32
 FORMAT = (
     '{{bold(fixed_size 19 fblog_timestamp)}} '
     '{{level_style (fixed_size 5 fblog_level)}} '
-    '{{#if session}}{{fixed_size %(width)d session}}{{else}}%(pad)s{{/if}} '
+    '{{#if caller}}{{fixed_size %(width)d caller}}{{else}}%(pad)s{{/if}} '
     '{{#if command}}{{bold(cyan command)}} {{/if}}'
     '{{#if goal}}{{yellow goal}} {{/if}}'
     '{{#if phase}}[{{phase}}] {{/if}}'

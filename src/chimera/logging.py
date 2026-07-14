@@ -5,10 +5,13 @@ object ``{time, pid, command?, level, message?, **extra}`` — everything bound 
 included (only the ``line`` scratch is dropped), so any ``logger.bind(...)`` anywhere in the
 codebase surfaces without touching this format.
 
-Every line also carries ``session`` — the address of whoever is running ``ch``
+Every line also carries ``caller`` — the address of whoever is running ``ch``
 (:func:`chimera.context.caller`: the captain's persona, ``<project>@manager``,
 ``<project>@<goal>@agent``), bound as loguru's default extra by :func:`configure` so frames,
-domain events and the git trace are all attributed without any call site knowing.
+domain events and the git trace are all attributed without any call site knowing. It is
+deliberately not named ``session``: plenty of lines bind that for the session they *act on*
+(``agent stop``, the stale-session warnings), and the actor must never be displaced by the
+acted-upon.
 
 A CLI action frames itself with a start/end pair sharing a ``pid`` (one process per
 invocation, so ``pid`` ties them — and any lines logged in between — together):
@@ -94,14 +97,14 @@ def configure() -> None:
 
 
 def _identity(cwd: Path) -> dict[str, str]:
-    """The ``session`` every line carries: the address of whoever is running ``ch`` here.
+    """The ``caller`` every line carries: the address of whoever is running ``ch`` here.
 
     Best-effort — identity must never take logging (and with it the command) down: in a
     workspace broken enough that the caller can't be resolved (a malformed config is
     doctor's to report, and doctor must still run there) lines just go unattributed.
     """
     try:
-        return {'session': caller(cwd)}
+        return {'caller': caller(cwd)}
     except Exception:
         return {}
 
