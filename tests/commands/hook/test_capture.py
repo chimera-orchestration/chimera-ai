@@ -4,7 +4,7 @@ from pathlib import Path
 
 from testfixtures import Replacer, TempDir
 
-from chimera.archive import Archive, Session
+from chimera.archive import Archive, Event, Session
 from chimera.commands.hook.capture import session_end, session_start
 from tests.cli import Command, action_logs
 
@@ -15,6 +15,11 @@ END = 'chimera.commands.hook.capture.session_end'
 def _archived(ws: Path) -> list[Session]:
     with Archive.open(ws / 'state' / 'archive.db') as a:
         return a.sessions()
+
+
+def _events(ws: Path, session_id: str) -> list[Event]:
+    with Archive.open(ws / 'state' / 'archive.db') as a:
+        return a.events(platform='claude', native_id=session_id)
 
 
 def test_session_start_records_the_session(tmpdir: TempDir, replace: Replacer) -> None:
@@ -66,6 +71,36 @@ def test_session_end_marks_the_session_ended(tmpdir: TempDir, replace: Replacer)
     [session] = _archived(ws)
     assert session.status == 'logout'
     assert session.ended_at is not None
+
+
+def test_a_resumed_session_keeps_its_row_and_gains_the_history(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_ROLE', '')
+    session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
+    started = _archived(ws)[0].started_at
+    session_end(ws, 'uuid-1', 'other')
+    session_start(ws, 'uuid-1', '/t.jsonl', 'resume')
+    [session] = _archived(ws)  # one row per identity, however many lives
+    assert session.started_at == started
+    assert session.ended_at is None
+    assert session.status == 'resume'
+    timeline = [(e.kind, e.detail) for e in _events(ws, 'uuid-1')]
+    assert timeline == [('startup', None), ('end', 'other'), ('resume', None)]
+
+
+def test_session_end_for_a_session_the_hooks_never_saw_records_no_event(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    session_end(ws, 'pre-hook-uuid', 'other')  # no crash — nothing to stitch an event to
+    assert _archived(ws) == []
+    assert _events(ws, 'pre-hook-uuid') == []
 
 
 def test_session_end_outside_a_workspace_is_a_noop(tmpdir: TempDir) -> None:
