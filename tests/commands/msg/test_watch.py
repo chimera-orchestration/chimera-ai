@@ -101,6 +101,17 @@ def test_never_claims(tmpdir: TempDir) -> None:
     assert [m.id for m in mail(ws).inbox(ADDRESS, unread_only=True)] == ['m1']  # still in new/
 
 
+def test_once_returns_after_the_first_arrival_without_a_further_poll(tmpdir: TempDir) -> None:
+    ws = tmpdir.path
+    polls = iter([lambda: (_seed(ws, 'm1'), _seed(ws, 'm2'))])  # both land before the poll
+
+    def sleep(interval: float) -> None:
+        next(polls)()  # a second poll would StopIteration — proof `once` didn't stop
+
+    emitted = [m.id for m in watch(ws, ADDRESS, interval=0, once=True, sleep=sleep)]
+    compare(emitted, expected=['m1'])  # only the first, and it returned cleanly
+
+
 def test_line_carries_id_parties_kind_and_subject(tmpdir: TempDir) -> None:
     _seed(tmpdir.path, 'm1', subject='build red')
     [message] = mail(tmpdir.path).inbox(ADDRESS)
@@ -149,7 +160,9 @@ def test_cli_streams_lines_until_interrupted(
         step()
 
     replace(target=time.sleep, container=time, name='sleep', replacement=sleep)
-    start, end = action_logs('msg watch', WATCH, {'address': ADDRESS, 'interval': 5.0})
+    start, end = action_logs(
+        'msg watch', WATCH, {'address': ADDRESS, 'interval': 5.0, 'once': False}
+    )
     sent = {  # m1's mid-watch send — the watch itself logs no moves, only its emission
         'level': 'INFO',
         'message': 'comms: send p@manager -> p@g@agent [message] ping (m1)',
@@ -161,5 +174,35 @@ def test_cli_streams_lines_until_interrupted(
         **M1_FIELDS,
     }
     command.run('msg', 'watch', ADDRESS, '--interval', '5').check(
+        output='m1  p@manager → p@g@agent  [message] ping', logging=[start, sent, watched, end]
+    )
+
+
+def test_cli_once_prints_one_line_then_exits(
+    tmpdir: TempDir, command: Command, replace: Replacer
+) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    polls = iter([lambda: _seed(ws, 'm1')])  # m1 lands on the first poll; --once stops there
+
+    def sleep(interval: float) -> None:
+        next(polls)()
+
+    replace(target=time.sleep, container=time, name='sleep', replacement=sleep)
+    start, end = action_logs(
+        'msg watch', WATCH, {'address': ADDRESS, 'interval': 0.0, 'once': True}
+    )
+    sent = {
+        'level': 'INFO',
+        'message': 'comms: send p@manager -> p@g@agent [message] ping (m1)',
+        **M1_FIELDS,
+    }
+    watched = {
+        'level': 'INFO',
+        'message': 'comms: watch p@manager -> p@g@agent [message] ping (m1)',
+        **M1_FIELDS,
+    }
+    command.run('msg', 'watch', ADDRESS, '--interval', '0', '--once').check(
         output='m1  p@manager → p@g@agent  [message] ping', logging=[start, sent, watched, end]
     )

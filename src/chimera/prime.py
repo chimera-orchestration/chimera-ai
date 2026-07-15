@@ -34,9 +34,12 @@ The loop:
 
 Mail: incoming messages are injected at each turn start until acked — `ch msg ack <id>`
 when handled. `ch msg send <address> "<subject>" "<body>"` reaches any actor
-(`{persona}`, `<project>@manager`, `<project>@<goal>@agent`). While idle, keep
-`ch msg watch` running under a background monitor so an arriving message wakes you —
-it is read-only and claims nothing.
+(`{persona}`, `<project>@manager`, `<project>@<goal>@agent`). While idle, keep a mail
+watcher armed as a background **task** — `ch msg watch --once` run in the background — so
+mail wakes you even after you've been backgrounded: it blocks until a message arrives,
+then exits, and that exit is the wake. It must be a task, not a monitor: the harness stops
+monitors when you background a session, but a background task carries over. Re-arm it
+whenever it fires. It is read-only and claims nothing.
 
 Context here layers the workspace's `roles/captain/` and `principles/`; every project's
 `knowledge/` is indexed to read on demand — save workspace-wide learnings to `knowledge/`.
@@ -65,9 +68,12 @@ The loop:
 
 Mail: incoming messages are injected at each turn start until acked — `ch msg ack <id>`
 when handled. `ch msg send <address> "<subject>" "<body>"` reaches your agents
-(`{project}@<goal>@agent`) and the captain. While idle, keep `ch msg watch` running
-under a background monitor so an arriving message wakes you — it is read-only and
-claims nothing.
+(`{project}@<goal>@agent`) and the captain. While idle, keep a mail watcher armed as a
+background **task** — `ch msg watch --once` run in the background — so mail wakes you even
+after you've been backgrounded: it blocks until a message arrives, then exits, and that
+exit is the wake. It must be a task, not a monitor — the harness stops monitors when a
+session is backgrounded, but a background task carries over. Re-arm it whenever it fires.
+It is read-only and claims nothing.
 
 Context layers workspace then project — `roles/manager/` and `principles/` inline whole;
 {project}'s `knowledge/` is indexed to read on demand — save what you learn there.
@@ -88,9 +94,12 @@ one-shot read-only agent there and returns its report.
 
 Mail: messages from your manager are injected at each turn start until acked —
 `ch msg ack <id>` when handled. Reply or escalate with
-`ch msg send <address> "<subject>" "<body>"`. While idle, keep `ch msg watch` running
-under a background monitor so an arriving message wakes you — it is read-only and
-claims nothing.
+`ch msg send <address> "<subject>" "<body>"`. While idle, keep a mail watcher armed as a
+background **task** — `ch msg watch --once` run in the background — so mail wakes you even
+after you've been backgrounded: it blocks until a message arrives, then exits, and that
+exit is the wake. It must be a task, not a monitor — the harness stops monitors when a
+session is backgrounded, but a background task carries over. Re-arm it whenever it fires.
+It is read-only and claims nothing.
 
 Context layers workspace then project — `roles/agent/` and `principles/` inline whole;
 {project}'s `knowledge/` is indexed to read on demand — save what you learn there.

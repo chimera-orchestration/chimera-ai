@@ -1770,9 +1770,18 @@ def msg_watch(
     interval: Annotated[
         float, typer.Option('--interval', help='Seconds between inbox polls')
     ] = 1.0,
+    once: Annotated[
+        bool,
+        typer.Option(
+            '--once',
+            help='Exit after the first new message, instead of streaming forever. Run in '
+            'the background as a task so its exit wakes a session even after backgrounding '
+            '(a monitor, which the harness stops on backgrounding, cannot); re-arm on wake.',
+        ),
+    ] = False,
 ) -> None:
     who = address if address is not None else caller(Path.cwd())
-    feed = _msg_watch(resolve_workspace(Path.cwd()), who, interval=interval)
+    feed = _msg_watch(resolve_workspace(Path.cwd()), who, interval=interval, once=once)
     try:
         for message in feed:  # typer.echo flushes per line — the line-buffered contract
             typer.echo(_msg_line(message))
@@ -1838,9 +1847,25 @@ def hook_session_end() -> None:
     'deliver', cls=LoggingCommand, help='Surface unacked mail to a session (UserPromptSubmit hook).'
 )
 @logs(_hook_deliver)
-def hook_deliver() -> None:
+def hook_deliver(
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            '--verbose',
+            '-v',
+            help='Log a per-call session-identity diagnostic (session id, cwd, resolved '
+            'address, whether the archive knew the session). Off by default to keep the '
+            'mail log quiet. Add it to the hook command line in settings.json when a '
+            'backgrounded session stops waking or gets the wrong mail: it reveals a bridge '
+            '— an interactively-backgrounded session re-hosted under a new, unrecorded id '
+            'that ch agent ls/resume no longer track.',
+        ),
+    ] = False,
+) -> None:
     payload = json.load(sys.stdin)
-    delivered = _hook_deliver(Path(str(payload['cwd'])), str(payload['session_id']))
+    delivered = _hook_deliver(
+        Path(str(payload['cwd'])), str(payload['session_id']), verbose=verbose
+    )
     if delivered:
         typer.echo(_msg_as_context(delivered))
 

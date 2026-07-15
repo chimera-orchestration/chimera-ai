@@ -12,7 +12,12 @@ from chimera.commands.msg.dispose import dispose
 from chimera.commands.msg.drain import drain
 from chimera.commands.msg.store import mail
 from chimera.comms import Message
-from tests.cli import Command, Run, action_logs
+from tests.cli import Command, Run, action_logs, full_capture
+
+BRIDGE = (
+    'hook deliver: no archive row for this session — bridged (a backgrounded session '
+    're-hosted under a new id) or pre-hook; delivering by cwd address'
+)
 
 NOON = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
 DELIVER = 'chimera.commands.hook.deliver.deliver'
@@ -80,6 +85,53 @@ def test_deliver_skips_a_session_archived_without_an_address(
     assert [m.id for m in deliver(ws, 'uuid-chat')] == ['m1']  # the real session still gets it
 
 
+def test_verbose_flags_an_unrecorded_bridged_session(tmpdir: TempDir, replace: Replacer) -> None:
+    # a session id the archive never saw is the bridge signature; it is still delivered to
+    # (fail-open by cwd), and -v records exactly what we need to spot the bridge in the log
+    ws = _ws(tmpdir, replace)
+    _seed(ws, 'm1')
+    with full_capture() as log:
+        assert [m.id for m in deliver(ws, 'bridged-uuid', verbose=True)] == ['m1']
+    log.check_present(
+        {
+            'level': 'DEBUG',
+            'message': BRIDGE,
+            'session': 'bridged-uuid',
+            'cwd': str(ws),
+            'address': ADDRESS,
+            'recorded': False,
+            'recorded_name': None,
+        }
+    )
+
+
+def test_verbose_names_a_session_the_archive_knows(tmpdir: TempDir, replace: Replacer) -> None:
+    ws = _ws(tmpdir, replace)
+    session_start(ws, 'uuid-1', '/t.jsonl', 'startup')  # recorded, addressed
+    _seed(ws, 'm1')
+    with full_capture() as log:
+        deliver(ws, 'uuid-1', verbose=True)
+    log.check_present(
+        {
+            'level': 'DEBUG',
+            'message': 'hook deliver: session resolved from the archive',
+            'session': 'uuid-1',
+            'cwd': str(ws),
+            'address': ADDRESS,
+            'recorded': True,
+            'recorded_name': ADDRESS,
+        }
+    )
+
+
+def test_no_diagnostic_without_verbose(tmpdir: TempDir, replace: Replacer) -> None:
+    ws = _ws(tmpdir, replace)
+    _seed(ws, 'm1')
+    with full_capture() as log:
+        deliver(ws, 'bridged-uuid')  # default: quiet, since it fires every turn
+    assert not any(str(e.get('message', '')).startswith('hook deliver:') for e in log.actual())
+
+
 def test_deliver_outside_a_workspace_is_a_noop(tmpdir: TempDir, replace: Replacer) -> None:
     replace.in_environ('CHIMERA_SESSION', ADDRESS)
     assert deliver(tmpdir.path / 'nowhere', 'uuid-x') == []
@@ -98,7 +150,7 @@ def test_hook_deliver_cli_injects_a_block(
     ws = _ws(tmpdir, replace)
     _seed(ws, 'm1')
     drain(ws, ADDRESS)  # even a third-party claim doesn't silence the injection
-    start, end = action_logs('hook deliver', DELIVER, {})
+    start, end = action_logs('hook deliver', DELIVER, {'verbose': False})
     delivered = {
         'level': 'INFO',
         'message': 'comms: deliver p@manager -> p@g@agent [message] ping (m1)',
@@ -130,5 +182,5 @@ def test_hook_deliver_cli_is_silent_once_seen(
     _seed(ws, 'm1')
     deliver(ws, 'uuid-1')
     _run_hook(command, replace, ws, 'uuid-1').check(
-        output='', logging=action_logs('hook deliver', DELIVER, {})
+        output='', logging=action_logs('hook deliver', DELIVER, {'verbose': False})
     )

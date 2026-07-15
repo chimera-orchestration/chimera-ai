@@ -12,6 +12,16 @@ session its SessionStart recorded without one (a one-shot ``claude -p`` — see
 ``capture.addressed``) shares a cwd with real conversations, so ``caller(cwd)`` would
 happily hand it their mail. A session the archive has no row for still gets its mail —
 a real chat must not go silent because a hook misfired.
+
+``verbose`` gates a per-call diagnostic line (off by default — this fires on every turn
+of every session, so silence is the norm). It exists for the one behaviour we can only
+observe in the field: backgrounding an interactive session *bridges* it onto a fresh
+``native_id`` that SessionStart never records, so it reaches this hook as an id the
+archive has never seen (``recorded=False``). That is invisible to ``ch agent ls`` and
+``ch agent resume``, which still resolve the pre-bridge id — so when a backgrounded
+session stops waking, or gets the wrong mail, turning ``-v`` on at the hook (in the
+settings.json command line) records session id, cwd, resolved address and whether the
+archive knew the session, which is enough to spot a bridge from the log alone.
 """
 
 from pathlib import Path
@@ -25,12 +35,13 @@ from chimera.config import NotInWorkspaceError
 from chimera.context import caller, resolve_workspace
 
 
-def deliver(cwd: Path, session: str) -> list[Message]:
+def deliver(cwd: Path, session: str, *, verbose: bool = False) -> list[Message]:
     """The unacked messages for ``cwd``'s address not yet seen by ``session``, claiming them.
 
     The hook fires for every session on the machine; outside any workspace there is no
     mailbox to read, and a session archived without a mail address gets none — those are
-    the no-ops.
+    the no-ops. ``verbose`` emits the session-identity diagnostic described in the module
+    docstring; it is off by default because it fires on every turn of every session.
     """
     try:
         workspace = resolve_workspace(cwd)
@@ -39,6 +50,19 @@ def deliver(cwd: Path, session: str) -> list[Message]:
         return []
     with archive(workspace) as store:
         recorded = store.session('claude', session)
+    if verbose:
+        logger.bind(
+            session=session,
+            cwd=str(cwd),
+            address=address,
+            recorded=recorded is not None,
+            recorded_name=recorded.name if recorded is not None else None,
+        ).debug(
+            'hook deliver: no archive row for this session — bridged (a backgrounded '
+            'session re-hosted under a new id) or pre-hook; delivering by cwd address'
+            if recorded is None
+            else 'hook deliver: session resolved from the archive'
+        )
     if recorded is not None and recorded.name is None:
         logger.bind(session=session).info('hook deliver: unaddressed session, no mail')
         return []

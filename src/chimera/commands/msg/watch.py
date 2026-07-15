@@ -31,13 +31,17 @@ def watch(
     address: str,
     *,
     interval: float,
+    once: bool = False,
     sleep: Callable[[float], None] | None = None,
 ) -> Iterator[Message]:
-    """Yield each message newly appearing in ``address``'s inbox, oldest first, forever.
+    """Yield each message newly appearing in ``address``'s inbox, oldest first.
 
     Messages already in the inbox when the watch starts are the baseline — never yielded;
-    every later arrival is yielded exactly once. ``sleep`` (default ``time.sleep``) is the
-    injectable pause between polls.
+    every later arrival is yielded exactly once. Runs forever unless ``once`` is set, when
+    it returns after the first new arrival — the mode a background-task wake needs, since a
+    task notifies on process *exit* (a monitor, which the harness stops when a session is
+    backgrounded, notifies per line and never exits). ``sleep`` (default ``time.sleep``) is
+    the injectable pause between polls.
     """
     box = mail(workspace)
     seen = {message.id for message in box.inbox(address)}
@@ -47,4 +51,6 @@ def watch(
                 seen.add(message.id)
                 log_action('watch', message)
                 yield message
+                if once:
+                    return
         (sleep or time.sleep)(interval)
