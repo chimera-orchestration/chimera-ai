@@ -1774,9 +1774,10 @@ def msg_watch(
         bool,
         typer.Option(
             '--once',
-            help='Exit after the first new message, instead of streaming forever. Run in '
-            'the background as a task so its exit wakes a session even after backgrounding '
-            '(a monitor, which the harness stops on backgrounding, cannot); re-arm on wake.',
+            help='Exit as soon as undelivered mail exists — mail already waiting counts, '
+            'so arming late never strands a message. Run in the background as a task so '
+            'its exit wakes a session even after backgrounding (a monitor, which the '
+            'harness stops on backgrounding, cannot); re-arm on wake.',
         ),
     ] = False,
 ) -> None:

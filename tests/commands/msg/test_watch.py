@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
+from testfixtures.mock import Mock
 
 from chimera.commands.msg.dispose import dispose
 from chimera.commands.msg.drain import drain
@@ -46,7 +47,7 @@ def _seed(ws: Path, id: str, subject: str = 'ping') -> None:
     )
 
 
-def _watch(ws: Path, *between_polls) -> list[str]:
+def _watch(ws: Path, *between_polls, once: bool = False) -> list[str]:
     """The ids a watch emits, running each callable between polls, then ending."""
     steps = iter(between_polls)
 
@@ -58,7 +59,7 @@ def _watch(ws: Path, *between_polls) -> list[str]:
 
     emitted: list[str] = []
     with ShouldRaise(Enough):
-        for message in watch(ws, ADDRESS, interval=0, sleep=sleep):
+        for message in watch(ws, ADDRESS, interval=0, once=once, sleep=sleep):
             emitted.append(message.id)
     return emitted
 
@@ -101,7 +102,9 @@ def test_never_claims(tmpdir: TempDir) -> None:
     assert [m.id for m in mail(ws).inbox(ADDRESS, unread_only=True)] == ['m1']  # still in new/
 
 
-def test_once_returns_after_the_first_arrival_without_a_further_poll(tmpdir: TempDir) -> None:
+def test_once_returns_after_the_first_poll_with_mail_without_a_further_poll(
+    tmpdir: TempDir,
+) -> None:
     ws = tmpdir.path
     polls = iter([lambda: (_seed(ws, 'm1'), _seed(ws, 'm2'))])  # both land before the poll
 
@@ -109,7 +112,29 @@ def test_once_returns_after_the_first_arrival_without_a_further_poll(tmpdir: Tem
         next(polls)()  # a second poll would StopIteration — proof `once` didn't stop
 
     emitted = [m.id for m in watch(ws, ADDRESS, interval=0, once=True, sleep=sleep)]
-    compare(emitted, expected=['m1'])  # only the first, and it returned cleanly
+    compare(emitted, expected=['m1', 'm2'])  # everything undelivered, then a clean return
+
+
+def test_once_exits_immediately_on_mail_already_waiting(tmpdir: TempDir) -> None:
+    # the arm-window race: mail landing mid-turn (after the delivery hook ran) is already
+    # in new/ when the wake turn re-arms — a baseline would swallow it and the session
+    # would idle deaf; undelivered mail must trigger even when it predates the watcher
+    ws = tmpdir.path
+    _seed(ws, 'm0')
+    sleep = Mock()
+    emitted = [m.id for m in watch(ws, ADDRESS, interval=0, once=True, sleep=sleep)]
+    compare(emitted, expected=['m0'])
+    assert sleep.call_count == 0  # exited on what was waiting — never polled at all
+    assert [m.id for m in mail(ws).inbox(ADDRESS, unread_only=True)] == ['m0']  # never claims
+
+
+def test_once_does_not_trigger_on_drained_unacked_mail(tmpdir: TempDir) -> None:
+    # cur/ is drained-but-unacked: the delivery ledger re-surfaces it at every session's
+    # next turn already, so waking on it would loop wake → deliver → re-arm → wake
+    ws = tmpdir.path
+    _seed(ws, 'm0')
+    drain(ws, ADDRESS)
+    compare(_watch(ws, once=True), expected=[])  # one quiet poll, then Enough ends it
 
 
 def test_line_carries_id_parties_kind_and_subject(tmpdir: TempDir) -> None:
