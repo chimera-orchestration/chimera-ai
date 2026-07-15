@@ -157,7 +157,7 @@ class TestMain:
         with ShouldRaise(SystemExit(0)):
             main()
         # same styling caveat as above — assert on the help text, not the flag itself.
-        assert 'Skip the live-agent check' in capsys.readouterr().out
+        assert 'Stop any live agent sessions' in capsys.readouterr().out
 
 
 class TestStripToRole:

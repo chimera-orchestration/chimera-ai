@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -167,8 +167,8 @@ WorktreeForceOpt = Annotated[
     bool,
     typer.Option(
         '--force',
-        help='Skip the live-agent check, dirty/unmerged safety checks, and fetch; '
-        'discards uncommitted or unmerged work',
+        help='Stop any live agent sessions, skip the dirty/unmerged safety checks and '
+        'fetch; discards uncommitted or unmerged work',
     ),
 ]
 ProjectForceOpt = Annotated[
@@ -1184,11 +1184,9 @@ def worktree_rm(
 ) -> None:
     p = _project(ctx, project)
     dry_run = Dry(dry)
-    _report_removed(
-        _worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline, dry=dry_run),
-        goal,
-        dry_run,
-    )
+    result = _worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline, dry=dry_run)
+    _report_stopped(result.stopped, dry_run)
+    _report_removed(list(result.removed), goal, dry_run)
 
 
 @worktree_app.command('ls', cls=LoggingCommand, help="List a project's worktrees.")
@@ -1411,8 +1409,7 @@ def goal_merge(
     for landed in result.landed:
         verb = dry_run.verb('Checked out', 'Would check out')
         typer.echo(f'{verb} {landed.branch} at {landed.where} (was {landed.was})')
-    for session in result.stopped:
-        typer.echo(f'{dry_run.verb("Stopped", "Would stop")} {session.name} (pid {session.pid})')
+    _report_stopped(result.stopped, dry_run)
     _report_removed(list(result.removed), goal, dry_run)
 
 
@@ -1475,11 +1472,9 @@ def goal_finish(
 ) -> None:
     p = _project(ctx, project)
     dry_run = Dry(dry)
-    _report_removed(
-        _worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline, dry=dry_run),
-        goal,
-        dry_run,
-    )
+    result = _worktree_remove(p.repo, p.worktrees, goal, force, fetch=not offline, dry=dry_run)
+    _report_stopped(result.stopped, dry_run)
+    _report_removed(list(result.removed), goal, dry_run)
 
 
 @goal_app.command('ls', cls=LoggingCommand, help='List goals.')
@@ -1582,8 +1577,7 @@ def agent_stop(
     worktree = worktree_path(p.worktrees, g, a)
     dry_run = Dry(dry)
     stopped = _agent_stop(worktree, dry_run)
-    for session in stopped:
-        typer.echo(f'{dry_run.verb("Stopped", "Would stop")} {session.name} (pid {session.pid})')
+    _report_stopped(stopped, dry_run)
     if not stopped:
         typer.echo(f'No live agent in {worktree}')
 
@@ -1853,6 +1847,12 @@ def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
         typer.echo(f'{verb} {worktree}')
     if not removed:
         typer.echo(f'Nothing to remove for {goal}')
+
+
+def _report_stopped(stopped: Sequence[Session], dry: Dry = Dry()) -> None:
+    verb = dry.verb('Stopped', 'Would stop')
+    for session in stopped:
+        typer.echo(f'{verb} {session.name} (pid {session.pid})')
 
 
 def _strip_restricted_options(command: Command) -> None:

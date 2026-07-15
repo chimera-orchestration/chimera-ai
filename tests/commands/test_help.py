@@ -32,8 +32,8 @@ def test_finish_entry_is_fully_derived() -> None:
             options=(
                 OptionEntry(
                     signature='--force',
-                    help='Skip the live-agent check, dirty/unmerged safety checks, and fetch; '
-                    'discards uncommitted or unmerged work',
+                    help='Stop any live agent sessions, skip the dirty/unmerged safety checks '
+                    'and fetch; discards uncommitted or unmerged work',
                 ),
                 OptionEntry(
                     signature='--offline',
