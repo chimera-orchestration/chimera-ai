@@ -9,7 +9,7 @@ from loguru import logger
 from chimera.agent_env import ai_session
 from chimera.agents import Session
 from chimera.agents.registry import AGENTS, AgentSpec
-from chimera.commands.hook.capture import archive
+from chimera.archive import archive
 from chimera.config import NotInWorkspaceError, UserError
 from chimera.context import Scope, resolve_workspace
 from chimera.dry import Dry

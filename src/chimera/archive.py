@@ -363,6 +363,11 @@ class Archive:
         return [_row_to_session(row) for row in rows]
 
 
+def archive(workspace: Path) -> Archive:
+    """The workspace's session archive, at ``state/archive.db``."""
+    return Archive.open(workspace / 'state' / 'archive.db')
+
+
 def _filters(
     *,
     platform: str | None,

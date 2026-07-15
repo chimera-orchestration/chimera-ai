@@ -18,7 +18,8 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.agent_env import session_role
-from chimera.archive import Archive, Event, Session
+from chimera.archive import Event, Session, archive
+from chimera.commands.agent import live
 from chimera.config import NotInWorkspaceError
 from chimera.context import caller, resolve_scope
 from chimera.worktrees import SEP, session_name
@@ -30,11 +31,6 @@ PRINT_ENTRYPOINT = 'sdk-cli'
 gets ``cli``). Undocumented but field-verified: claude stamps it into its own process
 per-mode, so a ``-p`` spawned from inside a session never inherits the parent's value.
 See ``knowledge/claude-session-type-signals.md`` for the full signal matrix."""
-
-
-def archive(workspace: Path) -> Archive:
-    """The workspace's session archive, at ``state/archive.db``."""
-    return Archive.open(workspace / 'state' / 'archive.db')
 
 
 def addressed(agent_type: str | None, entrypoint: str | None) -> bool:
@@ -57,7 +53,7 @@ def session_start(
     source: str,
     agent_type: str | None = None,
     entrypoint: str | None = None,
-) -> None:
+) -> str | None:
     """Record a starting session from a SessionStart hook. No-op outside any workspace.
 
     A ``resume``/``clear`` firing lands on the session's existing row (``started_at``
@@ -66,10 +62,14 @@ def session_start(
     payload) and ``entrypoint`` (``$CLAUDE_CODE_ENTRYPOINT``) decide whether the session
     is :func:`addressed`: one that isn't is still recorded — cwd, transcript and the
     location axes — but with no name and no actor, so no mail routes to it.
+
+    Returns the :func:`occupied` warning for the starting session's context when it is
+    a conversation entering a goal worktree another session is already live in, else
+    ``None``.
     """
     axes = _axes(cwd)
     if axes is None:
-        return
+        return None
     workspace, project, goal, actor = axes
     mail = addressed(agent_type, entrypoint)
     if not mail:
@@ -105,6 +105,39 @@ def session_start(
         store.record_event(
             Event(at=now, kind=source or 'startup', platform='claude', native_id=session_id)
         )
+    if mail and goal is not None and actor is not None:
+        return occupied(cwd, session_id)
+    return None
+
+
+def occupied(worktree: Path, session_id: str) -> str | None:
+    """The loud warning for a session entering a goal worktree another session is live
+    in, or ``None`` when the worktree is free.
+
+    The exclusive-launch guard's reach into launches chimera never makes: ``ch``'s own
+    launchers refuse an occupied worktree up front, but a harness-native attach or
+    revive — the ``claude agents`` browser, a raw ``claude --resume`` run in the
+    worktree — first touches chimera *here*, already starting, too late to refuse. So
+    the hook warns instead: the returned text is injected into the starting session's
+    context, telling it before its first turn, and a WARNING (occupant ids bound) lands
+    in the log. The starting session's own registry entry is excluded by id. Only goal
+    worktrees are policed — one writer per branch is their invariant; a chat
+    deliberately sits alongside whatever else its scope's cwd is running.
+    """
+    occupants = [s for s in live(worktree) if not session_id.startswith(s.short)]
+    if not occupants:
+        return None
+    named = ', '.join(f'{s.short} ({s.status})' for s in occupants)
+    logger.bind(
+        session_id=session_id, occupants=[s.id for s in occupants], cwd=str(worktree)
+    ).warning(f'hook session-start: worktree occupied by {named}')
+    return (
+        f'WARNING: another agent session is already live in this worktree: {named}. '
+        f'Two sessions sharing one worktree write over each other and its branch ends up '
+        f'with commits neither made. Do not write, commit, or continue goal work here — '
+        f'surface this to the user immediately: one session must stop (`ch agent stop`, '
+        f'or exit the other) before work continues.'
+    )
 
 
 def session_end(cwd: Path, session_id: str, reason: str) -> None:

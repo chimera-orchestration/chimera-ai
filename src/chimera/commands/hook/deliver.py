@@ -18,7 +18,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from chimera.commands.hook.capture import archive
+from chimera.archive import archive
 from chimera.commands.msg.store import mail
 from chimera.comms import Message
 from chimera.config import NotInWorkspaceError
