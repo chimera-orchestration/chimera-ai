@@ -4,7 +4,15 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.git import HTTP_TIMEOUTS, SSH_COMMAND, Git, _env, remote_repo, remote_slug
+from chimera.git import (
+    HTTP_TIMEOUTS,
+    SSH_COMMAND,
+    Git,
+    _env,
+    remote_repo,
+    remote_slug,
+    sibling_url,
+)
 
 
 def _trace() -> LogCapture:
@@ -170,6 +178,23 @@ def test_remote_slug_shapes() -> None:
     compare(remote_slug('ssh://git@github.com/Owner/Repo.git'), expected='owner/repo')
     compare(remote_slug('file:///Users/me/repos/fork.git'), expected='')  # a path, not an owner
     compare(remote_slug('/Users/me/repos/fork'), expected='')
+
+
+def test_sibling_url_shapes() -> None:
+    compare(
+        sibling_url('git@github.com:Owner/Repo.git', 'alice/fork'),
+        expected='git@github.com:alice/fork.git',
+    )
+    compare(
+        sibling_url('https://github.com/Owner/Repo', 'alice/fork'),
+        expected='https://github.com/alice/fork',
+    )
+    compare(
+        sibling_url('ssh://git@ghe.corp.example/Team/Proj.git', 'alice/fork'),
+        expected='ssh://git@ghe.corp.example/alice/fork.git',
+    )
+    compare(sibling_url('/Users/me/repos/fork', 'alice/fork'), expected='')  # no host to keep
+    compare(sibling_url('file:///Users/me/repos/fork.git', 'alice/fork'), expected='')
 
 
 def test_remote_repo_shapes() -> None:

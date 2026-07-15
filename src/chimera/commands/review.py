@@ -14,7 +14,7 @@ from chimera.commands.agent import agent
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
 from chimera.dry import Dry
-from chimera.git import Git, remote_slug, repo_slug
+from chimera.git import Git, remote_slug, repo_slug, sibling_url
 from chimera.worktrees import (
     ACTORS,
     AGENT,
@@ -34,8 +34,14 @@ GUARDRAIL = (
     "`/code-review --comment`. Publishing is the human's decision.\n\n"
 )
 
-# The JSON gh resolves for us; headRefOid is the authoritative head commit (see _wire_upstream).
-_PR_FIELDS = 'number,headRefOid,baseRefName,title,url,isCrossRepository,state,headRepositoryOwner'
+# The JSON gh resolves for us; headRefOid is the authoritative head commit (see _fetch_head).
+_PR_FIELDS = (
+    'number,headRefOid,headRefName,baseRefName,title,url,'
+    'isCrossRepository,maintainerCanModify,state,headRepository,headRepositoryOwner'
+)
+
+# gh viewerPermission values that carry push access — what a maintainer-edit push requires.
+_PUSH_PERMISSIONS = frozenset({'ADMIN', 'MAINTAIN', 'WRITE'})
 
 
 def review(
@@ -55,9 +61,11 @@ def review(
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
 
-    Resolves the PR through ``gh`` (authoritative ``headRefOid``), wires ``refs/pull/<N>/head``
-    in as the ``origin/pr/<N>`` tracking ref, branches ``<goal>/{human,agent}`` off the verified
-    head with that ref as upstream, and launches the agent on a review prompt — the project's
+    Resolves the PR through ``gh`` (authoritative ``headRefOid``), wires a tracking ref the
+    goal's branches can push back to the PR through where possible (see ``_wire_tracking`` —
+    the PR's real branch on origin or its fork, falling back to the read-only
+    ``refs/pull/<N>/head``), branches ``<goal>/{human,agent}`` off the verified head with that
+    ref as upstream, and launches the agent on a review prompt — the project's
     ``prompts/review.md`` if present, else the packaged default, both behind a no-publish
     guardrail. ``into`` optionally lands the human branch in place (see ``checkout_here``).
 
@@ -92,8 +100,7 @@ def review(
     _check_pr_repo(git, meta['url'], project)
     number, head_oid = int(str(meta['number'])), str(meta['headRefOid'])
     goal = f'pr-{number}'
-    tracking = f'origin/pr/{number}'
-    dry(_wire_upstream, git, number, head_oid, tracking)
+    tracking = _wire_tracking(git, repo, meta, dry)
     agent_worktree = worktree_path(worktrees_root, goal, AGENT)
     with git.ref_log(
         'review: refs',
@@ -207,16 +214,158 @@ def _check_pr_repo(git: Git, url: object, project: str) -> None:
         )
 
 
-def _wire_upstream(git: Git, number: int, head_oid: str, tracking: str) -> str:
+def _wire_tracking(git: Git, repo: Path, meta: dict[str, object], dry: Dry) -> str:
+    """The tracking ref for the goal's branches: the PR's real branch when pushable, else its ref.
+
+    Picks, in order: origin's own head branch (a same-repo PR — write access to origin is write
+    access to the PR); the fork's head branch when the PR grants maintainer edits and the viewer
+    has write on origin (the fork lands as a named remote — see ``_wire_fork``); else the
+    read-only ``refs/pull/<N>/head``, which always exists and outlives a deleted fork or branch.
+    A branch tracking the real head is one a human can push back to the PR from — the name
+    mismatch (``pr-<N>/human`` vs the head branch) still makes bare ``git push`` refuse, but
+    git's refusal prints the exact ``git push <remote> HEAD:<branch>`` to run, instead of
+    silently minting a junk branch. Every choice lands a ``review: tracking`` line, at WARNING
+    when it's a degraded fallback.
+
+    The decision itself is read-only (``git ls-remote`` probes, never a fetch) and always runs
+    for real, dry or not — only the fetch/config that *acts* on the decision routes through
+    ``dry`` — so a preview names the exact same tracking ref the real run would wire, never an
+    optimistic guess a real run could then contradict.
+    """
+    number, head_ref = int(str(meta['number'])), str(meta['headRefName'])
+    head_oid, pr_ref = str(meta['headRefOid']), f'origin/pr/{number}'
+
+    def decided(tracking: str, reason: str, degraded: bool = False) -> str:
+        line = logger.bind(tracking=tracking, reason=reason)
+        (line.warning if degraded else line.info)('review: tracking')
+        return tracking
+
+    def fallback(reason: str, degraded: bool = False) -> str:
+        dry(_wire_pr_ref, git, number, head_oid, pr_ref)
+        return decided(pr_ref, reason, degraded)
+
+    if not meta['isCrossRepository']:
+        if _remote_head_oid(git, 'origin', head_ref) != head_oid:
+            return fallback('head branch not on origin', degraded=True)
+        dry(_fetch_head, git, 'origin', head_ref, f'origin/{head_ref}', head_oid, number)
+        return decided(f'origin/{head_ref}', 'same-repo head branch')
+    if not meta['maintainerCanModify']:
+        return fallback('fork PR without maintainer edits')
+    if not _viewer_can_push(repo):
+        return fallback('no write access to origin')
+    login = _nested(meta, 'headRepositoryOwner', 'login')
+    name = _nested(meta, 'headRepository', 'name')
+    slug = f'{login}/{name}'
+    url = sibling_url(git('remote', 'get-url', 'origin').strip(), slug) if login and name else ''
+    if not url:
+        return fallback('fork identity unknown', degraded=True)
+    if _remote_head_oid(git, url, head_ref) != head_oid:
+        return fallback('fork branch not reachable at the expected head', degraded=True)
+    _check_remote(git, login, url, slug)  # a colliding remote refuses, under --dry too
+    dry(_wire_fork, git, login, url, head_ref, f'{login}/{head_ref}', head_oid, number)
+    return decided(f'{login}/{head_ref}', 'maintainer-editable fork')
+
+
+def _remote_head_oid(git: Git, source: str, head_ref: str) -> str | None:
+    """The sha ``source`` has at ``refs/heads/<head_ref>``, or ``None`` if absent/unreachable.
+
+    A read-only probe (``git ls-remote``, by name or URL) that never mutates anything — the
+    discovery step ``_wire_tracking`` needs to decide the tracking ref the same way whether or
+    not this is a dry run.
+    """
+    try:
+        output = git('ls-remote', source, f'refs/heads/{head_ref}').strip()
+    except GitError:
+        return None
+    return output.split('\t', 1)[0] if output else None
+
+
+def _nested(meta: dict[str, object], key: str, field: str) -> str:
+    """``meta[key][field]`` as a string; '' when the object is missing (a deleted fork)."""
+    value = meta.get(key)
+    return str(value.get(field) or '') if isinstance(value, dict) else ''
+
+
+def _viewer_can_push(repo: Path) -> bool:
+    """Whether the gh viewer has write access to origin — what a maintainer-edit push requires.
+
+    Failing to ask (gh offline, auth) degrades to False with a warning: the read-only PR ref
+    still reviews fine, while a fork branch wired as pushable would just promise a push the
+    server will refuse.
+    """
+    result = subprocess.run(
+        ['gh', 'repo', 'view', '--json', 'viewerPermission'],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.bind(stderr=result.stderr.strip()).warning('review: viewer permission unknown')
+        return False
+    return str(json.loads(result.stdout).get('viewerPermission')) in _PUSH_PERMISSIONS
+
+
+def _check_remote(git: Git, remote: str, url: str, slug: str) -> None:
+    """Refuse when ``remote`` already exists but names something other than the fork.
+
+    An existing remote for the fork — accreted by a previous PR from the same contributor —
+    is fine whatever URL shape it uses (ssh where we derived https, say): the slugs match.
+    """
+    if remote not in git('remote').split():
+        return
+    existing = git('remote', 'get-url', remote).strip()
+    if existing != url and remote_slug(existing) != slug.lower():
+        raise UserError(
+            f"remote '{remote}' already points at {existing}, not {slug} — "
+            f'rename or remove it first'
+        )
+
+
+def _wire_fork(
+    git: Git, remote: str, url: str, head_ref: str, tracking: str, head_oid: str, number: int
+) -> None:
+    """Fetch the fork's head branch as ``tracking`` and, once that succeeds, persist ``remote``.
+
+    Fetching by URL before the remote exists is the crash-safety (``_wire_pr_ref``'s pattern):
+    a dead or foreign fork never lands a remote pointing at it. The remote then accretes
+    deliberately — never swept, it keeps paying off on the contributor's next PR (an existing
+    one has already passed ``_check_remote``, so it's fetched by name and left untouched).
+    """
+    known = remote in git('remote').split()
+    _fetch_head(git, remote if known else url, head_ref, tracking, head_oid, number)
+    if not known:
+        git('remote', 'add', remote, url)
+        logger.bind(remote=remote, url=url).info('review: remote add')
+
+
+def _fetch_head(
+    git: Git, source: str, head_ref: str, tracking: str, head_oid: str, number: int
+) -> None:
+    """Fetch ``refs/heads/<head_ref>`` from ``source`` as ``tracking``, verified as ``head_oid``.
+
+    Trusts gh's ``headRefOid`` as the source of truth — a mismatch means a stale fetch (or a
+    PR that moved mid-command) and is refused; a re-run resolves either.
+    """
+    git('fetch', source, f'+refs/heads/{head_ref}:refs/remotes/{tracking}')
+    _verify(git, number, tracking, head_oid)
+
+
+def _verify(git: Git, number: int, tracking: str, head_oid: str) -> None:
+    if (fetched := git.rev_parse(tracking, short=False)) != head_oid:
+        raise UserError(
+            f'PR #{number}: fetched {tracking} is {fetched}, but gh reports headRefOid {head_oid}'
+        )
+
+
+def _wire_pr_ref(git: Git, number: int, head_oid: str, tracking: str) -> str:
     """Fetch ``refs/pull/<number>/head`` as ``tracking`` and verify it is ``head_oid``.
 
     Fetches the PR head into the tracking ref *first* — a targeted fetch that touches no config —
     then persists the fetch refspec (once, idempotent) so the PR head stays a real remote-tracking
     ref ``git status`` compares against on later fetches. Persisting only *after* a clean fetch is
     the crash-safety: a missing or foreign PR ref (the fetch fails) can't leave a dead refspec in
-    ``remote.origin.fetch`` that bricks every future ``git fetch`` in the repo. Trusts gh's
-    ``headRefOid`` as the source of truth — a mismatch means a stale fetch and is refused. Returns
-    the tracking ref name.
+    ``remote.origin.fetch`` that bricks every future ``git fetch`` in the repo. Returns the
+    tracking ref name.
     """
     spec = f'+refs/pull/{number}/head:refs/remotes/{tracking}'
     git('fetch', 'origin', spec)  # validate + create the ref without mutating config on failure
@@ -226,10 +375,7 @@ def _wire_upstream(git: Git, number: int, head_oid: str, tracking: str) -> str:
         existing = []  # no fetch refspec configured yet
     if spec not in existing:
         git('config', '--add', 'remote.origin.fetch', spec)
-    if (fetched := git.rev_parse(tracking, short=False)) != head_oid:
-        raise UserError(
-            f'PR #{number}: fetched {tracking} is {fetched}, but gh reports headRefOid {head_oid}'
-        )
+    _verify(git, number, tracking, head_oid)
     return tracking
 
 

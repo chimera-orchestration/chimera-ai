@@ -84,6 +84,23 @@ def remote_repo(url: str) -> str:
     return f'{host}/{slug}' if host else ''
 
 
+def sibling_url(url: str, slug: str) -> str:
+    """``url`` with its ``owner/repo`` swapped for ``slug`` — same scheme, host and credentials.
+
+    How a fork's URL is derived from origin's: the fork lives on the same host and answers
+    to the same credentials, only the slug differs. '' when ``url`` carries no hosted
+    identity to swap (a local path), mirroring :func:`remote_slug`.
+    """
+    if not remote_slug(url):
+        return ''
+    text = url.removesuffix('.git')
+    suffix = '.git' if text != url else ''
+    if '://' in text:
+        split = urlsplit(text)
+        return f'{split.scheme}://{split.netloc}/{slug}{suffix}'
+    return f'{text.split(":", 1)[0]}:{slug}{suffix}'  # scp-like git@host:owner/repo
+
+
 def _env(base: Mapping[str, str], caller: dict[str, str] | None) -> dict[str, str]:
     """``base`` (the process environment) plus the timeout defaults it doesn't already set,
     with any ``caller`` overrides merged last."""

@@ -20,41 +20,84 @@ from chimera.commands.review import (
     GUARDRAIL,
     _PR_FIELDS,
     _check_pr_repo,
+    _check_remote,
     _default_template,
     _pr_argument,
     _pr_metadata,
     _prompt,
-    _wire_upstream,
+    _viewer_can_push,
+    _wire_pr_ref,
+    _wire_tracking,
     review,
 )
 from chimera.config import UserError
-from chimera.git import Git
+from chimera.git import Git, sibling_url
 from tests.cli import Command, action_logs
 
 
-def _origin_with_pr(tmpdir: TempDir) -> tuple[Repo, str]:
-    """An origin whose PR #1 head lives only under ``refs/pull/1/head`` (branch deleted)."""
+def _origin_with_pr(tmpdir: TempDir, delete_branch: bool = True) -> tuple[Repo, str]:
+    """An origin with PR #1's head on ``feature``, mirrored at ``refs/pull/1/head`` as
+    GitHub always does. ``delete_branch`` (the default) then drops ``feature`` itself, so the
+    head survives only as the PR ref — the common case once a same-repo PR branch is cleaned up.
+    """
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed')
     origin('checkout', '-q', '-b', 'feature')
     head = origin.commit_content('pr-work', short=False)
     origin('checkout', '-q', 'main')
     origin('update-ref', 'refs/pull/1/head', head)
-    origin('branch', '-q', '-D', 'feature')  # the head survives only as the PR ref
+    if delete_branch:
+        origin('branch', '-q', '-D', 'feature')
     return origin, head
 
 
-def _meta(head: str) -> dict[str, object]:
-    return {
+def _fork_pr(tmpdir: TempDir, delete_branch: bool = False) -> tuple[Repo, Repo, str]:
+    """A cross-repo PR #1: ``fork`` carries the head on ``feature``; ``origin`` mirrors it at
+    ``refs/pull/1/head`` (as GitHub always does, same-repo or not) without ever hosting the
+    branch itself. ``delete_branch`` drops ``feature`` from the fork afterwards, simulating a
+    contributor who deleted their branch post-merge — the PR ref is all that is left.
+    """
+    origin = Repo.make(tmpdir / 'origin')
+    origin.commit_content('seed')
+    fork_path = tmpdir / 'fork'
+    Git.clone(origin.path, fork_path)
+    fork = Repo(fork_path)
+    fork('checkout', '-q', '-b', 'feature')
+    head = fork.commit_content('pr-work', short=False)
+    origin('fetch', '-q', str(fork_path), '+refs/heads/feature:refs/pull/1/head')
+    if delete_branch:
+        fork('checkout', '-q', 'main')
+        fork('branch', '-q', '-D', 'feature')
+    return origin, fork, head
+
+
+def _meta(head: str, **overrides: object) -> dict[str, object]:
+    base: dict[str, object] = {
         'number': 1,
         'headRefOid': head,
+        'headRefName': 'feature',
         'baseRefName': 'main',
         'title': 'Fix the thing',
         'url': 'https://github.com/o/r/pull/1',
         'isCrossRepository': False,
+        'maintainerCanModify': False,
         'state': 'OPEN',
         'headRepositoryOwner': {'login': 'o'},
+        'headRepository': {'name': 'r'},
     }
+    base.update(overrides)
+    return base
+
+
+def _fork_meta(head: str, **overrides: object) -> dict[str, object]:
+    defaults: dict[str, object] = {
+        'isCrossRepository': True,
+        'maintainerCanModify': True,
+        'headRepositoryOwner': {'login': 'alice'},
+        'headRepository': {'name': 'fork'},
+    }
+    defaults.update(overrides)
+    return _meta(head, **defaults)
 
 
 def _stub_meta(replace: Replacer, meta: dict[str, object]) -> None:
@@ -179,6 +222,10 @@ def test_review_logs_the_goal_refs(tmpdir: TempDir, replace: Replacer) -> None:
         review(repo, worktrees, 'proj', tmpdir / 'prompts', '1')
     log.check(
         (
+            'review: tracking',
+            {'tracking': 'origin/pr/1', 'reason': 'head branch not on origin'},
+        ),
+        (
             'review: refs',
             {
                 'goal': 'pr-1',
@@ -302,31 +349,213 @@ def test_pr_metadata_raises_on_gh_failure(tmpdir: TempDir, replace: Replacer) ->
         _pr_metadata(tmpdir.path, '999')
 
 
-def test_wire_upstream_verifies_against_head_oid(tmpdir: TempDir) -> None:
+def test_wire_pr_ref_verifies_against_head_oid(tmpdir: TempDir) -> None:
     repo, head = _cloned(tmpdir)
     git = Git(repo)
-    compare(_wire_upstream(git, 1, head, 'origin/pr/1'), expected='origin/pr/1')
+    compare(_wire_pr_ref(git, 1, head, 'origin/pr/1'), expected='origin/pr/1')
     compare(git.rev_parse('origin/pr/1', short=False), expected=head)
 
 
-def test_wire_upstream_adds_a_refspec_when_none_configured(tmpdir: TempDir) -> None:
+def test_wire_pr_ref_adds_a_refspec_when_none_configured(tmpdir: TempDir) -> None:
     origin, head = _origin_with_pr(tmpdir)
     git = Git(Repo.make(tmpdir / 'r').path)
     git('remote', 'add', 'origin', str(origin.path))
     git('config', '--unset-all', 'remote.origin.fetch')  # no fetch refspec at all
-    compare(_wire_upstream(git, 1, head, 'origin/pr/1'), expected='origin/pr/1')
+    compare(_wire_pr_ref(git, 1, head, 'origin/pr/1'), expected='origin/pr/1')
     compare(git.rev_parse('origin/pr/1', short=False), expected=head)
 
 
-def test_wire_upstream_leaves_config_clean_when_the_pr_ref_is_missing(tmpdir: TempDir) -> None:
+def test_wire_pr_ref_leaves_config_clean_when_the_pr_ref_is_missing(tmpdir: TempDir) -> None:
     repo, head = _cloned(tmpdir)
     git = Git(repo)
     before = git('config', '--get-all', 'remote.origin.fetch')
     with ShouldRaise(GitError, match='refs/pull/9/head'):
-        _wire_upstream(git, 9, head, 'origin/pr/9')  # origin has no PR #9
+        _wire_pr_ref(git, 9, head, 'origin/pr/9')  # origin has no PR #9
     # the failed fetch must not have persisted a dead refspec that bricks future fetches
     compare(git('config', '--get-all', 'remote.origin.fetch'), expected=before)
     git('fetch', '--prune', 'origin')  # proves origin is still fetchable
+
+
+def test_wire_tracking_tracks_the_origin_head_branch_when_reachable(tmpdir: TempDir) -> None:
+    origin, head = _origin_with_pr(tmpdir, delete_branch=False)
+    repo = tmpdir / 'clone'
+    Git.clone(origin.path, repo)
+    git = Git(repo)
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(_wire_tracking(git, repo, _meta(head), Dry()), expected='origin/feature')
+    compare(git.rev_parse('origin/feature', short=False), expected=head)
+    log.check(
+        ('review: tracking', {'tracking': 'origin/feature', 'reason': 'same-repo head branch'}),
+    )
+
+
+def test_wire_tracking_falls_back_when_the_head_branch_is_gone(tmpdir: TempDir) -> None:
+    repo, head = _cloned(tmpdir)  # _origin_with_pr's default: 'feature' deleted post-merge
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(_wire_tracking(Git(repo), repo, _meta(head), Dry()), expected='origin/pr/1')
+    log.check(
+        ('review: tracking', {'tracking': 'origin/pr/1', 'reason': 'head branch not on origin'}),
+    )
+
+
+def test_wire_tracking_falls_back_without_maintainer_edits(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    repo, head = _cloned(tmpdir)
+    unreached = Mock(side_effect=AssertionError('should not be reached'))
+    replace.in_module(_viewer_can_push, unreached, module=review_mod)  # refused before any gh call
+    meta = _fork_meta(head, maintainerCanModify=False)
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(_wire_tracking(Git(repo), repo, meta, Dry()), expected='origin/pr/1')
+    log.check(
+        (
+            'review: tracking',
+            {'tracking': 'origin/pr/1', 'reason': 'fork PR without maintainer edits'},
+        ),
+    )
+
+
+def test_wire_tracking_falls_back_without_push_access(tmpdir: TempDir, replace: Replacer) -> None:
+    repo, head = _cloned(tmpdir)
+    replace.in_module(_viewer_can_push, lambda repo: False, module=review_mod)
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(_wire_tracking(Git(repo), repo, _fork_meta(head), Dry()), expected='origin/pr/1')
+    log.check(
+        ('review: tracking', {'tracking': 'origin/pr/1', 'reason': 'no write access to origin'}),
+    )
+
+
+def test_wire_tracking_falls_back_when_fork_identity_unknown(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    repo, head = _cloned(tmpdir)
+    replace.in_module(_viewer_can_push, lambda repo: True, module=review_mod)
+    meta = _fork_meta(head, headRepository=None)  # the fork was deleted after the PR was opened
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(_wire_tracking(Git(repo), repo, meta, Dry()), expected='origin/pr/1')
+    log.check(
+        ('review: tracking', {'tracking': 'origin/pr/1', 'reason': 'fork identity unknown'}),
+    )
+
+
+def test_wire_tracking_falls_back_when_the_fork_is_unreachable(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    repo, head = _cloned(tmpdir)
+    replace.in_module(_viewer_can_push, lambda repo: True, module=review_mod)
+    replace.in_module(
+        sibling_url, lambda url, slug: str(tmpdir / 'no-such-fork'), module=review_mod
+    )
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(_wire_tracking(Git(repo), repo, _fork_meta(head), Dry()), expected='origin/pr/1')
+    log.check(
+        (
+            'review: tracking',
+            {
+                'tracking': 'origin/pr/1',
+                'reason': 'fork branch not reachable at the expected head',
+            },
+        ),
+    )
+
+
+def test_wire_tracking_falls_back_when_the_fork_branch_is_gone(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    origin, fork, head = _fork_pr(tmpdir, delete_branch=True)
+    repo = tmpdir / 'clone'
+    Git.clone(origin.path, repo)
+    replace.in_module(_viewer_can_push, lambda repo: True, module=review_mod)
+    replace.in_module(sibling_url, lambda url, slug: str(fork.path), module=review_mod)
+    compare(_wire_tracking(Git(repo), repo, _fork_meta(head), Dry()), expected='origin/pr/1')
+
+
+def test_wire_tracking_wires_a_named_remote_for_a_pushable_fork(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    origin, fork, head = _fork_pr(tmpdir)
+    repo = tmpdir / 'clone'
+    Git.clone(origin.path, repo)
+    git = Git(repo)
+    replace.in_module(_viewer_can_push, lambda repo: True, module=review_mod)
+    replace.in_module(sibling_url, lambda url, slug: str(fork.path), module=review_mod)
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(_wire_tracking(git, repo, _fork_meta(head), Dry()), expected='alice/feature')
+    compare(git('remote', 'get-url', 'alice').strip(), expected=str(fork.path))
+    compare(git.rev_parse('alice/feature', short=False), expected=head)
+    log.check(
+        ('review: remote add', {'remote': 'alice', 'url': str(fork.path)}),
+        (
+            'review: tracking',
+            {'tracking': 'alice/feature', 'reason': 'maintainer-editable fork'},
+        ),
+    )
+
+
+def test_wire_tracking_reuses_an_existing_fork_remote(tmpdir: TempDir, replace: Replacer) -> None:
+    origin, fork, head = _fork_pr(tmpdir)
+    repo = tmpdir / 'clone'
+    Git.clone(origin.path, repo)
+    git = Git(repo)
+    replace.in_module(_viewer_can_push, lambda repo: True, module=review_mod)
+    replace.in_module(sibling_url, lambda url, slug: str(fork.path), module=review_mod)
+    compare(_wire_tracking(git, repo, _fork_meta(head), Dry()), expected='alice/feature')
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(_wire_tracking(git, repo, _fork_meta(head), Dry()), expected='alice/feature')
+    compare(git('remote').split().count('alice'), expected=1)  # accreted once, never duplicated
+    log.check(  # no 'review: remote add' the second time — the remote already existed
+        (
+            'review: tracking',
+            {'tracking': 'alice/feature', 'reason': 'maintainer-editable fork'},
+        ),
+    )
+
+
+def test_check_remote_allows_a_matching_remote_by_slug(tmpdir: TempDir) -> None:
+    git = Git(Repo.make(tmpdir / 'r').path)
+    git('remote', 'add', 'alice', 'git@example.com:alice/fork.git')  # ssh where we'd derive https
+    assert _check_remote(git, 'alice', 'https://example.com/alice/fork.git', 'alice/fork') is None
+
+
+def test_check_remote_refuses_a_conflicting_remote(tmpdir: TempDir) -> None:
+    git = Git(Repo.make(tmpdir / 'r').path)
+    git('remote', 'add', 'alice', 'https://example.com/someone-else/other.git')
+    with ShouldRaise(
+        UserError(
+            "remote 'alice' already points at https://example.com/someone-else/other.git, "
+            'not alice/fork — rename or remove it first'
+        )
+    ):
+        _check_remote(git, 'alice', 'https://example.com/alice/fork.git', 'alice/fork')
+
+
+def test_viewer_can_push_true_for_write_access(tmpdir: TempDir, replace: Replacer) -> None:
+    Popen = MockPopen()
+    replace.in_module(subprocess.Popen, Popen)
+    Popen.set_command(
+        'gh repo view --json viewerPermission', stdout=b'{"viewerPermission": "WRITE"}'
+    )
+    assert _viewer_can_push(tmpdir.path) is True
+
+
+def test_viewer_can_push_false_for_read_access(tmpdir: TempDir, replace: Replacer) -> None:
+    Popen = MockPopen()
+    replace.in_module(subprocess.Popen, Popen)
+    Popen.set_command(
+        'gh repo view --json viewerPermission', stdout=b'{"viewerPermission": "READ"}'
+    )
+    assert _viewer_can_push(tmpdir.path) is False
+
+
+def test_viewer_can_push_false_and_warns_when_gh_fails(tmpdir: TempDir, replace: Replacer) -> None:
+    Popen = MockPopen()
+    replace.in_module(subprocess.Popen, Popen)
+    Popen.set_command('gh repo view --json viewerPermission', stderr=b'not logged in', returncode=1)
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        assert _viewer_can_push(tmpdir.path) is False
+    log.check(
+        ('review: viewer permission unknown', {'stderr': 'not logged in'}),
+    )
 
 
 def _repo_with_origin(tmpdir: TempDir, origin_url: str) -> Git:
@@ -455,13 +684,13 @@ class TestPrArgument:
             review(repo, tmpdir / 'wt', 'proj', tmpdir / 'prompts', url)
 
 
-def test_wire_upstream_refuses_a_mismatched_head(tmpdir: TempDir) -> None:
+def test_wire_pr_ref_refuses_a_mismatched_head(tmpdir: TempDir) -> None:
     repo, head = _cloned(tmpdir)
     wrong = '0' * 40
     with ShouldRaise(
         UserError(f'PR #1: fetched origin/pr/1 is {head}, but gh reports headRefOid {wrong}')
     ):
-        _wire_upstream(Git(repo), 1, wrong, 'origin/pr/1')
+        _wire_pr_ref(Git(repo), 1, wrong, 'origin/pr/1')
 
 
 def _project_dir(tmpdir: TempDir, repo: Repo) -> Path:
@@ -487,7 +716,9 @@ def test_review_dry_wires_nothing(tmpdir: TempDir, replace: Replacer) -> None:
         git('config', '--get-all', 'remote.origin.fetch').splitlines(),
         expected=['+refs/heads/*:refs/remotes/origin/*'],
     )
-    log.check_empty()  # no refs changed, so no 'review: refs' line
+    log.check(  # the tracking decision is read-only and still runs (and logs) under --dry…
+        ('review: tracking', {'tracking': 'origin/pr/1', 'reason': 'head branch not on origin'}),
+    )  # …but nothing mutated, so no 'review: refs' line follows it
 
 
 def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command) -> None:
