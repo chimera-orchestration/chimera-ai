@@ -1807,6 +1807,40 @@ class TestClaudeHooks:
         replace.in_module(hook_install.settings_path, lambda: settings)
         compare(_run(ClaudeHooksCheck(), _ws(tmpdir)), expected=[])
 
+    def test_a_hook_with_extra_flags_counts_as_installed(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # `ch hook deliver -v` is deliver's own documented diagnostic toggle: an exact
+        # match would report it missing forever and --fix would wire a bare duplicate
+        # beside it, doubling the hook on every turn
+        settings = tmpdir.path / 'settings.json'
+        installed = hook_install.merge({})
+        installed['hooks']['UserPromptSubmit'] = [
+            {'hooks': [{'type': 'command', 'command': 'ch hook deliver -v'}]}
+        ]
+        hook_install.write(settings, installed)
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        compare(_run(ClaudeHooksCheck(), _ws(tmpdir)), expected=[])
+        prompts = [
+            h['command']
+            for entry in hook_install.merge(hook_install.read(settings))['hooks'][
+                'UserPromptSubmit'
+            ]
+            for h in entry['hooks']
+        ]
+        compare(prompts, expected=['ch hook deliver -v'])  # not doubled by a re-merge
+
+    def test_a_hook_sharing_only_a_word_prefix_does_not_count(self) -> None:
+        # token-wise, not string-prefix: `ch hook deliverance` must not satisfy deliver
+        settings = {
+            'hooks': {
+                'UserPromptSubmit': [
+                    {'hooks': [{'type': 'command', 'command': 'ch hook deliverance'}]}
+                ]
+            }
+        }
+        assert 'UserPromptSubmit' in hook_install.missing_hooks(settings)
+
     def test_missing_hooks_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
         settings = tmpdir.path / '.claude' / 'settings.json'  # absent
         replace.in_module(hook_install.settings_path, lambda: settings)

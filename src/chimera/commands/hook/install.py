@@ -88,5 +88,13 @@ def _sweep(entry: dict[str, Any]) -> bool:
 
 
 def _installed(settings: dict[str, Any], event: str, command: str) -> bool:
+    """Token-prefix match, not equality: a hook carrying extra flags (``ch hook deliver -v``,
+    the documented diagnostic toggle) still counts, so doctor neither re-reports it missing
+    nor appends a bare duplicate beside it."""
+    expected = command.split()
     entries = settings.get('hooks', {}).get(event, [])
-    return any(h.get('command') == command for entry in entries for h in entry.get('hooks', []))
+    return any(
+        str(h.get('command') or '').split()[: len(expected)] == expected
+        for entry in entries
+        for h in entry.get('hooks', [])
+    )
