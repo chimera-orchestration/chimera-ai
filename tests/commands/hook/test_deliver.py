@@ -4,13 +4,14 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from testfixtures import Replacer, TempDir
+from testfixtures import Replacer, TempDir, compare
 
 from chimera.commands.hook.capture import session_start
-from chimera.commands.hook.deliver import deliver
+from chimera.commands.hook.deliver import REARM, Delivery, deliver
 from chimera.commands.msg.dispose import dispose
 from chimera.commands.msg.drain import drain
 from chimera.commands.msg.store import mail
+from chimera.commands.msg.watch import _alive, markers
 from chimera.comms import Message
 from tests.cli import Command, Run, action_logs, full_capture
 
@@ -18,6 +19,11 @@ BRIDGE = (
     'hook deliver: no archive row for this session — bridged (a backgrounded session '
     're-hosted under a new id) or pre-hook; delivering by cwd address'
 )
+UNARMED = {
+    'level': 'INFO',
+    'message': 'hook deliver: watcher unarmed, re-arm requested',
+    'address': 'p@g@agent',
+}
 
 NOON = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
 DELIVER = 'chimera.commands.hook.deliver.deliver'
@@ -46,10 +52,17 @@ def _ws(tmpdir: TempDir, replace: Replacer) -> Path:
     return ws
 
 
+def _arm(ws: Path, replace: Replacer) -> None:
+    """A live watcher for ADDRESS: a marker whose pid probes alive."""
+    markers(ws, ADDRESS).mkdir(parents=True)
+    (markers(ws, ADDRESS) / '123').touch()
+    replace.in_module(_alive, lambda pid: True)
+
+
 def test_deliver_claims_and_surfaces_new_mail(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _ws(tmpdir, replace)
     _seed(ws, 'm1')
-    assert [m.id for m in deliver(ws, 'uuid-1')] == ['m1']
+    assert [m.id for m in deliver(ws, 'uuid-1').messages] == ['m1']
     assert mail(ws).inbox(ADDRESS, unread_only=True) == []  # claimed: new/ → cur/
 
 
@@ -57,7 +70,7 @@ def test_deliver_surfaces_mail_a_third_party_drained(tmpdir: TempDir, replace: R
     ws = _ws(tmpdir, replace)
     _seed(ws, 'm1')
     drain(ws, ADDRESS)  # another process claims it — the hook must not go silent
-    assert [m.id for m in deliver(ws, 'uuid-1')] == ['m1']
+    assert [m.id for m in deliver(ws, 'uuid-1').messages] == ['m1']
 
 
 def test_deliver_does_not_respam_a_session_but_stops_only_at_ack(
@@ -66,10 +79,10 @@ def test_deliver_does_not_respam_a_session_but_stops_only_at_ack(
     ws = _ws(tmpdir, replace)
     _seed(ws, 'm1')
     deliver(ws, 'uuid-1')
-    assert deliver(ws, 'uuid-1') == []  # this session already saw it
-    assert [m.id for m in deliver(ws, 'uuid-2')] == ['m1']  # unacked → a fresh session still does
+    assert deliver(ws, 'uuid-1').messages == []  # this session already saw it
+    assert [m.id for m in deliver(ws, 'uuid-2').messages] == ['m1']  # unacked → fresh session does
     dispose(ws, ADDRESS, 'm1')
-    assert deliver(ws, 'uuid-3') == []  # acked → surfacing over
+    assert deliver(ws, 'uuid-3').messages == []  # acked → surfacing over
 
 
 def test_deliver_skips_a_session_archived_without_an_address(
@@ -81,8 +94,25 @@ def test_deliver_skips_a_session_archived_without_an_address(
     replace.in_environ('CHIMERA_ROLE', '')
     session_start(ws, 'uuid-p', '/t.jsonl', 'startup', entrypoint='sdk-cli')
     _seed(ws, 'm1')
-    assert deliver(ws, 'uuid-p') == []
-    assert [m.id for m in deliver(ws, 'uuid-chat')] == ['m1']  # the real session still gets it
+    compare(deliver(ws, 'uuid-p'), expected=Delivery())  # no mail, and never nagged to re-arm
+    assert [m.id for m in deliver(ws, 'uuid-chat').messages] == ['m1']  # the real session does
+
+
+def test_rearm_requested_while_no_watcher_holds_the_address(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    ws = _ws(tmpdir, replace)
+    with full_capture() as log:
+        assert deliver(ws, 'uuid-1').rearm
+    log.check_present({**UNARMED, 'session': 'uuid-1'})
+
+
+def test_no_rearm_while_a_watcher_holds_the_address(tmpdir: TempDir, replace: Replacer) -> None:
+    ws = _ws(tmpdir, replace)
+    _arm(ws, replace)
+    with full_capture() as log:
+        assert not deliver(ws, 'uuid-1').rearm
+    assert not any(e.get('message') == UNARMED['message'] for e in log.actual())
 
 
 def test_verbose_flags_an_unrecorded_bridged_session(tmpdir: TempDir, replace: Replacer) -> None:
@@ -91,7 +121,7 @@ def test_verbose_flags_an_unrecorded_bridged_session(tmpdir: TempDir, replace: R
     ws = _ws(tmpdir, replace)
     _seed(ws, 'm1')
     with full_capture() as log:
-        assert [m.id for m in deliver(ws, 'bridged-uuid', verbose=True)] == ['m1']
+        assert [m.id for m in deliver(ws, 'bridged-uuid', verbose=True).messages] == ['m1']
     log.check_present(
         {
             'level': 'WARNING',  # a fallback taken — delivering by cwd, archive blind
@@ -126,6 +156,7 @@ def test_verbose_names_a_session_the_archive_knows(tmpdir: TempDir, replace: Rep
 
 def test_no_diagnostic_without_verbose(tmpdir: TempDir, replace: Replacer) -> None:
     ws = _ws(tmpdir, replace)
+    _arm(ws, replace)  # armed, so the re-arm line can't muddy what -v alone should add
     _seed(ws, 'm1')
     with full_capture() as log:
         deliver(ws, 'bridged-uuid')  # default: quiet, since it fires every turn
@@ -134,7 +165,7 @@ def test_no_diagnostic_without_verbose(tmpdir: TempDir, replace: Replacer) -> No
 
 def test_deliver_outside_a_workspace_is_a_noop(tmpdir: TempDir, replace: Replacer) -> None:
     replace.in_environ('CHIMERA_SESSION', ADDRESS)
-    assert deliver(tmpdir.path / 'nowhere', 'uuid-x') == []
+    compare(deliver(tmpdir.path / 'nowhere', 'uuid-x'), expected=Delivery())
     assert not (tmpdir.path / 'nowhere').exists()  # nothing written either
 
 
@@ -147,6 +178,8 @@ def _run_hook(command: Command, replace: Replacer, ws: Path, session: str, *flag
 def test_hook_deliver_cli_injects_a_block(
     tmpdir: TempDir, command: Command, replace: Replacer
 ) -> None:
+    # unarmed is the wake turn's normal state (the watcher just exited), so the reminder
+    # rides the same injection as the mail itself
     ws = _ws(tmpdir, replace)
     _seed(ws, 'm1')
     drain(ws, ADDRESS)  # even a third-party claim doesn't silence the injection
@@ -169,9 +202,10 @@ def test_hook_deliver_cli_injects_a_block(
     _run_hook(command, replace, ws, 'uuid-1').check(
         output=(
             'You have inter-agent mail; once a message is handled, `ch msg ack <id>` it:\n'
-            '- m1 from p@manager [message] ping: .'
+            '- m1 from p@manager [message] ping: .\n'
+            f'{REARM}'
         ),
-        logging=[start, delivered, end],
+        logging=[start, {**UNARMED, 'session': 'uuid-1'}, delivered, end],
     )
 
 
@@ -181,6 +215,7 @@ def test_hook_deliver_cli_verbose_logs_the_diagnostic(
     # the wrapper's -v wiring: a typo in the option declaration would pass the
     # pure-function tests, which bypass Click entirely
     ws = _ws(tmpdir, replace)
+    _arm(ws, replace)
     _seed(ws, 'm1')
     start, end = action_logs('hook deliver', DELIVER, {'verbose': True})
     bridged = {
@@ -230,12 +265,24 @@ def test_hook_deliver_cli_verbose_logs_the_diagnostic(
     )
 
 
-def test_hook_deliver_cli_is_silent_once_seen(
+def test_hook_deliver_cli_is_silent_when_armed_and_seen(
     tmpdir: TempDir, command: Command, replace: Replacer
 ) -> None:
     ws = _ws(tmpdir, replace)
+    _arm(ws, replace)
     _seed(ws, 'm1')
     deliver(ws, 'uuid-1')
     _run_hook(command, replace, ws, 'uuid-1').check(
         output='', logging=action_logs('hook deliver', DELIVER, {'verbose': False})
+    )
+
+
+def test_hook_deliver_cli_reminds_alone_when_there_is_no_mail(
+    tmpdir: TempDir, command: Command, replace: Replacer
+) -> None:
+    # a deaf session heals on any turn, not just one that happens to carry mail
+    ws = _ws(tmpdir, replace)
+    start, end = action_logs('hook deliver', DELIVER, {'verbose': False})
+    _run_hook(command, replace, ws, 'uuid-1').check(
+        output=REARM, logging=[start, {**UNARMED, 'session': 'uuid-1'}, end]
     )

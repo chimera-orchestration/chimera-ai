@@ -54,6 +54,7 @@ from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.hook.capture import session_end as _hook_session_end
 from chimera.commands.hook.capture import session_start as _hook_session_start
+from chimera.commands.hook.deliver import REARM
 from chimera.commands.hook.deliver import deliver as _hook_deliver
 from chimera.commands.init import init as _init
 from chimera.commands.logtail import logtail as _logtail
@@ -1867,8 +1868,10 @@ def hook_deliver(
     delivered = _hook_deliver(
         Path(str(payload['cwd'])), str(payload['session_id']), verbose=verbose
     )
-    if delivered:
-        typer.echo(_msg_as_context(delivered))
+    if delivered.messages:
+        typer.echo(_msg_as_context(delivered.messages))
+    if delivered.rearm:
+        typer.echo(REARM)
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
