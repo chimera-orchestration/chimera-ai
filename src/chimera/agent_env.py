@@ -44,7 +44,7 @@ _MSG_COMMANDS = frozenset(
 # The harness hooks — installed user-wide, so they fire inside chimera-launched sessions too,
 # where the role strip would otherwise reach them. They record to the archive and deliver
 # mail; harmless as capability, and the hook process (not the agent) is what invokes them.
-_HOOK_COMMANDS = frozenset({'hook session-start', 'hook session-end', 'hook deliver'})
+_HOOK_COMMANDS = frozenset({'hook session-start', 'hook session-end', 'hook deliver', 'hook stop'})
 
 # Per-role command allowlists (canonical leaf paths). A role's session sees only these —
 # the rest of the tree is stripped (see __main__._strip_to_role), never admonished about.

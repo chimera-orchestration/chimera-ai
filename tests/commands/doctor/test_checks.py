@@ -1849,7 +1849,8 @@ class TestClaudeHooks:
             expected=[
                 Finding(
                     'claude-hooks',
-                    f'{settings} missing chimera hooks: SessionStart, SessionEnd, UserPromptSubmit',
+                    f'{settings} missing chimera hooks: '
+                    'SessionStart, SessionEnd, UserPromptSubmit, Stop',
                     resolved=False,
                     fixable=True,
                 )
@@ -1903,8 +1904,15 @@ class TestClaudeHooks:
 
     def test_sweep_leaves_an_entry_without_commands_alone(self) -> None:
         # not command-shaped, so it can't be a stale chimera hook — kept verbatim
+        # (ours is appended beside it: Stop is a chimera event now)
         settings = hook_install.merge({'hooks': {'Stop': [{'matcher': 'foo'}]}})
-        compare(settings['hooks']['Stop'], expected=[{'matcher': 'foo'}])
+        compare(
+            settings['hooks']['Stop'],
+            expected=[
+                {'matcher': 'foo'},
+                {'hooks': [{'type': 'command', 'command': 'ch hook stop'}]},
+            ],
+        )
 
     def test_superseded_hook_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
         settings = self._superseded(tmpdir, replace)

@@ -307,9 +307,11 @@ add/retire via the `CHECKS` tuple). Current checks:
 - **fblog** — `ch logtail`'s renderer (the `fblog` binary) is on the PATH; `--fix` installs it
   with brew. Without brew there's nothing to install with, so the finding just points at
   fblog's repo — not auto-fixable
-- **claude-hooks** — chimera's session-capture + mail-delivery hooks are installed in the
-  user's global `~/.claude/settings.json` (SessionStart/End → the archive, UserPromptSubmit →
-  `ch hook deliver`). `--fix` merges them in idempotently, preserving any existing hooks while
+- **claude-hooks** — chimera's session-capture + mail hooks are installed in the user's
+  global `~/.claude/settings.json` (SessionStart/End → the archive, UserPromptSubmit →
+  `ch hook deliver`, Stop → `ch hook stop`, the re-arm enforcer — an addressed session
+  idling with no mail watcher armed is blocked once with the re-arm instruction, then let
+  go). `--fix` merges them in idempotently, preserving any existing hooks while
   sweeping superseded chimera spellings (the old `ch msg drain --inject`, which surfaced only
   the mail it claimed itself — left in place it would double-inject beside the new hook).
   Machine config, not the workspace's, so doctor *is* the installer — there's no `ch hook

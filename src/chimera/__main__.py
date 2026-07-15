@@ -56,6 +56,7 @@ from chimera.commands.hook.capture import session_end as _hook_session_end
 from chimera.commands.hook.capture import session_start as _hook_session_start
 from chimera.commands.hook.deliver import REARM
 from chimera.commands.hook.deliver import deliver as _hook_deliver
+from chimera.commands.hook.stop import stop as _hook_stop
 from chimera.commands.init import init as _init
 from chimera.commands.logtail import logtail as _logtail
 from chimera.commands.ls import Board, board
@@ -1872,6 +1873,23 @@ def hook_deliver(
         typer.echo(_msg_as_context(delivered.messages))
     if delivered.rearm:
         typer.echo(REARM)
+
+
+@hook_app.command(
+    'stop',
+    cls=LoggingCommand,
+    help='Block an addressed session idling with no mail watcher armed (Stop hook).',
+)
+@logs(_hook_stop)
+def hook_stop() -> None:
+    payload = json.load(sys.stdin)
+    reason = _hook_stop(
+        Path(str(payload['cwd'])),
+        str(payload['session_id']),
+        stop_hook_active=bool(payload.get('stop_hook_active')),
+    )
+    if reason is not None:
+        typer.echo(json.dumps({'decision': 'block', 'reason': reason}))
 
 
 def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:

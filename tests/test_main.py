@@ -183,7 +183,7 @@ class TestStripToRole:
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'hook')).commands),
-            expected={'session-start', 'session-end', 'deliver'},
+            expected={'session-start', 'session-end', 'deliver', 'stop'},
         )
 
     def test_agent_tree_is_help_prime_errand_mail_and_hooks(self) -> None:
@@ -195,7 +195,7 @@ class TestStripToRole:
         )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'hook')).commands),
-            expected={'session-start', 'session-end', 'deliver'},
+            expected={'session-start', 'session-end', 'deliver', 'stop'},
         )
 
     def test_synonyms_survive_iff_their_canonical_does(self) -> None:

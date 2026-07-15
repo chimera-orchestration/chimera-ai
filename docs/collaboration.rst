@@ -140,7 +140,7 @@ settings you already have:
 .. code-block:: console
 
     $ ch doctor -c claude-hooks --fix
-    [claude-hooks] (fixed) /Users/you/.claude/settings.json missing chimera hooks: SessionStart, SessionEnd, UserPromptSubmit
+    [claude-hooks] (fixed) /Users/you/.claude/settings.json missing chimera hooks: SessionStart, SessionEnd, UserPromptSubmit, Stop
 
 See :doc:`health` for doctor itself.
 

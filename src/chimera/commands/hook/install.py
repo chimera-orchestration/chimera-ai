@@ -17,6 +17,7 @@ CHIMERA_HOOKS = {
     'SessionStart': 'ch hook session-start',
     'SessionEnd': 'ch hook session-end',
     'UserPromptSubmit': 'ch hook deliver',
+    'Stop': 'ch hook stop',
 }
 
 # Superseded spellings merge() sweeps out. The drain-based injection surfaced only the
