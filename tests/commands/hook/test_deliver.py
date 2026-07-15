@@ -94,7 +94,7 @@ def test_verbose_flags_an_unrecorded_bridged_session(tmpdir: TempDir, replace: R
         assert [m.id for m in deliver(ws, 'bridged-uuid', verbose=True)] == ['m1']
     log.check_present(
         {
-            'level': 'DEBUG',
+            'level': 'WARNING',  # a fallback taken — delivering by cwd, archive blind
             'message': BRIDGE,
             'session': 'bridged-uuid',
             'cwd': str(ws),
@@ -113,7 +113,7 @@ def test_verbose_names_a_session_the_archive_knows(tmpdir: TempDir, replace: Rep
         deliver(ws, 'uuid-1', verbose=True)
     log.check_present(
         {
-            'level': 'DEBUG',
+            'level': 'INFO',
             'message': 'hook deliver: session resolved from the archive',
             'session': 'uuid-1',
             'cwd': str(ws),
@@ -138,10 +138,10 @@ def test_deliver_outside_a_workspace_is_a_noop(tmpdir: TempDir, replace: Replace
     assert not (tmpdir.path / 'nowhere').exists()  # nothing written either
 
 
-def _run_hook(command: Command, replace: Replacer, ws: Path, session: str) -> Run:
+def _run_hook(command: Command, replace: Replacer, ws: Path, session: str, *flags: str) -> Run:
     payload = json.dumps({'cwd': str(ws), 'session_id': session})
     replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
-    return command.run('hook', 'deliver')
+    return command.run('hook', 'deliver', *flags)
 
 
 def test_hook_deliver_cli_injects_a_block(
@@ -172,6 +172,61 @@ def test_hook_deliver_cli_injects_a_block(
             '- m1 from p@manager [message] ping: .'
         ),
         logging=[start, delivered, end],
+    )
+
+
+def test_hook_deliver_cli_verbose_logs_the_diagnostic(
+    tmpdir: TempDir, command: Command, replace: Replacer
+) -> None:
+    # the wrapper's -v wiring: a typo in the option declaration would pass the
+    # pure-function tests, which bypass Click entirely
+    ws = _ws(tmpdir, replace)
+    _seed(ws, 'm1')
+    start, end = action_logs('hook deliver', DELIVER, {'verbose': True})
+    bridged = {
+        'level': 'WARNING',
+        'message': BRIDGE,
+        'session': 'uuid-1',
+        'cwd': str(ws),
+        'address': ADDRESS,
+        'recorded': False,
+        'recorded_name': None,
+    }
+    received = {  # deliver's own claim of the still-undrained m1: new/ → cur/
+        'level': 'INFO',
+        'message': 'comms: receive p@manager -> p@g@agent [message] ping (m1)',
+        'msg_id': 'm1',
+        'sender': 'p@manager',
+        'to': ADDRESS,
+        'kind': 'message',
+        'priority': 'normal',
+        'thread': None,
+        're': None,
+        'severity': None,
+        'subject': 'ping',
+        'body': '.',
+    }
+    delivered = {
+        'level': 'INFO',
+        'message': 'comms: deliver p@manager -> p@g@agent [message] ping (m1)',
+        'session': 'uuid-1',
+        'msg_id': 'm1',
+        'sender': 'p@manager',
+        'to': ADDRESS,
+        'kind': 'message',
+        'priority': 'normal',
+        'thread': None,
+        're': None,
+        'severity': None,
+        'subject': 'ping',
+        'body': '.',
+    }
+    _run_hook(command, replace, ws, 'uuid-1', '-v').check(
+        output=(
+            'You have inter-agent mail; once a message is handled, `ch msg ack <id>` it:\n'
+            '- m1 from p@manager [message] ping: .'
+        ),
+        logging=[start, bridged, received, delivered, end],
     )
 
 

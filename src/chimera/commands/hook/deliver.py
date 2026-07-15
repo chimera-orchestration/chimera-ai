@@ -51,18 +51,22 @@ def deliver(cwd: Path, session: str, *, verbose: bool = False) -> list[Message]:
     with archive(workspace) as store:
         recorded = store.session('claude', session)
     if verbose:
-        logger.bind(
+        bound = logger.bind(
             session=session,
             cwd=str(cwd),
             address=address,
             recorded=recorded is not None,
             recorded_name=recorded.name if recorded is not None else None,
-        ).debug(
-            'hook deliver: no archive row for this session — bridged (a backgrounded '
-            'session re-hosted under a new id) or pre-hook; delivering by cwd address'
-            if recorded is None
-            else 'hook deliver: session resolved from the archive'
         )
+        # -v gates the volume; the level still carries triage (DEBUG is the git
+        # trace's): unrecorded = a fallback taken → WARNING, resolved = normal → INFO.
+        if recorded is None:
+            bound.warning(
+                'hook deliver: no archive row for this session — bridged (a backgrounded '
+                'session re-hosted under a new id) or pre-hook; delivering by cwd address'
+            )
+        else:
+            bound.info('hook deliver: session resolved from the archive')
     if recorded is not None and recorded.name is None:
         logger.bind(session=session).info('hook deliver: unaddressed session, no mail')
         return []
