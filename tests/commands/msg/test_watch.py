@@ -1,3 +1,5 @@
+import os
+import subprocess
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +10,7 @@ from testfixtures.mock import Mock
 from chimera.commands.msg.dispose import dispose
 from chimera.commands.msg.drain import drain
 from chimera.commands.msg.store import mail
-from chimera.commands.msg.watch import line, watch
+from chimera.commands.msg.watch import _alive, armed, line, markers, watch
 from chimera.comms import Message
 from tests.cli import Command, action_logs, full_capture
 
@@ -231,3 +233,83 @@ def test_cli_once_prints_one_line_then_exits(
     command.run('msg', 'watch', ADDRESS, '--interval', '0', '--once').check(
         output='m1  p@manager → p@g@agent  [message] ping', logging=[start, sent, watched, end]
     )
+
+
+def test_holds_the_armed_marker_while_watching(tmpdir: TempDir) -> None:
+    ws = tmpdir.path
+    marker = markers(ws, ADDRESS) / str(os.getpid())
+    held: list[bool] = []
+    compare(_watch(ws, lambda: held.append(marker.exists())), expected=[])
+    compare(held, expected=[True])
+    assert not marker.exists()  # the finally swept it — even an interrupted watch
+
+
+def test_once_sweeps_its_marker_on_the_clean_exit(tmpdir: TempDir) -> None:
+    ws = tmpdir.path
+    _seed(ws, 'm0')
+    list(watch(ws, ADDRESS, interval=0, once=True, sleep=Mock()))
+    assert not (markers(ws, ADDRESS) / str(os.getpid())).exists()
+
+
+class TestArmed:
+    def test_no_marker_dir_means_unarmed(self, tmpdir: TempDir) -> None:
+        assert not armed(tmpdir.path, ADDRESS, alive=Mock(side_effect=AssertionError))
+
+    def test_a_live_marker_arms(self, tmpdir: TempDir) -> None:
+        markers(tmpdir.path, ADDRESS).mkdir(parents=True)
+        (markers(tmpdir.path, ADDRESS) / '123').touch()
+        assert armed(tmpdir.path, ADDRESS, alive=lambda pid: pid == 123)
+
+    def test_a_dead_marker_is_pruned_and_logged(self, tmpdir: TempDir) -> None:
+        marker = markers(tmpdir.path, ADDRESS) / '123'
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+        with full_capture() as log:
+            assert not armed(tmpdir.path, ADDRESS, alive=lambda pid: False)
+        assert not marker.exists()
+        log.check(
+            {'level': 'INFO', 'message': 'msg watch: pruned stale marker', 'marker': str(marker)}
+        )
+
+    def test_a_malformed_marker_is_pruned_without_a_probe(self, tmpdir: TempDir) -> None:
+        marker = markers(tmpdir.path, ADDRESS) / 'junk'
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+        assert not armed(tmpdir.path, ADDRESS, alive=Mock(side_effect=AssertionError))
+        assert not marker.exists()
+
+    def test_one_live_watcher_arms_while_the_dead_are_swept(self, tmpdir: TempDir) -> None:
+        directory = markers(tmpdir.path, ADDRESS)
+        directory.mkdir(parents=True)
+        for pid in ('1', '2', '3'):
+            (directory / pid).touch()
+        assert armed(tmpdir.path, ADDRESS, alive=lambda pid: pid == 2)
+        compare(sorted(m.name for m in directory.iterdir()), expected=['2'])
+
+
+class TestAlive:
+    def test_dead_pid(self, replace: Replacer) -> None:
+        def kill(pid: int, sig: int) -> None:
+            raise ProcessLookupError()
+
+        replace(target=os.kill, container=os, name='kill', replacement=kill)
+        assert not _alive(123)
+
+    def test_another_users_pid_cannot_be_our_watcher(self, replace: Replacer) -> None:
+        def kill(pid: int, sig: int) -> None:
+            raise PermissionError()
+
+        replace(target=os.kill, container=os, name='kill', replacement=kill)
+        assert not _alive(123)
+
+    def test_a_recycled_pid_running_something_else(self) -> None:
+        # this very pytest process: alive, but its argv is no `msg watch`
+        assert not _alive(os.getpid())
+
+    def test_a_running_watch(self, replace: Replacer) -> None:
+        def run(args: list[str], capture_output: bool, text: bool) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(args, 0, stdout='ch msg watch p@g@agent --once\n')
+
+        replace(target=os.kill, container=os, name='kill', replacement=lambda pid, sig: None)
+        replace(target=subprocess.run, container=subprocess, name='run', replacement=run)
+        assert _alive(123)
