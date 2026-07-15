@@ -316,6 +316,12 @@ add/retire via the `CHECKS` tuple). Current checks:
   the mail it claimed itself — left in place it would double-inject beside the new hook).
   Machine config, not the workspace's, so doctor *is* the installer — there's no `ch hook
   install` to remember
+- **mail-watch** — every live agent session in this workspace has a mail watcher armed for
+  its address (`state/watch/<address>/<pid>` markers, held by `ch msg watch`): mail wakes an
+  idle session only through its own watcher task, so an unwatched live session is deaf to
+  mail until some unrelated turn. Not fixable from outside (no external wake path — the
+  whole reason the watcher is in-session); the finding names the self-heal (any next turn
+  re-arms via the delivery/Stop hooks) and the manual one (attach and prompt)
 - **workspace-clean** — the workspace's own git repo has no uncommitted or untracked content
   (skipped when the workspace isn't a git repo; `*/repo/` and `*/worktrees/` are gitignored, so
   only tracked workspace files count). Runs last, so it sweeps up the config/gitignore edits the

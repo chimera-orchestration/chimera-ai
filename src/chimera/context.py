@@ -196,8 +196,13 @@ def caller(cwd: Path) -> str:
     goal worktree → ``<project>@<goal>@agent``. A non-agent actor on a goal (a reviewer, a
     human) names itself with ``--from`` instead.
     """
-    if stamped := os.environ.get('CHIMERA_SESSION'):
-        return stamped
+    return os.environ.get('CHIMERA_SESSION') or address_for(cwd)
+
+
+def address_for(cwd: Path) -> str:
+    """The address ``cwd`` alone infers — :func:`caller` minus the env stamp, for
+    attributing *another* session's cwd (doctor's mail-watch check), where this
+    process's own ``CHIMERA_SESSION`` must not leak in."""
     scope = resolve_scope(cwd)
     if scope.project is None:
         return workspace_config(scope.workspace).captain.name

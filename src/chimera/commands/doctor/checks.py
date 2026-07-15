@@ -7,6 +7,7 @@ from pathlib import Path
 from giterator import GitError
 from loguru import logger
 
+from chimera.commands import agent
 from chimera.commands.doctor.core import (
     Check,
     Exclusions,
@@ -18,6 +19,8 @@ from chimera.commands.doctor.core import (
 )
 from chimera.commands.hook import install as hook_install
 from chimera.commands.init import TEMPLATE
+from chimera.commands.msg.watch import armed
+from chimera.context import address_for
 from chimera.git import Git
 from chimera.worktrees import (
     AGENT,
@@ -868,6 +871,38 @@ class ClaudeHooksCheck:
         yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
+class MailWatchCheck:
+    """Every live agent session in this workspace has a mail watcher armed for its address.
+
+    Mail wakes an idle session only through its own armed ``ch msg watch --once``
+    background task — there is no external wake path — so a live session with no watcher
+    is deaf to mail until some unrelated turn. Unfixable from outside for the same
+    reason: the finding names the self-heal (any next turn re-arms it via the
+    delivery/Stop hooks) and the manual one (attach and prompt). Sessions are attributed
+    by cwd, the axis ``agent ls`` scopes by; sessions sharing an address count once —
+    the watcher is per-address.
+    """
+
+    name = 'mail-watch'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        addresses = {
+            address_for(session.cwd)
+            for session in agent.agents()
+            if session.stale is None and session.cwd.is_relative_to(workspace)
+        }
+        for address in sorted(addresses):
+            if armed(workspace, address):
+                continue
+            yield Finding(
+                self.name,
+                f'{address}: live session but no mail watcher armed — mail cannot wake '
+                'it; any next turn re-arms (delivery/Stop hooks), or attach and prompt',
+                resolved=False,
+                fixable=False,
+            )
+
+
 # The lightweight model `commit_message` asks to summarise a workspace's staged changes,
 # and the message it falls back to when claude can't be reached (so the fix still commits —
 # leaving nothing uncommitted is the point, a perfect subject line is not).
@@ -947,5 +982,6 @@ CHECKS: tuple[Check, ...] = (
     ShellCompletionCheck(),
     FblogCheck(),
     ClaudeHooksCheck(),
+    MailWatchCheck(),
     WorkspaceCommitCheck(),
 )

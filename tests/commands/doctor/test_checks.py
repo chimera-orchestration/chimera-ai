@@ -20,6 +20,7 @@ from chimera.commands.doctor.checks import (
     GitignoreCheck,
     InertBranchCheck,
     LegacyWorktreeSeparatorCheck,
+    MailWatchCheck,
     OrphanedWorktreeCheck,
     ProjectConfigCheck,
     RuntimeStateDirCheck,
@@ -31,9 +32,12 @@ from chimera.commands.doctor.checks import (
     WorktreeBranchCheck,
     commit_message,
 )
+from chimera.agents import Session
+from chimera.commands import agent
 from chimera.commands.doctor.core import Check, Exclusions, Finding
 from chimera.commands.hook import install as hook_install
 from chimera.commands.init import TEMPLATE
+from chimera.commands.msg.watch import _alive, markers
 from chimera.worktrees import is_dirty, registered_worktrees
 
 
@@ -1795,6 +1799,68 @@ class TestCommitMessage:
         replace.in_module(subprocess.Popen, Popen)
         Popen.set_command(_commit_cmd(), returncode=1)
         compare(commit_message('a staged diff'), expected='Snapshot workspace changes')
+
+
+def _session(cwd: Path, stale: str | None = None) -> Session:
+    return Session(id='uuid-1', name='s', status='running', cwd=cwd, summary=None, stale=stale)
+
+
+class TestMailWatch:
+    def _ws(self, tmpdir: TempDir, replace: Replacer, *sessions: Session) -> Path:
+        ws = _ws(tmpdir)
+        tmpdir.dump(ws / 'config.yaml', {'kind': 'workspace'})  # resolvable for address_for
+        replace.in_module(agent.agents, lambda: list(sessions))
+        return ws
+
+    def test_no_live_sessions_is_silent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        compare(_run(MailWatchCheck(), self._ws(tmpdir, replace)), expected=[])
+
+    def test_an_unwatched_live_session_is_reported(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        ws = self._ws(tmpdir, replace, _session(cwd=tmpdir.path / 'lycia'))
+        compare(
+            _run(MailWatchCheck(), ws),
+            expected=[
+                Finding(
+                    'mail-watch',
+                    'captain: live session but no mail watcher armed — mail cannot wake '
+                    'it; any next turn re-arms (delivery/Stop hooks), or attach and prompt',
+                    resolved=False,
+                    fixable=False,
+                )
+            ],
+        )
+
+    def test_a_watched_session_is_silent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        ws = self._ws(tmpdir, replace, _session(cwd=tmpdir.path / 'lycia'))
+        markers(ws, 'captain').mkdir(parents=True)
+        (markers(ws, 'captain') / '123').touch()
+        replace.in_module(_alive, lambda pid: True)
+        compare(_run(MailWatchCheck(), ws), expected=[])
+
+    def test_sessions_outside_the_workspace_and_stale_ones_are_skipped(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        ws = self._ws(
+            tmpdir,
+            replace,
+            _session(cwd=tmpdir.path / 'elsewhere'),
+            _session(cwd=tmpdir.path / 'lycia', stale='registry corpse'),
+        )
+        compare(_run(MailWatchCheck(), ws), expected=[])
+
+    def test_sessions_sharing_an_address_land_one_finding(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        ws = self._ws(
+            tmpdir,
+            replace,
+            _session(cwd=tmpdir.path / 'lycia'),
+            _session(cwd=tmpdir.path / 'lycia'),
+        )
+        [finding] = _run(MailWatchCheck(), ws)
+        assert finding.message.startswith('captain: ')
 
 
 class TestClaudeHooks:
