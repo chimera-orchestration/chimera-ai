@@ -22,7 +22,7 @@ from chimera.archive import Event, Session, archive
 from chimera.commands.agent import live
 from chimera.config import NotInWorkspaceError
 from chimera.context import caller, resolve_scope
-from chimera.worktrees import SEP, session_name
+from chimera.worktrees import session_name, worktree_actor
 
 _Axes = tuple[Path, str | None, str | None, str | None]
 
@@ -53,6 +53,7 @@ def session_start(
     source: str,
     agent_type: str | None = None,
     entrypoint: str | None = None,
+    model: str | None = None,
 ) -> str | None:
     """Record a starting session from a SessionStart hook. No-op outside any workspace.
 
@@ -61,7 +62,10 @@ def session_start(
     and appends its lifecycle event, ``source`` as the kind. ``agent_type`` (from the
     payload) and ``entrypoint`` (``$CLAUDE_CODE_ENTRYPOINT``) decide whether the session
     is :func:`addressed`: one that isn't is still recorded — cwd, transcript and the
-    location axes — but with no name and no actor, so no mail routes to it.
+    location axes — but with no name and no actor, so no mail routes to it. ``model``
+    (also from the payload) rides through to the archive; it's optional on the payload
+    (absent on some firings, e.g. after ``/clear``) — :meth:`~chimera.archive.Archive.
+    record_session` keeps the last known value rather than blanking it on an omitted one.
 
     Returns the :func:`occupied` warning for the starting session's context when it is
     a conversation entering a goal worktree another session is already live in, else
@@ -93,6 +97,7 @@ def session_start(
                 status=source or 'running',
                 started_at=now,
                 manager='chimera' if session_role() is not None else 'none',
+                model=model,
                 name=name,
                 cwd=cwd,
                 transcript=Path(transcript),
@@ -175,6 +180,10 @@ def _axes(cwd: Path) -> _Axes | None:
         project = scope.project.name if scope.project is not None else None
         return scope.workspace, project, scope.goal, None
     # the goal was pinned by physically standing in worktrees/<goal>@<actor> (see
-    # goal_from_worktree), so the head segment always splits on the separator
-    head = cwd.resolve().relative_to(scope.project.worktrees.resolve()).parts[0]
-    return scope.workspace, scope.project.name, scope.goal, head.split(SEP, 1)[1]
+    # goal_from_worktree), so worktree_actor always resolves
+    return (
+        scope.workspace,
+        scope.project.name,
+        scope.goal,
+        worktree_actor(cwd, scope.project.worktrees),
+    )

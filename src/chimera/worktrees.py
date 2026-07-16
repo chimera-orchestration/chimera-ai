@@ -78,6 +78,23 @@ def session_name(project: str, goal: str, actor: str) -> str:
     return SEP.join((project, goal, actor))
 
 
+def worktree_actor(cwd: Path, worktrees: Path) -> str | None:
+    """The actor whose ``<goal>@<actor>`` worktree physically holds ``cwd``, else ``None``.
+
+    Trusts the directory, not a branch or a caller's assumption — the true actor (a
+    ``reviewer``'s worktree, say) rather than a generic default. ``None`` when ``cwd``
+    isn't inside one of ``worktrees``' ``<goal>@<actor>`` dirs.
+    """
+    worktrees = worktrees.resolve()
+    cwd = cwd.resolve()
+    if cwd != worktrees and worktrees not in cwd.parents:
+        return None
+    head = cwd.relative_to(worktrees).parts
+    if not head or SEP not in head[0]:
+        return None
+    return head[0].split(SEP, 1)[1]
+
+
 def worktree_dirs(root: Path) -> list[Path]:
     """Worktree directories present under root, sorted."""
     return sorted(child for child in root.iterdir() if child.is_dir()) if root.is_dir() else []

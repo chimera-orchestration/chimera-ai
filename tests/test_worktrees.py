@@ -24,6 +24,7 @@ from chimera.worktrees import (
     require_valid_actor,
     require_valid_goal,
     session_name,
+    worktree_actor,
     worktree_dirs,
     worktree_path,
 )
@@ -118,6 +119,30 @@ def test_goals_are_derived_from_agent_worktrees(tmpdir: TempDir) -> None:
     for name in ('g1@agent', 'g2@agent', 'g1@reviewer'):  # reviewer rides g1's agent
         tmpdir.makedir(name)
     compare(goals(tmpdir.path), expected={'g1', 'g2'})
+
+
+class TestWorktreeActor:
+    def test_reads_the_actor_from_the_worktree_dir(self, tmpdir: TempDir) -> None:
+        cwd = tmpdir.makedir('worktrees/g@reviewer')
+        assert worktree_actor(cwd, tmpdir / 'worktrees') == 'reviewer'
+
+    def test_resolves_from_a_subdirectory_of_the_worktree(self, tmpdir: TempDir) -> None:
+        cwd = tmpdir.makedir('worktrees/g@agent/src/sub')
+        assert worktree_actor(cwd, tmpdir / 'worktrees') == 'agent'
+
+    def test_none_outside_worktrees(self, tmpdir: TempDir) -> None:
+        cwd = tmpdir.makedir('elsewhere')
+        assert worktree_actor(cwd, tmpdir / 'worktrees') is None
+
+    def test_none_for_worktrees_itself(self, tmpdir: TempDir) -> None:
+        cwd = tmpdir.makedir('worktrees')
+        assert worktree_actor(cwd, tmpdir / 'worktrees') is None
+
+    def test_none_for_a_dir_directly_under_worktrees_without_the_separator(
+        self, tmpdir: TempDir
+    ) -> None:
+        cwd = tmpdir.makedir('worktrees/not-a-goal-actor-dir')
+        assert worktree_actor(cwd, tmpdir / 'worktrees') is None
 
 
 class TestGoalActors:

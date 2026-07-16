@@ -1820,6 +1820,7 @@ def hook_session_start() -> None:
         str(payload.get('source') or ''),
         agent_type=str(agent_type) if (agent_type := payload.get('agent_type')) else None,
         entrypoint=os.environ.get('CLAUDE_CODE_ENTRYPOINT'),
+        model=str(model) if (model := payload.get('model')) else None,
     )
     if warning is not None:
         typer.echo(warning)  # SessionStart stdout lands in the starting session's context

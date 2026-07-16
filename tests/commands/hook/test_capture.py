@@ -49,6 +49,15 @@ def test_session_start_records_the_session(tmpdir: TempDir, replace: Replacer) -
     assert (session.name, session.status, session.workspace) == ('pegasus', 'startup', 'ws')
 
 
+def test_session_start_records_the_model(tmpdir: TempDir, replace: Replacer) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    session_start(ws, 'uuid-1', '/t.jsonl', 'startup', model='claude-sonnet-5')
+    [session] = _archived(ws)
+    assert session.model == 'claude-sonnet-5'
+
+
 def test_session_start_in_a_goal_worktree_sets_the_axes(tmpdir: TempDir, replace: Replacer) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
@@ -191,6 +200,24 @@ def test_hook_session_start_cli(tmpdir: TempDir, command: Command, replace: Repl
         output='', logging=action_logs('hook session-start', START, {})
     )
     assert _archived(ws)[0].native_id == 'uuid-1'
+
+
+def test_hook_session_start_cli_reads_the_model_from_the_payload(
+    tmpdir: TempDir, command: Command, replace: Replacer
+) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_ROLE', '')
+    payload = (
+        f'{{"cwd": "{ws}", "session_id": "uuid-1", "transcript_path": "/t.jsonl", '
+        f'"source": "startup", "model": "claude-sonnet-5"}}'
+    )
+    replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
+    command.run('hook', 'session-start').check(
+        output='', logging=action_logs('hook session-start', START, {})
+    )
+    assert _archived(ws)[0].model == 'claude-sonnet-5'
 
 
 def test_hook_session_start_cli_fences_on_payload_and_environment(
