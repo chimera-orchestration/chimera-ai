@@ -59,12 +59,10 @@ def _fork_pr(tmpdir: TempDir, delete_branch: bool = False) -> tuple[Repo, Repo, 
     """
     origin = Repo.make(tmpdir / 'origin')
     origin.commit_content('seed')
-    fork_path = tmpdir / 'fork'
-    Git.clone(origin.path, fork_path)
-    fork = Repo(fork_path)
+    fork = Repo.clone(origin.path, tmpdir / 'fork')
     fork('checkout', '-q', '-b', 'feature')
     head = fork.commit_content('pr-work', short=False)
-    origin('fetch', '-q', str(fork_path), '+refs/heads/feature:refs/pull/1/head')
+    origin('fetch', '-q', str(fork.path), '+refs/heads/feature:refs/pull/1/head')
     if delete_branch:
         fork('checkout', '-q', 'main')
         fork('branch', '-q', '-D', 'feature')
