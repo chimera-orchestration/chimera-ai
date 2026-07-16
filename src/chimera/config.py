@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter
+from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter, ValidationError
 
 
 class AgentConfig(BaseModel):
@@ -83,11 +83,18 @@ class NotInProjectError(UserError):
 
 
 def load_config(directory: Path) -> AnyConfig | None:
-    """Parse the config.yaml in directory into its model, or None if there is none."""
+    """Parse the config.yaml in directory into its model, or None if it's absent or foreign."""
     path = directory / 'config.yaml'
     if not path.exists():
         return None
-    return _ADAPTER.validate_python(yaml.safe_load(path.read_text()))
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError:
+        return None
+    try:
+        return _ADAPTER.validate_python(data)
+    except ValidationError:
+        return None
 
 
 def workspace_config(workspace: Path) -> WorkspaceConfig:
