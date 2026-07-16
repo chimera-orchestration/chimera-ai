@@ -1529,7 +1529,9 @@ def agent_start(
         _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
 
 
-@agent_app.command('resume', cls=PassthroughCommand, help="Reattach to an agent's session.")
+@agent_app.command(
+    'resume', cls=PassthroughCommand, help="Revive an agent's most recent session in its worktree."
+)
 @logs(_resume)
 def agent_resume(
     ctx: typer.Context,

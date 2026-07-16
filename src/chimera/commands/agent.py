@@ -148,7 +148,7 @@ def agent(
 
 
 def resume_target(cwd: Path, platform: str, project: str, goal: str, actor: str) -> str | None:
-    """The archived native session id ``agent resume`` reattaches by, else ``None``.
+    """The archived native session id ``agent resume`` resumes by, else ``None``.
 
     Session identity lives in the archive: the address ``(project, goal, actor)`` maps
     to its newest session — live or dead, resuming is how a dead one is revived — and
@@ -183,7 +183,7 @@ def resume(
     dry: Dry = Dry(),
     id: str | None = None,
 ) -> None:
-    """Reattach to ``spec``'s agent session — by archived ``id`` when the caller resolved
+    """Revive ``spec``'s agent session — by archived ``id`` when the caller resolved
     one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``); ``env`` as
     on :func:`agent`."""
     refuse_restricted(spec, extra)

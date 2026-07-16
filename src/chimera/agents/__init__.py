@@ -138,12 +138,14 @@ class Agent(ABC):
         env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> CompletedProcess[bytes]:
-        """Reattach to a session, reviving it in ``cwd`` if dead.
+        """Revive a session in ``cwd``, continuing it from wherever it left off.
 
-        ``id`` is the harness-native session id to reattach by, re-asserting ``name``
-        as the display label — names are mutable (a rename in the harness's own UI
-        orphans them), so a caller that knows the id must pass it. Without one the
-        name is the only handle left (the pre-archive behaviour).
+        Never attaches to a session still running — a live one is refused up front
+        (see ``exclusive``) — always a resume of a dead one. ``id`` is the
+        harness-native session id to resume by, re-asserting ``name`` as the display
+        label — names are mutable (a rename in the harness's own UI orphans them), so
+        a caller that knows the id must pass it. Without one the name is the only
+        handle left (the pre-archive behaviour).
         """
         ...
 

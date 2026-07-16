@@ -300,7 +300,7 @@ class Archive:
         """The most recently *active* session at a ``project@goal@actor`` address, else ``None``.
 
         The resume resolver: registry names are mutable (a UI rename orphans the label),
-        so ``agent resume`` looks the address up here and reattaches by the immutable
+        so ``agent resume`` looks the address up here and resumes by the immutable
         ``native_id`` — dead sessions included, since resuming is how a dead session is
         revived. Activity is the session's last lifecycle event (``started_at`` for a row
         with none, e.g. a backfilled one) — never creation time, which is first-write-wins:

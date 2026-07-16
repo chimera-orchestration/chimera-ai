@@ -99,9 +99,9 @@ class Claude(Agent):
         """Resume a claude session, with cwd set to ``cwd``.
 
         With ``id`` (the session's full UUID — ``--resume``'s documented argument) the
-        session is reattached by identity and ``--name`` re-asserts the canonical label,
+        session is resumed by identity and ``--name`` re-asserts the canonical label,
         exactly as :meth:`start` set it — so a rename in claude's own UI neither orphans
-        the session nor survives the reattach. Without one, ``--resume <name>`` leans on
+        the session nor survives the resume. Without one, ``--resume <name>`` leans on
         claude's name-to-session DWIM, the pre-archive behaviour. The cwd is the key —
         claude has no ``--cwd``, so setting it here is what lets a dead session be
         revived in its worktree from anywhere. Interactive foreground by default; with
