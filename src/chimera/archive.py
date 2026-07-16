@@ -313,7 +313,7 @@ class Archive:
         actor: str | None = None,
         *,
         platform: str | None = None,
-        manager: str | None = None,
+        name: str | None = None,
     ) -> Session | None:
         """The most recently *active* session at an address, else ``None``.
 
@@ -325,22 +325,28 @@ class Archive:
         an old thread the user resumed yesterday must beat a fresher-created one abandoned
         after a ``/clear``. ``platform`` narrows to the harness doing the resuming.
 
-        A goal actor address gives all three axes; a manager address gives ``project``
-        only (``goal``/``actor`` default ``None``); the captain address gives none of
-        them. Unlike :meth:`sessions`, ``None`` here means "must be unset" (``IS NULL``),
-        not "unconstrained" — a board slot needs the exact address, not a widened match.
-        ``manager``, when given, further narrows to sessions recorded with that
-        ``manager`` value (e.g. ``'chimera'``, so a same-named session a human started
-        outside any chimera launcher doesn't masquerade as the captain/manager slot).
+        A goal actor address gives all three axes, which already pin it uniquely. A
+        manager address gives ``project`` only, and the captain address gives none of
+        them — both leave ``goal``/``actor`` (or every axis) null, which alone can't tell
+        "the manager's own session" from any other axis-less row, so ``name`` narrows to
+        the exact address in that case. ``name`` beats the once-tried ``manager='chimera'``
+        filter: that flag is stamped from the launching process's ``CHIMERA_ROLE`` env var,
+        which doesn't survive a resume, a reattach, or a background job — in practice almost
+        no real session keeps it, so filtering on it hid genuine activity far more often
+        than it caught an unrelated same-named session. ``name`` (derived from cwd by
+        :func:`chimera.context.caller`, stable across every resume) is the durable signal.
+        Unlike :meth:`sessions`, ``None`` here means "must be unset" (``IS NULL``), not
+        "unconstrained", for ``project``/``goal``/``actor`` — a board slot needs the exact
+        address, not a widened match.
         """
         clauses = 'sessions.project IS ? AND sessions.goal IS ? AND sessions.actor IS ?'
         params: list[str | None] = [project, goal, actor]
         if platform is not None:
             clauses += ' AND sessions.platform=?'
             params.append(platform)
-        if manager is not None:
-            clauses += ' AND sessions.manager=?'
-            params.append(manager)
+        if name is not None:
+            clauses += ' AND sessions.name=?'
+            params.append(name)
         row = self._db.execute(
             'latest_session_for',
             f"""
@@ -356,18 +362,24 @@ class Archive:
         return _row_to_session(row) if row is not None else None
 
     def recent_sessions(
-        self, workspace: str, *, exclude: Sequence[tuple[str, str]] = (), limit: int
+        self, workspace: str, *, exclude: Sequence[str] = (), limit: int
     ) -> list[Session]:
-        """The most recently active sessions in ``workspace``, newest first, excluding the
-        given ``(platform, native_id)`` identities — the residue not claimed by any board
-        slot (:func:`chimera.commands.ls.board`'s ``history`` catchall). Same "most
-        recently active" ordering as :meth:`latest_session_for`.
+        """The most recently active sessions in ``workspace``, newest first, excluding every
+        session named in ``exclude`` — the residue not claimed by any board slot
+        (:func:`chimera.commands.ls.board`'s ``history`` catchall). Excluding by ``name``
+        (an address), not one specific ``(platform, native_id)``, drops *every* archived
+        incarnation of a claimed slot (old resumes included), not just whichever one the
+        slot happened to pick as its current occupant. Same "most recently active" ordering
+        as :meth:`latest_session_for`. A ``NOT IN`` alone would silently drop every
+        unnamed row too (SQL's three-valued logic: ``NULL NOT IN (...)`` is ``NULL``, not
+        true), so an explicit ``IS NULL`` keeps them eligible.
         """
         clauses = 'sessions.workspace=?'
         params: list[str] = [workspace]
-        for platform, native_id in exclude:
-            clauses += ' AND NOT (sessions.platform=? AND sessions.native_id=?)'
-            params.extend((platform, native_id))
+        if exclude:
+            placeholders = ', '.join('?' for _ in exclude)
+            clauses += f' AND (sessions.name IS NULL OR sessions.name NOT IN ({placeholders}))'
+            params.extend(exclude)
         rows = self._db.execute(
             'recent_sessions',
             f"""

@@ -158,16 +158,17 @@ class TestBoard:
         assert result.captain.last is not None
         assert result.captain.last.native_id == 's1'
 
-    def test_captain_row_ignores_a_same_named_raw_session(
+    def test_captain_row_uses_the_archive_even_when_manager_is_none(
         self, workspace: Path, store: Archive, mailbox: Comms
     ) -> None:
-        # a raw `claude` sitting at the bare workspace root computes the same address via
-        # caller()'s inference, but never claimed the role — must not masquerade as captain
+        # CHIMERA_ROLE (and so manager='chimera') doesn't survive a resume/reattach/
+        # background job — identity here rides the address's own name, not that stamp
         _record(workspace, 'raw', name='captain', manager='none')
         result = board(Scope(workspace, None, None), [], store, mailbox)
         assert result.captain.live is None
-        assert result.captain.last is None
-        assert [row.last.native_id for row in result.history if row.last] == ['raw']
+        assert result.captain.last is not None
+        assert result.captain.last.native_id == 'raw'
+        assert result.history == []
 
     def test_manager_row_falls_back_to_the_archive(
         self, tmpdir: TempDir, workspace: Path, store: Archive, mailbox: Comms
@@ -227,6 +228,26 @@ class TestBoard:
         _record(workspace, 'ghost', manager='none')  # no project/goal — unaddressed system run
         result = board(Scope(workspace, None, None), [], store, mailbox)
         compare([row.last.native_id for row in result.history if row.last], expected=['ghost'])
+
+    def test_history_omits_an_old_resume_of_a_currently_live_actor(
+        self, tmpdir: TempDir, workspace: Path, store: Archive, mailbox: Comms
+    ) -> None:
+        # a goal actor resumed more than once accrues one archive row per resume, all
+        # sharing the address's name — only the exact live occupant used to get excluded,
+        # leaving every earlier resume to leak into history under the same display name
+        _project(tmpdir, workspace, 'alpha', 'g')
+        worktree = workspace / 'alpha' / 'worktrees' / 'g@agent'
+        _record(
+            workspace,
+            'earlier-resume',
+            name='alpha@g@agent',
+            project='alpha',
+            goal='g',
+            actor='agent',
+        )
+        live = _agent(worktree, 'alpha@g@agent', id='current-native-id')
+        result = board(Scope(workspace, None, None), [live], store, mailbox)
+        assert result.history == []
 
     def test_history_is_bounded_and_signals_withheld(
         self, workspace: Path, store: Archive, mailbox: Comms

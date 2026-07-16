@@ -95,12 +95,13 @@ def _named_row(
     project: str | None,
 ) -> Row:
     """The captain/manager slot at ``address``: a session chimera itself named at launch
-    (``--name``, matched by the registry's own ``name``), else the latest chimera-attributed
-    archive row — a same-named raw session started outside any chimera launcher fills
-    neither, and falls to the ``history`` catchall instead.
+    (``--name``, matched by the registry's own ``name``), else the archive's latest session
+    recorded under that same ``name`` — project/goal/actor alone can't pin the captain/manager
+    address (every axis-less row would match), so identity here rides ``name`` itself (see
+    :meth:`Archive.latest_session_for`).
     """
     live = next((a for a in universe if a.name == address), None)
-    last = None if live is not None else archive.latest_session_for(project, manager='chimera')
+    last = None if live is not None else archive.latest_session_for(project, name=address)
     return Row(address, live, last, mail_map.get(address, _NO_MAIL))
 
 
@@ -136,13 +137,14 @@ def board(scope: Scope, listing: list[Session], archive: Archive, mail: Comms) -
     """
     universe = scoped(listing, scope, otherwise=scope.workspace)
     mail_map = _mail_map(mail)
-    claimed: list[tuple[str, str]] = []
+    claimed: list[str] = []
 
     def _claim(row: Row) -> None:
-        if row.live is not None:
-            claimed.append(('claude', row.live.id))
-        elif row.last is not None:
-            claimed.append((row.last.platform, row.last.native_id))
+        # by address, not the one (platform, native_id) a slot happened to pick as its
+        # current occupant — so every archived incarnation under that name drops out of
+        # history, not just whichever row filled the slot.
+        if row.live is not None or row.last is not None:
+            claimed.append(row.address)
 
     captain_address = workspace_config(scope.workspace).captain.name
     captain = _named_row(captain_address, universe, archive, mail_map, project=None)

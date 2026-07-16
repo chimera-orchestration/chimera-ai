@@ -370,15 +370,16 @@ def test_latest_session_for_the_captain_address_wants_every_axis_null(archive: A
     assert latest.native_id == 'captain-row'
 
 
-def test_latest_session_for_narrows_by_manager(archive: Archive) -> None:
-    # a same-named raw session (manager='none') must not masquerade as the real captain
+def test_latest_session_for_narrows_by_name(archive: Archive) -> None:
+    # project/goal/actor alone can't pin the captain/manager address (every axis-less row
+    # matches); name does, and stays reliable regardless of the (unstamped-on-resume) manager
     archive.record_session(
-        make_session('raw', manager='none', started_at=NOON + timedelta(hours=1))
+        make_session('other', manager='none', started_at=NOON + timedelta(hours=1))
     )
-    archive.record_session(make_session('real', manager='chimera', started_at=NOON))
-    latest = archive.latest_session_for(None, manager='chimera')
+    archive.record_session(make_session('pegasus', manager='none', name='pegasus', started_at=NOON))
+    latest = archive.latest_session_for(None, name='pegasus')
     assert latest is not None
-    assert latest.native_id == 'real'
+    assert latest.native_id == 'pegasus'
 
 
 def test_recent_sessions_orders_by_last_active_newest_first(archive: Archive) -> None:
@@ -397,10 +398,33 @@ def test_recent_sessions_scopes_to_the_workspace(archive: Archive) -> None:
 
 
 def test_recent_sessions_excludes_claimed_identities(archive: Archive) -> None:
-    archive.record_session(make_session('a', workspace='ws', started_at=NOON))
-    archive.record_session(make_session('b', workspace='ws', started_at=NOON + timedelta(hours=1)))
-    recent = archive.recent_sessions('ws', exclude=[('claude', 'b')], limit=10)
+    archive.record_session(make_session('a', workspace='ws', name='a', started_at=NOON))
+    archive.record_session(
+        make_session('b', workspace='ws', name='b', started_at=NOON + timedelta(hours=1))
+    )
+    recent = archive.recent_sessions('ws', exclude=['b'], limit=10)
     assert [s.native_id for s in recent] == ['a']
+
+
+def test_recent_sessions_excludes_every_row_sharing_a_claimed_name(archive: Archive) -> None:
+    # an old resume of a claimed slot shares its name but not its native_id — exclude by
+    # name, not just the one (platform, native_id) the slot picked as its current occupant
+    archive.record_session(
+        make_session('old-resume', workspace='ws', name='pegasus', started_at=NOON)
+    )
+    archive.record_session(
+        make_session(
+            'current', workspace='ws', name='pegasus', started_at=NOON + timedelta(hours=1)
+        )
+    )
+    assert archive.recent_sessions('ws', exclude=['pegasus'], limit=10) == []
+
+
+def test_recent_sessions_keeps_unnamed_sessions_when_excluding(archive: Archive) -> None:
+    # NULL NOT IN (...) is NULL (falsy) in SQL, not true — an unnamed row must stay eligible
+    archive.record_session(make_session('unnamed', workspace='ws', started_at=NOON))
+    recent = archive.recent_sessions('ws', exclude=['someone-else'], limit=10)
+    assert [s.native_id for s in recent] == ['unnamed']
 
 
 def test_recent_sessions_respects_the_limit(archive: Archive) -> None:
