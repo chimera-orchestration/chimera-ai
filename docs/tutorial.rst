@@ -69,7 +69,9 @@ The dashboard now shows it:
 
     $ ch ls
     lycia
+      pegasus  (never run)
       demo
+        demo@manager  (never run)
         (no goals)
 
 Start a goal

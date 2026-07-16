@@ -32,6 +32,7 @@ from chimera.agent_env import (
 from chimera.agents import Session
 from chimera.agents.context import Source, assemble, materialize
 from chimera.agents.registry import AgentSpec, resolve_spec
+from chimera.archive import archive
 from chimera.commands.agent import agents, resume_target, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
@@ -39,6 +40,7 @@ from chimera.commands.agent import stop as _agent_stop
 from chimera.commands.archive.backfill import CLAUDE_PROJECTS
 from chimera.commands.archive.backfill import backfill as _archive_backfill
 from chimera.commands.chat import chat as _chat
+from chimera.commands.dashboard import render as render_dashboard
 from chimera.commands.chat import chat_target
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
@@ -57,13 +59,14 @@ from chimera.commands.hook.capture import session_start as _hook_session_start
 from chimera.commands.hook.deliver import deliver as _hook_deliver
 from chimera.commands.init import init as _init
 from chimera.commands.logtail import logtail as _logtail
-from chimera.commands.ls import Board, board
+from chimera.commands.ls import Board, Mail, Row, board
 from chimera.commands.msg.dispose import dispose as _msg_dispose
 from chimera.commands.msg.drain import as_context as _msg_as_context
 from chimera.commands.msg.drain import drain as _msg_drain
 from chimera.commands.msg.inbox import inbox as _msg_inbox
 from chimera.commands.msg.ls import outstanding as _msg_outstanding
 from chimera.commands.msg.send import send as _msg_send
+from chimera.commands.msg.store import mail
 from chimera.commands.msg.thread import thread as _msg_thread
 from chimera.commands.msg.watch import line as _msg_line
 from chimera.commands.msg.watch import watch as _msg_watch
@@ -710,7 +713,21 @@ def logtail(
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
     rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
-    _render_board(board(scope, rows))
+    with archive(scope.workspace) as store:
+        _render_board(board(scope, rows, store, mail(scope.workspace)))
+
+
+@app.command(
+    'dashboard',
+    cls=LoggingCommand,
+    help='A colorized, columnar workspace dashboard for a human terminal (pair with watch).',
+)
+@logs(board)
+def dashboard_cmd(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
+    scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
+    rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
+    with archive(scope.workspace) as store:
+        typer.echo(render_dashboard(board(scope, rows, store, mail(scope.workspace))))
 
 
 # Detail (session title / last prompt) past this many chars is trimmed for listings.
@@ -737,27 +754,59 @@ def _status(a: Session) -> str:
 
 
 def _summary(a: Session) -> str:
-    """``id  name  status  detail`` for a board row, dropping the name when blank."""
+    """``id  name  status  detail`` for a live session, dropping the name when blank."""
     return '  '.join(part for part in (a.short, _name(a), a.status, _detail(a)) if part)
+
+
+def _mail_summary(m: Mail) -> str:
+    """``mail 2n 1c``, terse — omitted when nothing's outstanding; ``done`` never shown
+    (matches ``msg ls``'s own default of hiding disposed messages)."""
+    parts = [f'{m.new}n'] if m.new else []
+    parts += [f'{m.cur}c'] if m.cur else []
+    return f'mail {" ".join(parts)}' if parts else ''
+
+
+def _row_summary(row: Row) -> str:
+    """``address  id  status  detail`` for a board row, else ``address  (never run)`` — the
+    address (the archive's own name for the slot) always leads, so a configured persona
+    (e.g. a workspace's ``--captain pegasus``) is never lost behind a generic label. The
+    mail summary is appended when there's anything outstanding.
+    """
+    if row.live is not None:
+        fields = (row.address, row.live.short, _status(row.live), _detail(row.live))
+    elif row.last is not None:
+        s = row.last
+        detail = s.summary
+        if detail and len(detail) > DETAIL_MAX:
+            detail = detail[: DETAIL_MAX - 1] + '…'
+        fields = (row.address, s.native_id[:8], s.status, detail)
+    else:
+        fields = (row.address, '(never run)')
+    base = '  '.join(part for part in fields if part)
+    tail = _mail_summary(row.mail)
+    return f'{base}  {tail}' if tail else base
 
 
 def _render_board(b: Board) -> None:
     typer.echo(b.workspace)
+    typer.echo(f'  {_row_summary(b.captain)}')
     for p in b.projects:
         typer.echo(f'  {p.name}')
+        typer.echo(f'    {_row_summary(p.manager)}')
         for g in p.goals:
-            if g.agents:
-                typer.echo(f'    {g.name}')
-                for a in g.agents:
-                    typer.echo(f'      {_summary(a)}')
-            else:
-                typer.echo(f'    {g.name}  (no agent)')
+            typer.echo(f'    {g.name}')
+            for row in g.actors:
+                typer.echo(f'      {_row_summary(row)}')
         for a in p.loose:
             typer.echo(f'    · {_summary(a)}')
         if not p.goals and not p.loose:
             typer.echo('    (no goals)')
     for a in b.loose:
         typer.echo(f'  · {_summary(a)}')
+    for row in b.history:
+        typer.echo(f'  · {_row_summary(row)}')
+    if b.history_withheld:
+        typer.echo('  (+more archived sessions not shown — ch dashboard for the full view)')
 
 
 @app.command(
