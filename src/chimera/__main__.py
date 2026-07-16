@@ -720,14 +720,16 @@ def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> 
 @app.command(
     'dashboard',
     cls=LoggingCommand,
-    help='A colorized, columnar workspace dashboard for a human terminal (pair with watch).',
+    help='A colorized, columnar workspace dashboard for a human terminal (pair with watch -c).',
 )
 @logs(board)
 def dashboard_cmd(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
     rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
     with archive(scope.workspace) as store:
-        typer.echo(render_dashboard(board(scope, rows, store, mail(scope.workspace))))
+        # color=True: this command exists to run under `watch`, which pipes our stdout
+        # (no tty) — Click would otherwise auto-strip the ANSI codes before watch sees them.
+        typer.echo(render_dashboard(board(scope, rows, store, mail(scope.workspace))), color=True)
 
 
 # Detail (session title / last prompt) past this many chars is trimmed for listings.
