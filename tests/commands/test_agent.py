@@ -1287,7 +1287,7 @@ def test_agent_resume_cli_stamps_the_agent_role(
 
 def _orphan_sleeper() -> int:
     """A sleeping process that is not our child, so SIGTERM leaves no zombie to confuse
-    the exit polling in ``_terminate``."""
+    the exit polling in ``Agent.stop``."""
     out = subprocess.run(
         ['bash', '-c', 'sleep 60 & echo $!'], capture_output=True, text=True, check=True
     )
@@ -1301,7 +1301,7 @@ def _session_with(pid: int | None, cwd: Path, name: str = 'p@g@agent') -> Sessio
 def test_stop_terminates_the_live_session(tmpdir: TempDir, replace: Replacer) -> None:
     pid = _orphan_sleeper()
     session = _session_with(pid, tmpdir.path)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session])
     try:
         with full_capture() as log:
             compare(stop(tmpdir.path), expected=[session])
@@ -1319,12 +1319,12 @@ def test_stop_handles_a_session_that_already_died(tmpdir: TempDir, replace: Repl
     proc = subprocess.Popen(['true'])
     proc.wait()  # reaped: the pid no longer names a process
     session = _session_with(proc.pid, tmpdir.path)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session])
     compare(stop(tmpdir.path), expected=[session])
 
 
 def test_stop_refuses_a_pidless_session(tmpdir: TempDir, replace: Replacer) -> None:
-    replace.in_module(live, lambda worktree: [_session_with(None, tmpdir.path)])
+    replace.on_class(Claude.live, lambda self, cwd=None: [_session_with(None, tmpdir.path)])
     with ShouldRaise(
         UserError('p@g@agent reports no pid — stop it from its own harness, then re-run')
     ):
@@ -1345,7 +1345,7 @@ def test_stop_refuses_a_session_that_will_not_die(tmpdir: TempDir, replace: Repl
     )
     assert proc.stdout is not None
     proc.stdout.readline()  # the handler is installed
-    replace.in_module(live, lambda worktree: [_session_with(proc.pid, tmpdir.path)])
+    replace.on_class(Claude.live, lambda self, cwd=None: [_session_with(proc.pid, tmpdir.path)])
     try:
         with ShouldRaise(
             UserError(
@@ -1361,14 +1361,16 @@ def test_stop_refuses_a_session_that_will_not_die(tmpdir: TempDir, replace: Repl
 
 def test_stop_dry_signals_nothing(tmpdir: TempDir, replace: Replacer) -> None:
     session = _session_with(os.getpid(), tmpdir.path)  # us: a signal would be very visible
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session])
     compare(stop(tmpdir.path, Dry(True)), expected=[session])
 
 
 def test_agent_stop_cli_dry(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     _project_with_worktree(tmpdir)
     worktree = Path.cwd() / 'worktrees' / 'g@agent'
-    replace.in_module(live, lambda w: [_session_with(4242, worktree, 'myproject@g@agent')])
+    replace.on_class(
+        Claude.live, lambda self, cwd=None: [_session_with(4242, worktree, 'myproject@g@agent')]
+    )
     command.run('agent', 'stop', '-g', 'g', '--dry').check(
         output='Would stop myproject@g@agent (pid 4242)',
         logging=action_logs(
@@ -1383,7 +1385,7 @@ def test_agent_stop_cli_with_nothing_live(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     _project_with_worktree(tmpdir)
-    replace.in_module(live, lambda w: [])
+    replace.on_class(Claude.live, lambda self, cwd=None: [])
     worktree = Path.cwd() / 'worktrees' / 'g@agent'
     command.run('agent', 'stop', '-g', 'g').check(
         output=f'No live agent in {worktree}',
@@ -1398,7 +1400,7 @@ def test_agent_stop_cli_with_nothing_live(
 def test_stop_refuses_a_session_that_is_not_ours_to_signal(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
-    replace.in_module(live, lambda worktree: [_session_with(4242, tmpdir.path)])
+    replace.on_class(Claude.live, lambda self, cwd=None: [_session_with(4242, tmpdir.path)])
 
     def deny(pid: int, sig: int) -> None:
         raise PermissionError(1, 'Operation not permitted')
@@ -1412,7 +1414,7 @@ def test_stop_refuses_a_session_that_is_not_ours_to_signal(
 
 def test_stop_handles_the_pid_reused_by_another_user(tmpdir: TempDir, replace: Replacer) -> None:
     session = _session_with(4242, tmpdir.path)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session])
 
     def kill(pid: int, sig: int) -> None:
         if sig == 0:  # the SIGTERM freed the pid; another user's process now wears it

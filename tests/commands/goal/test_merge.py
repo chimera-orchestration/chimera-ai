@@ -9,6 +9,7 @@ from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.agents import Session
+from chimera.agents.claude import Claude
 from chimera.commands.agent import live, stop
 from chimera.commands.goal import merge as merge_mod
 from chimera.commands.goal.merge import MergeResult, merge
@@ -22,7 +23,7 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live, lambda worktree: [])  # what stop() consults
+    replace.on_class(Claude.live, lambda self, cwd=None: [])  # what stop() consults
     replace.in_module(live, lambda worktree: [], module=merge_mod)  # merge's own pre-flight
 
 
@@ -365,7 +366,7 @@ def test_dry_previews_the_whole_landing(tmpdir: TempDir, git_repo: Repo, replace
     agent_worktree = worktrees / 'g@agent'
     Repo(agent_worktree).commit_content('work')
     session = Session('x', 'p@g@agent', 'idle', agent_worktree, None, pid=4242)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     main_before = _full(git_repo.path, 'main')
     tip = _short(git_repo.path, 'g/agent')
     result = merge(git_repo.path, worktrees, 'g', dry=Dry(True))
@@ -391,7 +392,7 @@ def test_stops_the_live_agent_before_the_sweep(
     )
     pid = int(out.stdout)
     session = Session('x', 'p@g@agent', 'idle', agent_worktree, None, pid=pid)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     try:
         result = merge(git_repo.path, worktrees, 'g')
     finally:
@@ -536,7 +537,7 @@ def test_goal_merge_cli_dry_previews(
     agent_worktree = worktrees / 'g@agent'
     Repo(agent_worktree).commit_content('work')
     session = Session('x', 'myproject@g@agent', 'idle', agent_worktree, None, pid=4242)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     tip_short = _short(git_repo.path, 'g/agent')
     old_main = _full(git_repo.path, 'main')
     start, end = action_logs(

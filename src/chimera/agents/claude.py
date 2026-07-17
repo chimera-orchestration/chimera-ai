@@ -13,6 +13,7 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.agents import Agent, Session
+from chimera.config import UserError
 
 # claude only makes bypass-permissions mode reachable via shift-tab when launched with this;
 # availability is fixed at launch, so it must ride on the very command that starts the session.
@@ -210,6 +211,34 @@ class Claude(Agent):
                 session = replace(session, stale='no pid in the registry entry (degraded remnant)')
             claims.append(session)
         return claims
+
+    def stop(self, session: Session, timeout: float = 10.0) -> None:
+        """Stop ``session`` for good.
+
+        A background (``--bg``) session runs under claude's own supervisor, which
+        respawns a bare SIGTERM as a crash — a fresh pid picks up the same job within
+        seconds, so the session is never actually stopped, only briefly interrupted,
+        and the ``claude agents`` bridge is left with a row pointing at a pid that's
+        gone (clicking it reports "session ended", but the job itself keeps running).
+        Verified live against ``claude`` 2.1.212: a SIGTERM'd ``--bg`` job respawns
+        under a new pid within ~5s, while ``claude stop <id>`` cleanly kills both the
+        worker and its supervisor and marks the job ``stopped`` (resumable later via
+        ``claude attach``). So a background session is stopped through claude's own
+        ``stop`` subcommand — keyed by :attr:`Session.short`, the job id ``claude
+        stop`` expects (the full ``sessionId`` UUID is *not* accepted). An interactive
+        session has no such supervisor and stops cleanly on a plain SIGTERM, so it
+        keeps the base behaviour.
+        """
+        if session.kind != 'background':
+            super().stop(session, timeout)
+            return
+        result = subprocess.run(['claude', 'stop', session.short], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise UserError(
+                f'{session.name} (job {session.short}): `claude stop` failed: '
+                f'{result.stderr.strip() or result.stdout.strip()}'
+            )
+        logger.bind(session=session.name, id=session.short).info('agent stop')
 
     def _enriched(self, session: Session) -> Session:
         if session.cwd == Path('.'):  # registry entry had no cwd — no transcript folder to read

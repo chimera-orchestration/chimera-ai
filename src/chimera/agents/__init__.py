@@ -9,6 +9,8 @@ registry claims (:meth:`Agent.live`).
 """
 
 import os
+import signal
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -18,6 +20,8 @@ from subprocess import CompletedProcess
 from typing import ClassVar, Protocol
 
 from loguru import logger
+
+from chimera.config import UserError
 
 
 @dataclass(frozen=True)
@@ -209,6 +213,44 @@ class Agent(ABC):
     def live(self, cwd: Path | None = None) -> list[Session]:
         """The sessions actually live in ``cwd``: :meth:`checked`, minus the stale."""
         return [session for session in self.checked(cwd) if session.stale is None]
+
+    def stop(self, session: Session, timeout: float = 10.0) -> None:
+        """Stop ``session`` for good: SIGTERM its pid, then wait for it to exit.
+
+        The harness-agnostic default — a plain process dies cleanly on SIGTERM, with
+        nothing further to reconcile. A harness whose sessions need their own graceful
+        shutdown call overrides this (e.g. one with a supervisor that would otherwise
+        treat a bare SIGTERM as a crash and respawn the session under it). SIGKILL is
+        never sent — a session that won't die is the caller's to inspect. The caller
+        has already established ``session.pid`` is not ``None``.
+        """
+        assert session.pid is not None
+        pid = session.pid
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass  # died between the liveness check and the signal — already what we wanted
+        except PermissionError:
+            # the liveness layer deliberately counts another user's pid as live (it proves
+            # the process exists — e.g. a stale registry entry whose pid was reused after a
+            # reboot)
+            raise UserError(
+                f'{session.name} (pid {pid}) is not ours to signal — stop it by hand, then re-run'
+            ) from None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                # gone — PermissionError here means the pid we could signal a moment ago was
+                # freed by our SIGTERM and already reused by another user's process
+                logger.bind(session=session.name, pid=pid).info('agent stop')
+                return
+            time.sleep(0.05)
+        raise UserError(
+            f'{session.name} (pid {pid}) is still running {timeout:g}s after SIGTERM — '
+            f'kill it by hand, then re-run'
+        )
 
 
 def _distrusted(session: Session) -> Session:

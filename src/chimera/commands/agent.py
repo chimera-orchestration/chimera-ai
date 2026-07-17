@@ -1,6 +1,3 @@
-import os
-import signal
-import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -49,56 +46,32 @@ def live(worktree: Path) -> list[Session]:
 
 
 def stop(worktree: Path, dry: Dry = Dry(), timeout: float = 10.0) -> list[Session]:
-    """Stop every live agent session in the worktree: SIGTERM its pid, wait for it to exit.
+    """Stop every live agent session in the worktree, through its own harness.
 
     The polite kill for work that's over — a session's committed work is already on its
     branch, and anything uncommitted was the caller's to check *before* stopping. Refuses
     when the worktree itself doesn't exist (a mistyped goal or actor must never read as
-    "nothing running"), when a session reports no pid (nothing to signal — a
-    server-backed harness needs its own stop) or when the pid outlives ``timeout``
-    seconds after SIGTERM; SIGKILL is never sent — a session that won't die is the
-    user's to inspect. Each stop lands an ``agent stop`` log line binding the session
-    name and pid. Under ``dry`` the discovery runs but nothing is signalled. Returns the
-    sessions that were (or would be) stopped.
+    "nothing running") or when a session reports no pid (nothing to signal — a
+    server-backed harness needs its own stop). Each session is stopped by the harness
+    that reported it (:meth:`chimera.agents.Agent.stop`) — the harness-agnostic default
+    is SIGTERM-and-wait, but a harness whose sessions need their own graceful shutdown
+    (claude's background jobs — see :meth:`chimera.agents.claude.Claude.stop`) overrides
+    it, so a stop actually sticks instead of being silently respawned. Under ``dry`` the
+    discovery runs but nothing is stopped. Returns the sessions that were (or would be)
+    stopped.
     """
     if not worktree.is_dir():
         raise UserError(f'no worktree at {worktree} — check the goal (-g) and actor (-a)')
-    sessions = live(worktree)
-    for session in sessions:
-        if (pid := session.pid) is None:
+    pairs = [
+        (harness, session) for harness in AGENTS.values() for session in harness.live(worktree)
+    ]
+    for harness, session in pairs:
+        if session.pid is None:
             raise UserError(
                 f'{session.name} reports no pid — stop it from its own harness, then re-run'
             )
-        dry(_terminate, session.name, pid, timeout)
-    return sessions
-
-
-def _terminate(name: str, pid: int, timeout: float) -> None:
-    """SIGTERM ``pid`` and wait for it to exit, up to ``timeout`` seconds."""
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        pass  # died between the liveness check and the signal — already what we wanted
-    except PermissionError:
-        # the liveness layer deliberately counts another user's pid as live (it proves the
-        # process exists — e.g. a stale registry entry whose pid was reused after a reboot)
-        raise UserError(
-            f'{name} (pid {pid}) is not ours to signal — stop it by hand, then re-run'
-        ) from None
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            os.kill(pid, 0)
-        except (ProcessLookupError, PermissionError):
-            # gone — PermissionError here means the pid we could signal a moment ago was
-            # freed by our SIGTERM and already reused by another user's process
-            logger.bind(session=name, pid=pid).info('agent stop')
-            return
-        time.sleep(0.05)
-    raise UserError(
-        f'{name} (pid {pid}) is still running {timeout:g}s after SIGTERM — '
-        f'kill it by hand, then re-run'
-    )
+        dry(harness.stop, session, timeout)
+    return [session for _, session in pairs]
 
 
 def refuse_restricted(spec: AgentSpec, extra: Sequence[str]) -> None:

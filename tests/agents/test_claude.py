@@ -10,7 +10,7 @@ from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.popen import MockPopen
 
 from chimera.agent_env import ROLE_CAPTAIN, role_env
-from chimera.agents import Session
+from chimera.agents import Agent, Session
 from chimera.agents.claude import (
     READONLY_TOOLS,
     Claude,
@@ -19,6 +19,7 @@ from chimera.agents.claude import (
     _warn_missing_binary,
     session_summary,
 )
+from chimera.config import UserError
 
 
 def _registry(replace: Replacer, payload: str) -> MockPopen:
@@ -414,6 +415,70 @@ class TestRun:
                 'session': 'n',
             }
         )
+
+
+def _bg_session(kind: str | None = 'background', pid: int = 4242) -> Session:
+    return Session(
+        id='1ff2c8e3-54c6-4afe-9b24-f1c40d360770',
+        name='proj@g@agent',
+        status='busy',
+        cwd=Path('/wt'),
+        summary=None,
+        pid=pid,
+        kind=kind,
+    )
+
+
+class TestStop:
+    # a bare SIGTERM to a --bg session's pid is respawned by claude's own supervisor
+    # (verified live) — a background session must go through `claude stop <short-id>`
+    # instead; the short id (not the full sessionId UUID) is what `claude stop` accepts.
+
+    def test_background_session_stops_via_claude_stop_by_short_id(
+        self, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_default(returncode=0)
+        session = _bg_session()
+        Claude().stop(session)
+        compare(Popen.all_calls[0].args[0], expected=['claude', 'stop', '1ff2c8e3'])
+        full_logs.check(
+            {
+                'level': 'INFO',
+                'message': 'agent stop',
+                'session': 'proj@g@agent',
+                'id': '1ff2c8e3',
+            }
+        )
+
+    def test_background_session_stop_failure_raises(self, replace: Replacer) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_default(returncode=1, stderr=b"No job matching '1ff2c8e3'.\n")
+        with ShouldRaise(
+            UserError(
+                "proj@g@agent (job 1ff2c8e3): `claude stop` failed: No job matching '1ff2c8e3'."
+            )
+        ):
+            Claude().stop(_bg_session())
+
+    def test_interactive_session_falls_back_to_the_base_sigterm(self, replace: Replacer) -> None:
+        calls: list[tuple[Session, float]] = []
+        replace.on_class(
+            Agent.stop, lambda self, session, timeout=10.0: calls.append((session, timeout))
+        )
+        session = _bg_session(kind='interactive')
+        Claude().stop(session, timeout=5.0)
+        compare(calls, expected=[(session, 5.0)])
+
+    def test_session_with_no_kind_also_falls_back(self, replace: Replacer) -> None:
+        # a plain foreground launch reports no `kind` at all, not just 'interactive'
+        calls: list[Session] = []
+        replace.on_class(Agent.stop, lambda self, session, timeout=10.0: calls.append(session))
+        session = _bg_session(kind=None)
+        Claude().stop(session)
+        compare(calls, expected=[session])
 
 
 def test_print_args_defaults() -> None:
