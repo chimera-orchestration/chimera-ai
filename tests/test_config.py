@@ -35,6 +35,22 @@ def test_load_config_absent(tmpdir: TempDir) -> None:
     assert load_config(tmpdir.path) is None
 
 
+def test_load_config_foreign_mapping_without_kind(tmpdir: TempDir) -> None:
+    # e.g. a checked-out project's own config.yaml, unrelated to chimera
+    tmpdir.dump('proj/config.yaml', {'name': 'energy-sim', 'database': {'host': 'localhost'}})
+    assert load_config(tmpdir.path / 'proj') is None
+
+
+def test_load_config_foreign_kind(tmpdir: TempDir) -> None:
+    tmpdir.dump('proj/config.yaml', {'kind': 'something-else'})
+    assert load_config(tmpdir.path / 'proj') is None
+
+
+def test_load_config_malformed_yaml(tmpdir: TempDir) -> None:
+    tmpdir.write('proj/config.yaml', b'kind: [project\n')
+    assert load_config(tmpdir.path / 'proj') is None
+
+
 def test_load_config_agent_cascade_levels(tmpdir: TempDir) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'agent': {'harness': 'claude'}})
     project = tmpdir.path / 'ws' / 'proj'

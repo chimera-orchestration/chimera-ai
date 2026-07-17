@@ -111,6 +111,20 @@ class TestResolveProject:
         with ShouldRaise(CannotIdentifyProjectError(bare)):
             resolve_project(bare)
 
+    def test_tolerates_the_target_repos_own_config_yaml(
+        self, tmpdir: TempDir, workspace: Path
+    ) -> None:
+        # the checked-out repo tracks its own unrelated config.yaml at its root, which is
+        # also the goal worktree's root — this must not be mistaken for chimera's marker
+        repo = Repo.make(tmpdir / 'external')
+        repo.commit_content(
+            'config.yaml', content='name: energy-sim\ndatabase:\n  host: localhost\n'
+        )
+        project = _project(tmpdir, workspace, 'myproj', repo=str(repo.path))
+        add(repo.path, project / 'worktrees', goal='g', actors=('agent',))
+        worktree = project / 'worktrees' / 'g@agent'
+        compare(resolve_project(worktree), expected=_resolved(project, str(repo.path)))
+
 
 class TestIterProjects:
     def test_lists_only_projects_sorted(self, tmpdir: TempDir, workspace: Path) -> None:
