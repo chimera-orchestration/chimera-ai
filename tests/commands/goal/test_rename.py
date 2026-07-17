@@ -273,8 +273,8 @@ class TestRefusals:
             module=worktree_rm,
         )
         with ShouldRaise(
-            RuntimeError(
-                f'an agent is live in {worktrees / "g@agent"}:\n  pid 4242  idle\n'
+            UserError(
+                f'an agent is live in {worktrees / "g@agent"}: pid 4242  idle\n'
                 'find its terminal or kill the pid, then re-run'
             )
         ):

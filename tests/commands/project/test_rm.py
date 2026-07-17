@@ -11,12 +11,14 @@ from chimera.commands.project.new import new
 from chimera.commands.project.rm import remove
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
+from chimera.config import UserError
 from chimera.dry import Dry
 from tests.cli import Command, action_logs
 
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
+    replace.in_module(live, lambda worktree: [])  # what the forced sweep's stop() consults
     replace.in_module(live, lambda worktree: [], module=worktree_rm)
 
 
@@ -86,9 +88,8 @@ def test_remove_force_aborts_when_an_agent_is_running(
         module=worktree_rm,
     )
     with ShouldRaise(
-        RuntimeError(
-            f'an agent is live in {project / "worktrees" / "g@agent"}:\n'
-            '  pid ?  idle\n'
+        UserError(
+            f'an agent is live in {project / "worktrees" / "g@agent"}: pid ?  idle\n'
             'find its terminal or kill the pid, then re-run'
         )
     ):
@@ -106,13 +107,12 @@ def test_remove_aborts_when_a_project_chat_is_live(
         module=worktree_rm,
     )
     message = (
-        f'an agent is live in {project}:\n'
-        '  pid ?  idle  myproj@manager\n'
+        f'an agent is live in {project}: pid ?  idle  myproj@manager\n'
         'find its terminal or kill the pid, then re-run'
     )
-    with ShouldRaise(RuntimeError(message)):
+    with ShouldRaise(UserError(message)):
         remove(workspace, 'myproj')
-    with ShouldRaise(RuntimeError(message)):  # a live chat blocks force too
+    with ShouldRaise(UserError(message)):  # a live chat blocks force too
         remove(workspace, 'myproj', force=True)
     assert project.is_dir()
 

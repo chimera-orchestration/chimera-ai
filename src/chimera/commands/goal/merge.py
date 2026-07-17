@@ -114,7 +114,7 @@ def merge(
         # SIGTERM landing must refuse here — the sweep below is forced, and an uncommitted
         # file it discarded would be the one loss the log couldn't recover
         _refuse_if_dirty(worktrees)
-    removed = tuple(remove(repo, worktrees_root, goal, force=True, fetch=False, dry=dry))
+    removed = remove(repo, worktrees_root, goal, force=True, fetch=False, dry=dry).removed
     return MergeResult(source, base, sha, fastforwarded, landed, stopped, removed)
 
 

@@ -1,3 +1,5 @@
+import os
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -7,11 +9,12 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
+from chimera.agent_env import ai_session
 from chimera.agents import Session
 from chimera.commands.agent import live
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
-from chimera.commands.worktree.rm import remove
+from chimera.commands.worktree.rm import RemoveResult, remove
 from chimera.config import UserError
 from chimera.dry import Dry
 from tests.cli import Command, action_logs
@@ -19,7 +22,8 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live, lambda worktree: [], module=worktree_rm)
+    replace.in_module(live, lambda worktree: [])  # what a forced stop() consults
+    replace.in_module(live, lambda worktree: [], module=worktree_rm)  # rm's own gathering
 
 
 def _goal(tmpdir: TempDir, repo: Repo) -> Path:
@@ -36,7 +40,7 @@ def _project(tmpdir: TempDir, repo: Repo) -> Path:
 def test_remove_is_a_noop_for_a_goal_that_was_never_created(
     tmpdir: TempDir, git_repo: Repo
 ) -> None:
-    compare(remove(git_repo.path, tmpdir / 'worktrees', 'ghost'), expected=[])
+    compare(remove(git_repo.path, tmpdir / 'worktrees', 'ghost'), expected=RemoveResult())
 
 
 def test_remove_aborts_when_an_agent_is_running(
@@ -61,10 +65,11 @@ def test_remove_aborts_when_an_agent_is_running(
     )
     since = f'{datetime.fromtimestamp(1781247747055 / 1000):%a %H:%M}'
     with ShouldRaise(
-        RuntimeError(
-            f'an agent is live in {worktrees / "g@agent"}:\n'
-            f'  pid 4242  interactive  idle  since {since}  sybil@g@agent\n'
-            'find its terminal or kill the pid, then re-run'
+        UserError(
+            'refusing to clean up:\n'
+            f'  an agent is live in {worktrees / "g@agent"}: '
+            f'pid 4242  interactive  idle  since {since}  sybil@g@agent\n'
+            'use --force to stop the agents'
         )
     ):
         remove(git_repo.path, worktrees, 'g')
@@ -72,25 +77,64 @@ def test_remove_aborts_when_an_agent_is_running(
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
-def test_remove_force_bypasses_the_liveness_check(
+def test_remove_force_stops_the_live_agent(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
-    replace.in_module(
-        live,
-        lambda worktree: [Session('x', 'x', 'idle', worktree, None)],
-        module=worktree_rm,
+    out = subprocess.run(  # not our child, so no zombie confuses the exit polling
+        ['bash', '-c', 'sleep 60 & echo $!'], capture_output=True, text=True, check=True
     )
-    remove(git_repo.path, worktrees, 'g', force=True)
+    pid = int(out.stdout)
+    session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None, pid=pid)
+    replace.in_module(live, lambda worktree: [session])
+    try:
+        result = remove(git_repo.path, worktrees, 'g', force=True)
+    finally:
+        try:
+            os.kill(pid, 9)
+        except ProcessLookupError:
+            pass
+    compare(result, expected=RemoveResult((worktrees / 'g@agent',), stopped=(session,)))
+    with ShouldRaise(ProcessLookupError):
+        os.kill(pid, 0)
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])
+
+
+def test_remove_force_refuses_a_session_it_cannot_stop(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None)  # no pid to signal
+    replace.in_module(live, lambda worktree: [session])
+    with ShouldRaise(
+        UserError('p@g@agent reports no pid — stop it from its own harness, then re-run')
+    ):
+        remove(git_repo.path, worktrees, 'g', force=True)
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
+
+
+def test_remove_dry_force_previews_the_stop(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None, pid=4242)
+    replace.in_module(live, lambda worktree: [session])
+    compare(
+        remove(git_repo.path, worktrees, 'g', force=True, dry=Dry(on=True)),
+        expected=RemoveResult((worktrees / 'g@agent',), stopped=(session,)),
+    )
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing stopped or removed
+    compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
 
 
 def test_remove_takes_out_worktrees_and_branches(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     compare(
-        remove(git_repo.path, worktrees, 'g'), expected=[worktrees / 'g@agent']
-    )  # only the agent
+        remove(git_repo.path, worktrees, 'g'),
+        expected=RemoveResult((worktrees / 'g@agent',)),  # only the agent
+    )
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])
 
@@ -100,7 +144,7 @@ def test_remove_takes_out_on_demand_actor_branches(tmpdir: TempDir, git_repo: Re
     git = Git(git_repo.path)
     git('branch', '--no-track', 'g/human', 'g/agent')  # materialised later by `goal sync`
     git('branch', '--no-track', 'g/reviewer', 'g/agent')
-    compare(remove(git_repo.path, worktrees, 'g'), expected=[worktrees / 'g@agent'])
+    compare(remove(git_repo.path, worktrees, 'g'), expected=RemoveResult((worktrees / 'g@agent',)))
     tmpdir.compare(path='worktrees', expected=())
     compare(git.branches(), expected=['main'])  # every g/* branch gone, not just agent
 
@@ -128,9 +172,10 @@ def test_remove_refuses_uncommitted_changes(tmpdir: TempDir, git_repo: Repo) -> 
     worktrees = _goal(tmpdir, git_repo)
     (worktrees / 'g@agent' / 'scratch.txt').write_text('wip')
     with ShouldRaise(
-        RuntimeError(
-            'refusing to clean up (use --force to discard):\n'
-            f'  {worktrees / "g@agent"} has uncommitted or untracked changes'
+        UserError(
+            'refusing to clean up:\n'
+            f'  {worktrees / "g@agent"} has uncommitted or untracked changes\n'
+            'use --force to discard the work'
         )
     ):
         remove(git_repo.path, worktrees, 'g')
@@ -142,8 +187,10 @@ def test_remove_refuses_unmerged_branch(tmpdir: TempDir, git_repo: Repo) -> None
     worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('work')  # branch now ahead of main
     with ShouldRaise(
-        RuntimeError(
-            'refusing to clean up (use --force to discard):\n  branch g/agent has unmerged commits'
+        UserError(
+            'refusing to clean up:\n'
+            '  branch g/agent has unmerged commits\n'
+            'use --force to discard the work'
         )
     ):
         remove(git_repo.path, worktrees, 'g')
@@ -175,7 +222,7 @@ def test_remove_sweeps_a_stray_worktree_actor(tmpdir: TempDir, git_repo: Repo) -
     )  # an extra actor with its own worktree
     compare(
         remove(git_repo.path, worktrees, 'g'),
-        expected=[worktrees / 'g@agent', worktrees / 'g@scout'],  # both worktrees, sorted
+        expected=RemoveResult((worktrees / 'g@agent', worktrees / 'g@scout')),  # both, sorted
     )
     tmpdir.compare(path='worktrees', expected=())
     compare(Git(git_repo.path).branches(), expected=['main'])
@@ -186,8 +233,10 @@ def test_remove_refuses_an_unmerged_stray_actor(tmpdir: TempDir, git_repo: Repo)
     add(git_repo.path, worktrees, goal='g', actors=('scout',))
     Repo(worktrees / 'g@scout').commit_content('work')  # scout ahead of main
     with ShouldRaise(
-        RuntimeError(
-            'refusing to clean up (use --force to discard):\n  branch g/scout has unmerged commits'
+        UserError(
+            'refusing to clean up:\n'
+            '  branch g/scout has unmerged commits\n'
+            'use --force to discard the work'
         )
     ):
         remove(git_repo.path, worktrees, 'g')
@@ -206,19 +255,55 @@ def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
         module=worktree_rm,
     )
     with ShouldRaise(
-        RuntimeError(
-            f'an agent is live in {scout}:\n  pid ?\nfind its terminal or kill the pid, then re-run'
+        UserError(
+            f'refusing to clean up:\n  an agent is live in {scout}: pid ?\n'
+            'use --force to stop the agents'
         )
     ):
         remove(git_repo.path, worktrees, 'g')
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'g/scout', 'main'])
 
 
+def test_remove_reports_every_problem_in_one_refusal(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    agent_worktree = worktrees / 'g@agent'
+    Repo(agent_worktree).commit_content('work')  # unmerged
+    (agent_worktree / 'scratch.txt').write_text('wip')  # uncommitted
+    replace.in_module(
+        live,
+        lambda worktree: [Session('x', 'x', '?', worktree, None, pid=4242)],
+        module=worktree_rm,
+    )
+    with ShouldRaise(
+        UserError(
+            'refusing to clean up:\n'
+            f'  an agent is live in {agent_worktree}: pid 4242\n'
+            f'  {agent_worktree} has uncommitted or untracked changes\n'
+            '  branch g/agent has unmerged commits\n'
+            'use --force to stop the agents and discard the work'
+        )
+    ):
+        remove(git_repo.path, worktrees, 'g')
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
+
+
+def test_remove_refusal_never_signposts_force_to_an_ai_session(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    worktrees = _goal(tmpdir, git_repo)
+    Repo(worktrees / 'g@agent').commit_content('work')  # unmerged
+    replace.in_module(ai_session, lambda: True, module=worktree_rm)
+    with ShouldRaise(UserError('refusing to clean up:\n  branch g/agent has unmerged commits')):
+        remove(git_repo.path, worktrees, 'g')
+
+
 def test_remove_dry_previews_without_touching_anything(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo)
     compare(
         remove(git_repo.path, worktrees, 'g', dry=Dry(on=True)),
-        expected=[worktrees / 'g@agent'],  # what would be removed
+        expected=RemoveResult((worktrees / 'g@agent',)),  # what would be removed
     )
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # still present
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
@@ -253,7 +338,7 @@ def test_remove_recognises_an_upstream_merge_only_after_fetch(tmpdir: TempDir) -
     # local's origin/main tracking ref stays stale until a fetch — pushing to main would update it.
     local('push', '-q', 'origin', 'g/agent:refs/heads/incoming')
     origin('merge', '-q', 'incoming')  # origin's main now carries g/agent
-    with ShouldRaise(RuntimeError, match='branch g/agent has unmerged commits'):
+    with ShouldRaise(UserError, match='branch g/agent has unmerged commits'):
         remove(local.path, worktrees, 'g', fetch=False)  # stale refs don't see the merge
     remove(local.path, worktrees, 'g')  # fetch refreshes origin/main → merged
     tmpdir.compare(path='worktrees', expected=())
@@ -366,6 +451,25 @@ def test_worktree_rm_cli_dry_previews(tmpdir: TempDir, git_repo: Repo, command: 
     )
     tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
     compare(Git(git_repo.path).branches(), expected=['g/agent', 'main'])
+
+
+def test_worktree_rm_cli_force_dry_previews_the_stop(
+    tmpdir: TempDir, git_repo: Repo, command: Command, replace: Replacer
+) -> None:
+    project = _project(tmpdir, git_repo)
+    command.run('worktree', 'add', '--goal', 'g')
+    worktree = (project / 'worktrees' / 'g@agent').resolve()
+    session = Session('x', 'p@g@agent', 'idle', worktree, None, pid=4242)
+    replace.in_module(live, lambda worktree: [session])
+    command.run('worktree', 'rm', 'g', '--force', '--dry').check(
+        output=f'Would stop p@g@agent (pid 4242)\nWould remove {worktree}',
+        logging=action_logs(
+            'worktree rm',
+            WR,
+            {'goal': 'g', 'force': True, 'offline': False, 'dry': True, 'project': None},
+        ),
+    )
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
 
 
 def test_worktree_rm_cli_reports_nothing_to_remove(
