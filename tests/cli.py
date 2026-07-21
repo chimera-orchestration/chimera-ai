@@ -13,6 +13,7 @@ the *annotation*: a bare ``command: testfixtures.Command`` resolves to the stock
 makes the dict-typed ``check`` the one ty sees — with no per-test annotation churn.
 """
 
+import re
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
@@ -20,13 +21,19 @@ from typing import TYPE_CHECKING, TypeAlias
 from testfixtures import Command as _Command
 from testfixtures import LogCapture, Replacer
 from testfixtures.command import AbstractRun, CheckResult
+from testfixtures.comparing import compare
 from testfixtures.loguru import LoguruSource
 from testfixtures.mock import Mock, call
+from testfixtures.outputcapture import OutputCapture
 from typer._click.core import Command as ClickCommand
 from typer.core import TyperGroup
 
 from chimera.agents.claude import Claude
 from chimera.logging import configure
+
+# ch dashboard forces color (color=True) so it survives watch's non-tty pipe; strip it
+# before comparing captured output, same as TestRender's own _strip in test_dashboard.py.
+_ANSI = re.compile(r'\x1b\[[0-9;]*m')
 
 if TYPE_CHECKING:
     from loguru import Record
@@ -163,6 +170,15 @@ class Run(AbstractRun):
         mocks = Mock()
         replace.in_module(configure, mocks.configure)
         return mocks
+
+    @staticmethod
+    def check_output(expected: str, output: OutputCapture) -> CheckResult:
+        # ch dashboard forces color (chimera.commands.dashboard) so it survives watch's
+        # non-tty pipe; strip it here so every command's expected output stays plain text.
+        actual = _ANSI.sub('', output.captured)
+        return CheckResult(
+            'output', compare(expected=expected.strip(), actual=actual.strip(), raises=False)
+        )
 
     @staticmethod
     def check_logging(expected: Sequence[object], logging: LogCapture) -> CheckResult:

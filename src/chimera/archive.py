@@ -31,6 +31,7 @@ lexicographically, so keep them in a single zone (UTC) for a correct timeline.
 """
 
 import sqlite3
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Self
@@ -183,19 +184,30 @@ class Archive:
     def record_session(self, session: Session) -> None:
         """Insert ``session``, or update it in place if ``(platform, native_id)`` is known.
 
-        All but one column takes the new value: ``started_at`` is first-write-wins,
-        because a re-record of a known identity is a *resume* (or a late detail pass),
-        never a new run — the original start time is the one fact only the first firing
+        Most columns take the new value: a re-record of a known identity is a *resume*
+        (or a late detail pass), never a new run. Two exceptions: ``started_at`` is
+        first-write-wins — the original start time is the one fact only the first firing
         knew, and it must survive. ``ended_at`` does follow the new value, so a resume
         (recording with ``ended_at=None``) reopens a session a SessionEnd had closed.
+        ``manager`` is sticky-true — once a session is known to be chimera- (or
+        otherwise-) managed, a later firing recorded with ``manager='none'`` (e.g. a raw
+        ``claude --resume`` or the ``claude agents`` browser attaching outside any
+        chimera launcher, which stamps no role) never regresses it back to ``'none'``.
+        ``model`` similarly keeps its last known value rather than being blanked by a
+        firing whose payload omitted it (the field is optional, e.g. absent after
+        ``/clear``).
         """
         self._db.execute(
             'record_session',
             f"""
             {_INSERT_SESSION}
             ON CONFLICT(platform, native_id) DO UPDATE SET
-                status=excluded.status, manager=excluded.manager,
-                model=excluded.model, name=excluded.name, ended_at=excluded.ended_at,
+                status=excluded.status,
+                manager=CASE WHEN excluded.manager != 'none' THEN excluded.manager
+                              WHEN sessions.manager != 'none' THEN sessions.manager
+                              ELSE 'none' END,
+                model=COALESCE(excluded.model, sessions.model),
+                name=excluded.name, ended_at=excluded.ended_at,
                 cwd=excluded.cwd, transcript=excluded.transcript, summary=excluded.summary,
                 input_tokens=excluded.input_tokens, output_tokens=excluded.output_tokens,
                 cost_usd=excluded.cost_usd, workspace=excluded.workspace,
@@ -295,9 +307,15 @@ class Archive:
         return _row_to_session(row) if row is not None else None
 
     def latest_session_for(
-        self, project: str, goal: str, actor: str, *, platform: str | None = None
+        self,
+        project: str | None,
+        goal: str | None = None,
+        actor: str | None = None,
+        *,
+        platform: str | None = None,
+        name: str | None = None,
     ) -> Session | None:
-        """The most recently *active* session at a ``project@goal@actor`` address, else ``None``.
+        """The most recently *active* session at an address, else ``None``.
 
         The resume resolver: registry names are mutable (a UI rename orphans the label),
         so ``agent resume`` looks the address up here and resumes by the immutable
@@ -306,12 +324,29 @@ class Archive:
         with none, e.g. a backfilled one) — never creation time, which is first-write-wins:
         an old thread the user resumed yesterday must beat a fresher-created one abandoned
         after a ``/clear``. ``platform`` narrows to the harness doing the resuming.
+
+        A goal actor address gives all three axes, which already pin it uniquely. A
+        manager address gives ``project`` only, and the captain address gives none of
+        them — both leave ``goal``/``actor`` (or every axis) null, which alone can't tell
+        "the manager's own session" from any other axis-less row, so ``name`` narrows to
+        the exact address in that case. ``name`` beats the once-tried ``manager='chimera'``
+        filter: that flag is stamped from the launching process's ``CHIMERA_ROLE`` env var,
+        which doesn't survive a resume, a reattach, or a background job — in practice almost
+        no real session keeps it, so filtering on it hid genuine activity far more often
+        than it caught an unrelated same-named session. ``name`` (derived from cwd by
+        :func:`chimera.context.caller`, stable across every resume) is the durable signal.
+        Unlike :meth:`sessions`, ``None`` here means "must be unset" (``IS NULL``), not
+        "unconstrained", for ``project``/``goal``/``actor`` — a board slot needs the exact
+        address, not a widened match.
         """
-        clauses = 'sessions.project=? AND sessions.goal=? AND sessions.actor=?'
-        params = [project, goal, actor]
+        clauses = 'sessions.project IS ? AND sessions.goal IS ? AND sessions.actor IS ?'
+        params: list[str | None] = [project, goal, actor]
         if platform is not None:
             clauses += ' AND sessions.platform=?'
             params.append(platform)
+        if name is not None:
+            clauses += ' AND sessions.name=?'
+            params.append(name)
         row = self._db.execute(
             'latest_session_for',
             f"""
@@ -325,6 +360,39 @@ class Archive:
             params,
         ).fetchone()
         return _row_to_session(row) if row is not None else None
+
+    def recent_sessions(
+        self, workspace: str, *, exclude: Sequence[str] = (), limit: int
+    ) -> list[Session]:
+        """The most recently active sessions in ``workspace``, newest first, excluding every
+        session named in ``exclude`` — the residue not claimed by any board slot
+        (:func:`chimera.commands.ls.board`'s ``history`` catchall). Excluding by ``name``
+        (an address), not one specific ``(platform, native_id)``, drops *every* archived
+        incarnation of a claimed slot (old resumes included), not just whichever one the
+        slot happened to pick as its current occupant. Same "most recently active" ordering
+        as :meth:`latest_session_for`. A ``NOT IN`` alone would silently drop every
+        unnamed row too (SQL's three-valued logic: ``NULL NOT IN (...)`` is ``NULL``, not
+        true), so an explicit ``IS NULL`` keeps them eligible.
+        """
+        clauses = 'sessions.workspace=?'
+        params: list[str] = [workspace]
+        if exclude:
+            placeholders = ', '.join('?' for _ in exclude)
+            clauses += f' AND (sessions.name IS NULL OR sessions.name NOT IN ({placeholders}))'
+            params.extend(exclude)
+        rows = self._db.execute(
+            'recent_sessions',
+            f"""
+            SELECT sessions.*, COALESCE(MAX(events.at), sessions.started_at) AS last_active
+            FROM sessions LEFT JOIN events
+                ON events.platform = sessions.platform AND events.native_id = sessions.native_id
+            WHERE {clauses}
+            GROUP BY sessions.platform, sessions.native_id
+            ORDER BY last_active DESC, sessions.platform, sessions.native_id LIMIT ?
+            """,
+            (*params, limit),
+        ).fetchall()
+        return [_row_to_session(row) for row in rows]
 
     def record_event(self, event: Event) -> None:
         """Append ``event`` to the timeline."""

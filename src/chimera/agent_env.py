@@ -16,7 +16,9 @@ RESTRICTED_OPTIONS = frozenset({'--force', '--dangerous'})
 # captain included, unlike the per-role allowlists — just as RESTRICTED_OPTIONS strips
 # options. `logtail` is the human's live debugging surface: it blocks following the log
 # until Ctrl-C, a dead end for an agent, which reads the JSONL directly instead.
-RESTRICTED_COMMANDS = frozenset({'logtail'})
+# `dashboard` is `ls`'s colorized/columnar twin for a human terminal — the ANSI codes are
+# noise for an agent parsing text, so it reads `ch ls` instead (same underlying board()).
+RESTRICTED_COMMANDS = frozenset({'logtail', 'dashboard'})
 
 # The session-layer roles: the workspace captain, a project's manager (its chat), and a
 # goal's agent. ROLE_-prefixed to avoid colliding with chimera.worktrees.AGENT — the same

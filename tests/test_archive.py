@@ -151,6 +151,24 @@ def test_rerecording_reopens_an_ended_session(archive: Archive) -> None:
     assert stored.status == 'resume'
 
 
+def test_rerecording_never_regresses_a_known_manager_to_none(archive: Archive) -> None:
+    archive.record_session(make_session('s1', status='startup', manager='chimera'))
+    # a raw `claude --resume` or the `claude agents` browser stamps no role
+    archive.record_session(make_session('s1', status='resume', manager='none'))
+    stored = archive.session('claude', 's1')
+    assert stored is not None
+    assert stored.manager == 'chimera'  # sticky — the earlier attribution survives
+    assert stored.status == 'resume'  # everything else still takes the new value
+
+
+def test_rerecording_still_takes_a_new_non_none_manager(archive: Archive) -> None:
+    archive.record_session(make_session('s1', status='startup', manager='chimera'))
+    archive.record_session(make_session('s1', status='resume', manager='gastown'))
+    stored = archive.session('claude', 's1')
+    assert stored is not None
+    assert stored.manager == 'gastown'  # only 'none' is refused, not a genuine change
+
+
 def test_record_if_absent_never_clobbers_an_existing_row(archive: Archive) -> None:
     first = make_session('s1', status='running')
     assert archive.record_session_if_absent(first)
@@ -330,6 +348,91 @@ def test_latest_session_for_narrows_by_platform(archive: Archive) -> None:
 def test_latest_session_for_is_none_for_an_unseen_address(archive: Archive) -> None:
     archive.record_session(make_session('unaddressed', project='chimera', goal='logs', actor=None))
     assert archive.latest_session_for('chimera', 'logs', 'agent') is None
+
+
+def test_latest_session_for_a_manager_address_wants_goal_and_actor_null(
+    archive: Archive,
+) -> None:
+    # a manager address (project set, no goal/actor) must not match a goal actor row —
+    # None here means IS NULL, not "unconstrained" (unlike sessions())
+    archive.record_session(make_session('agent-row', project='chimera', goal='g', actor='agent'))
+    archive.record_session(make_session('mgr-row', project='chimera'))
+    latest = archive.latest_session_for('chimera')
+    assert latest is not None
+    assert latest.native_id == 'mgr-row'
+
+
+def test_latest_session_for_the_captain_address_wants_every_axis_null(archive: Archive) -> None:
+    archive.record_session(make_session('mgr-row', project='chimera'))
+    archive.record_session(make_session('captain-row'))
+    latest = archive.latest_session_for(None)
+    assert latest is not None
+    assert latest.native_id == 'captain-row'
+
+
+def test_latest_session_for_narrows_by_name(archive: Archive) -> None:
+    # project/goal/actor alone can't pin the captain/manager address (every axis-less row
+    # matches); name does, and stays reliable regardless of the (unstamped-on-resume) manager
+    archive.record_session(
+        make_session('other', manager='none', started_at=NOON + timedelta(hours=1))
+    )
+    archive.record_session(make_session('pegasus', manager='none', name='pegasus', started_at=NOON))
+    latest = archive.latest_session_for(None, name='pegasus')
+    assert latest is not None
+    assert latest.native_id == 'pegasus'
+
+
+def test_recent_sessions_orders_by_last_active_newest_first(archive: Archive) -> None:
+    archive.record_session(make_session('a', workspace='ws', started_at=NOON))
+    archive.record_session(make_session('b', workspace='ws', started_at=NOON + timedelta(hours=1)))
+    archive.record_event(
+        Event(at=NOON + timedelta(hours=5), kind='resume', platform='claude', native_id='a')
+    )
+    assert [s.native_id for s in archive.recent_sessions('ws', limit=10)] == ['a', 'b']
+
+
+def test_recent_sessions_scopes_to_the_workspace(archive: Archive) -> None:
+    archive.record_session(make_session('a', workspace='ws'))
+    archive.record_session(make_session('other', workspace='other-ws'))
+    assert [s.native_id for s in archive.recent_sessions('ws', limit=10)] == ['a']
+
+
+def test_recent_sessions_excludes_claimed_identities(archive: Archive) -> None:
+    archive.record_session(make_session('a', workspace='ws', name='a', started_at=NOON))
+    archive.record_session(
+        make_session('b', workspace='ws', name='b', started_at=NOON + timedelta(hours=1))
+    )
+    recent = archive.recent_sessions('ws', exclude=['b'], limit=10)
+    assert [s.native_id for s in recent] == ['a']
+
+
+def test_recent_sessions_excludes_every_row_sharing_a_claimed_name(archive: Archive) -> None:
+    # an old resume of a claimed slot shares its name but not its native_id — exclude by
+    # name, not just the one (platform, native_id) the slot picked as its current occupant
+    archive.record_session(
+        make_session('old-resume', workspace='ws', name='pegasus', started_at=NOON)
+    )
+    archive.record_session(
+        make_session(
+            'current', workspace='ws', name='pegasus', started_at=NOON + timedelta(hours=1)
+        )
+    )
+    assert archive.recent_sessions('ws', exclude=['pegasus'], limit=10) == []
+
+
+def test_recent_sessions_keeps_unnamed_sessions_when_excluding(archive: Archive) -> None:
+    # NULL NOT IN (...) is NULL (falsy) in SQL, not true — an unnamed row must stay eligible
+    archive.record_session(make_session('unnamed', workspace='ws', started_at=NOON))
+    recent = archive.recent_sessions('ws', exclude=['someone-else'], limit=10)
+    assert [s.native_id for s in recent] == ['unnamed']
+
+
+def test_recent_sessions_respects_the_limit(archive: Archive) -> None:
+    for i in range(3):
+        archive.record_session(
+            make_session(str(i), workspace='ws', started_at=NOON + timedelta(hours=i))
+        )
+    assert len(archive.recent_sessions('ws', limit=2)) == 2
 
 
 # --- events: the timeline that stitches logs to sessions ---------------------------
