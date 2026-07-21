@@ -6,6 +6,9 @@
 - a test that plants a git hook must point the repo's *local* `core.hooksPath` at the hook's
   dir — a user-global `core.hooksPath` (set on this machine) silently shadows per-repo
   `hooks/`, so the hook never fires and the test quietly asserts nothing
+- `happy.sh` runs pytest with `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null` — a repo
+  built or cloned in a test must never depend on the machine's own git identity/config (a dev
+  machine has one, CI doesn't); use `Repo.make`/`Repo.clone` below, which always configure one
 
 ## Grouping
 
@@ -138,6 +141,10 @@ shorter than the equivalent `compare` (e.g. one path among an otherwise-noisy tr
 
 **giterator.testing.Repo** (`from giterator.testing import Repo`)
 - `Repo.make(path)` — creates an initialized git repo at path
+- `Repo.clone(source, path)` — clones and always configures a user in the clone (inherited from
+  a `Git` `source`, else the same default as `Repo.make`) — use this, never `chimera.git.Git.clone`
+  + `Repo(path)`, which leaves the clone with no local identity so a commit in it silently falls
+  back to the machine's global git config (works on a dev box, fails on CI — see the top note)
 - `repo.commit_content('prefix', datetime(...))` — writes file and commits, returns short hash
 - `repo('log', ...)` — run raw git commands (instance is callable)
 - dep: `giterator>=1.1.0` (PyPI)
