@@ -228,8 +228,9 @@ class TestErrand:
         assert result.worktree.is_dir()  # left standing for inspection
         assert f'{result.goal}/agent' in Git(git_repo.path).branches()
         refusal = (
-            f'refusing to clean up (use --force to discard):\n'
-            f'  {result.worktree} has uncommitted or untracked changes'
+            f'refusing to clean up:\n'
+            f'  {result.worktree} has uncommitted or untracked changes\n'
+            'use --force to discard the work'
         )
         log.check_present(
             {

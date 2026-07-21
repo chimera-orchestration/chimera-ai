@@ -161,7 +161,7 @@ def _finish(repo: Path, worktrees_root: Path, goal: str, dry: Dry) -> bool:
     """
     try:
         remove(repo, worktrees_root, goal, fetch=False, dry=dry)
-    except RuntimeError as error:
+    except UserError as error:
         logger.bind(goal=goal, refusal=str(error)).warning('errand: cleanup refused')
         return False
     return True
