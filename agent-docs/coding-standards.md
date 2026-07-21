@@ -7,4 +7,7 @@
   Keep a name only when it's used more than once, or when it documents a genuinely non-obvious
   value (a long/dense expression that reads better named).
 - `ruff format` frequently
+- code comments are terse, WHY-only, one line — no caller/fix/test references (`# see
+  tests/conftest.py's bare_repo`, `# fixes the CI flake`). That density is for agent-docs
+  prose, not code; motivation belongs in the commit message, not the comment.
 - run @happy.sh any time you want to see if your code is of sufficient quality to commit.
