@@ -11,7 +11,7 @@ from testfixtures.loguru import LoguruSource
 
 from chimera.agent_env import ai_session
 from chimera.agents import Session
-from chimera.commands.agent import live
+from chimera.agents.claude import Claude
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
 from chimera.commands.worktree.rm import RemoveResult, remove
@@ -22,8 +22,8 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live, lambda worktree: [])  # what a forced stop() consults
-    replace.in_module(live, lambda worktree: [], module=worktree_rm)  # rm's own gathering
+    # both rm's own gathering and a forced stop() fan out through the registered harnesses
+    replace.on_class(Claude.live, lambda self, cwd=None: [])
 
 
 def _goal(tmpdir: TempDir, repo: Repo) -> Path:
@@ -47,21 +47,21 @@ def test_remove_aborts_when_an_agent_is_running(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
-    replace.in_module(
-        live,
-        lambda worktree: [
+    replace.on_class(
+        Claude.live,
+        lambda self, cwd=None: [
             Session(
                 id='x',
                 name='sybil@g@agent',
                 status='idle',
-                cwd=worktree,
+                cwd=worktrees / 'g@agent',
                 summary=None,
                 pid=4242,
                 kind='interactive',
                 started=datetime.fromtimestamp(1781247747055 / 1000),
             )
         ],
-        module=worktree_rm,
+        name='live',
     )
     since = f'{datetime.fromtimestamp(1781247747055 / 1000):%a %H:%M}'
     with ShouldRaise(
@@ -86,7 +86,7 @@ def test_remove_force_stops_the_live_agent(
     )
     pid = int(out.stdout)
     session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None, pid=pid)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     try:
         result = remove(git_repo.path, worktrees, 'g', force=True)
     finally:
@@ -106,7 +106,7 @@ def test_remove_force_refuses_a_session_it_cannot_stop(
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
     session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None)  # no pid to signal
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     with ShouldRaise(
         UserError('p@g@agent reports no pid — stop it from its own harness, then re-run')
     ):
@@ -120,7 +120,7 @@ def test_remove_dry_force_previews_the_stop(
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
     session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None, pid=4242)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     compare(
         remove(git_repo.path, worktrees, 'g', force=True, dry=Dry(on=True)),
         expected=RemoveResult((worktrees / 'g@agent',), stopped=(session,)),
@@ -249,10 +249,10 @@ def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
     worktrees = _goal(tmpdir, git_repo)
     add(git_repo.path, worktrees, goal='g', actors=('scout',))
     scout = worktrees / 'g@scout'
-    replace.in_module(
-        live,
-        lambda worktree: [Session('x', 'x', '?', worktree, None)] if worktree == scout else [],
-        module=worktree_rm,
+    replace.on_class(
+        Claude.live,
+        lambda self, cwd=None: [Session('x', 'x', '?', scout, None)] if cwd == scout else [],
+        name='live',
     )
     with ShouldRaise(
         UserError(
@@ -271,10 +271,10 @@ def test_remove_reports_every_problem_in_one_refusal(
     agent_worktree = worktrees / 'g@agent'
     Repo(agent_worktree).commit_content('work')  # unmerged
     (agent_worktree / 'scratch.txt').write_text('wip')  # uncommitted
-    replace.in_module(
-        live,
-        lambda worktree: [Session('x', 'x', '?', worktree, None, pid=4242)],
-        module=worktree_rm,
+    replace.on_class(
+        Claude.live,
+        lambda self, cwd=None: [Session('x', 'x', '?', agent_worktree, None, pid=4242)],
+        name='live',
     )
     with ShouldRaise(
         UserError(
@@ -460,7 +460,7 @@ def test_worktree_rm_cli_force_dry_previews_the_stop(
     command.run('worktree', 'add', '--goal', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
     session = Session('x', 'p@g@agent', 'idle', worktree, None, pid=4242)
-    replace.in_module(live, lambda worktree: [session])
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     command.run('worktree', 'rm', 'g', '--force', '--dry').check(
         output=f'Would stop p@g@agent (pid 4242)\nWould remove {worktree}',
         logging=action_logs(
