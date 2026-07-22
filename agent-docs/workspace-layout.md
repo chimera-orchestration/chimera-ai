@@ -316,6 +316,17 @@ add/retire via the `CHECKS` tuple). Current checks:
   the mail it claimed itself — left in place it would double-inject beside the new hook).
   Machine config, not the workspace's, so doctor *is* the installer — there's no `ch hook
   install` to remember
+- **bg-isolation** — the user's global `~/.claude/settings.json` sets `worktree.bgIsolation:
+  "none"`, turning off Claude Code's own background-session isolation guard (added in Claude
+  Code 2.1.143; `"worktree"` is its default) — the one that makes a `--bg` session call
+  `EnterWorktree` before its first edit. A chimera-launched agent never needs that guard: it
+  always starts inside its own `{goal}@{actor}` worktree already, never the shared checkout
+  (a chimera-managed project's `repo/` is often a bare clone with no working tree to guard in
+  the first place). Left at the default, the guard is pure friction on top of chimera's own
+  isolation — a wasted `EnterWorktree` call at best, an agent second-guessing itself out of a
+  worktree it's already isolated in at worst. `--fix` merges the setting into the same
+  machine-wide settings file `claude-hooks` above installs into, for the same reason: there's
+  no `claude config set` to shell out to, so a direct JSON merge is the only way in
 - **workspace-clean** — the workspace's own git repo has no uncommitted or untracked content
   (skipped when the workspace isn't a git repo; `*/repo/` and `*/worktrees/` are gitignored, so
   only tracked workspace files count). Runs last, so it sweeps up the config/gitignore edits the

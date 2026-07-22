@@ -868,6 +868,46 @@ class ClaudeHooksCheck:
         yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
+def bg_isolation_configured(settings: dict[str, object]) -> bool:
+    """Whether ``worktree.bgIsolation: "none"`` is already set in a Claude settings dict."""
+    worktree = settings.get('worktree')
+    return isinstance(worktree, dict) and worktree.get('bgIsolation') == 'none'
+
+
+class BgIsolationCheck:
+    """Claude Code's own background-session isolation guard is turned off, since chimera's
+    is the one that matters.
+
+    A ``--bg`` session normally must call ``EnterWorktree`` before its first edit — Claude
+    Code's own guard against a background agent silently editing the shared checkout
+    (``worktree.bgIsolation``, added in Claude Code 2.1.143; ``"worktree"`` is its default).
+    A chimera-launched agent never needs that: it always starts inside its own
+    ``{goal}@{actor}`` worktree already, never the shared checkout (there often isn't even
+    a working tree to edit — a chimera-managed project's ``repo/`` is a bare clone). Left at
+    the default, the guard is pure friction — a session either wastes a turn calling
+    ``EnterWorktree`` redundantly, or (worse) an agent already mid-task second-guesses
+    itself into "isolating" out of a worktree it's already isolated in. ``--fix`` sets
+    ``worktree.bgIsolation: "none"`` in the user's global ``~/.claude/settings.json`` — the
+    same machine-wide Claude config ``claude-hooks`` above installs into, and for the same
+    reason: there is no ``claude config set`` to shell out to, so a direct JSON merge is the
+    only way in.
+    """
+
+    name = 'bg-isolation'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        path = hook_install.settings_path()
+        settings = hook_install.read(path)
+        if bg_isolation_configured(settings):
+            return
+        message = f'{path} missing worktree.bgIsolation: "none"'
+        fixing = fix and not exclude.matches(self.name, message)
+        if fixing:
+            settings.setdefault('worktree', {})['bgIsolation'] = 'none'
+            hook_install.write(path, settings)
+        yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
 # The lightweight model `commit_message` asks to summarise a workspace's staged changes,
 # and the message it falls back to when claude can't be reached (so the fix still commits —
 # leaving nothing uncommitted is the point, a perfect subject line is not).
@@ -947,5 +987,6 @@ CHECKS: tuple[Check, ...] = (
     ShellCompletionCheck(),
     FblogCheck(),
     ClaudeHooksCheck(),
+    BgIsolationCheck(),
     WorkspaceCommitCheck(),
 )
