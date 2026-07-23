@@ -164,6 +164,35 @@ class CaptainCheck:
             )
 
 
+class OccupancyWarningCheck:
+    """No leftover ``hooks.occupancy_warning`` key survives in a workspace's config.yaml.
+
+    An earlier, since-removed SessionStart double-occupancy warning (it fired on a
+    harmless harness-native attach — resuming or watching a running background job
+    from ``claude agents`` — as readily as a genuine second writer, so the check
+    itself is gone, not just gated) was briefly gated behind this key. Nothing reads
+    it anymore, so a config.yaml still carrying it from that attempt is dead config —
+    ``--fix`` strips the key, and the ``hooks:`` block with it if it was the only entry.
+    """
+
+    name = 'occupancy-warning'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        raw = read_raw(workspace) or {}
+        hooks = raw.get('hooks')
+        if not isinstance(hooks, dict) or 'occupancy_warning' not in hooks:
+            return
+        message = f'{workspace}/config.yaml has a stray hooks.occupancy_warning — no longer read'
+        fixing = fix and not exclude.matches(self.name, message)
+        if fixing:
+            remaining = {k: v for k, v in hooks.items() if k != 'occupancy_warning'}
+            new_raw = {k: v for k, v in raw.items() if k != 'hooks'}
+            if remaining:
+                new_raw['hooks'] = remaining
+            write_config(workspace, new_raw)
+        yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
 class ProjectConfigCheck:
     """Each project's config.yaml carries kind: project."""
 
@@ -975,6 +1004,7 @@ CHECKS: tuple[Check, ...] = (
     GitignoreCheck(),
     WorkspaceDirsCheck(),
     CaptainCheck(),
+    OccupancyWarningCheck(),
     ProjectConfigCheck(),
     RuntimeStateDirCheck(),
     StaleHumanWorktreeCheck(),

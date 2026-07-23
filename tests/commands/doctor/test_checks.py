@@ -21,6 +21,7 @@ from chimera.commands.doctor.checks import (
     GitignoreCheck,
     InertBranchCheck,
     LegacyWorktreeSeparatorCheck,
+    OccupancyWarningCheck,
     OrphanedWorktreeCheck,
     ProjectConfigCheck,
     RuntimeStateDirCheck,
@@ -503,6 +504,96 @@ class TestCaptain:
             {'kind': 'workspace', 'captain': {'name': 'pegasus', 'model': 'opus'}},
         )
         compare(_run(CaptainCheck(), ws), expected=[_no_directives(ws)])
+
+
+class TestOccupancyWarning:
+    def test_absent_key_is_silent(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+        compare(_run(OccupancyWarningCheck(), ws), expected=[])
+
+    def test_no_config_at_all_is_silent(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        compare(_run(OccupancyWarningCheck(), ws), expected=[])
+
+    def test_no_hooks_block_is_silent(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
+        compare(_run(OccupancyWarningCheck(), ws), expected=[])
+
+    def test_stray_key_reported_without_fix(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump(
+            'lycia/config.yaml', {'kind': 'workspace', 'hooks': {'occupancy_warning': False}}
+        )
+        compare(
+            _run(OccupancyWarningCheck(), ws),
+            expected=[
+                Finding(
+                    'occupancy-warning',
+                    f'{ws}/config.yaml has a stray hooks.occupancy_warning — no longer read',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        compare(_config(ws), expected={'kind': 'workspace', 'hooks': {'occupancy_warning': False}})
+
+    def test_fix_strips_the_key_and_the_now_empty_hooks_block(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump(
+            'lycia/config.yaml',
+            {'kind': 'workspace', 'captain': 'pegasus', 'hooks': {'occupancy_warning': True}},
+        )
+        compare(
+            _run(OccupancyWarningCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'occupancy-warning',
+                    f'{ws}/config.yaml has a stray hooks.occupancy_warning — no longer read',
+                    resolved=True,
+                    fixable=True,
+                )
+            ],
+        )
+        compare(_config(ws), expected={'kind': 'workspace', 'captain': 'pegasus'})
+
+    def test_fix_keeps_other_hooks_keys(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump(
+            'lycia/config.yaml',
+            {'kind': 'workspace', 'hooks': {'occupancy_warning': True, 'other': 'kept'}},
+        )
+        compare(
+            _run(OccupancyWarningCheck(), ws, fix=True),
+            expected=[
+                Finding(
+                    'occupancy-warning',
+                    f'{ws}/config.yaml has a stray hooks.occupancy_warning — no longer read',
+                    resolved=True,
+                    fixable=True,
+                )
+            ],
+        )
+        compare(_config(ws), expected={'kind': 'workspace', 'hooks': {'other': 'kept'}})
+
+    def test_excluded_fix_not_written(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        tmpdir.dump(
+            'lycia/config.yaml', {'kind': 'workspace', 'hooks': {'occupancy_warning': True}}
+        )
+        compare(
+            _run(OccupancyWarningCheck(), ws, fix=True, exclude=Exclusions(('occupancy-warning',))),
+            expected=[
+                Finding(
+                    'occupancy-warning',
+                    f'{ws}/config.yaml has a stray hooks.occupancy_warning — no longer read',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        compare(_config(ws), expected={'kind': 'workspace', 'hooks': {'occupancy_warning': True}})
 
 
 class TestProjectConfig:

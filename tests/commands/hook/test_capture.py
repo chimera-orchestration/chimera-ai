@@ -2,30 +2,14 @@ import io
 import sys
 from pathlib import Path
 
-import pytest
-from testfixtures import Replacer, TempDir, compare
+from testfixtures import Replacer, TempDir
 
-from chimera.agents import Session as LiveSession
-from chimera.agents.claude import Claude
 from chimera.archive import Archive, Event, Session
 from chimera.commands.hook.capture import addressed, session_end, session_start
 from tests.cli import Command, action_logs
 
 START = 'chimera.commands.hook.capture.session_start'
 END = 'chimera.commands.hook.capture.session_end'
-
-
-@pytest.fixture(autouse=True)
-def live_sessions(replace: Replacer) -> list[LiveSession]:
-    """What the harness registry claims is live — the test's to dictate (by appending),
-    never the machine's own sessions."""
-    sessions: list[LiveSession] = []
-    replace.on_class(Claude.live, lambda self, cwd=None: list(sessions))
-    return sessions
-
-
-def _occupant(cwd: Path, id: str, status: str = 'busy') -> LiveSession:
-    return LiveSession(id, 'proj@g@agent', status, cwd, None, pid=42)
 
 
 def _archived(ws: Path) -> list[Session]:
@@ -263,106 +247,3 @@ def test_hook_session_end_cli(tmpdir: TempDir, command: Command, replace: Replac
         output='', logging=action_logs('hook session-end', END, {})
     )
     assert _archived(ws)[0].status == 'logout'
-
-
-@pytest.fixture()
-def goal_worktree(tmpdir: TempDir, replace: Replacer) -> Path:
-    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
-    tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
-    worktree = tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@agent'
-    worktree.mkdir(parents=True)
-    replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-    return worktree
-
-
-def _warning(named: str) -> str:
-    return (
-        f'WARNING: another agent session is already live in this worktree: {named}. '
-        f'Two sessions sharing one worktree write over each other and its branch ends up '
-        f'with commits neither made. Do not write, commit, or continue goal work here — '
-        f'surface this to the user immediately: one session must stop (`ch agent stop`, '
-        f'or exit the other) before work continues.'
-    )
-
-
-class TestOccupied:
-    def test_warns_naming_the_live_session(
-        self, goal_worktree: Path, live_sessions: list[LiveSession]
-    ) -> None:
-        live_sessions.append(_occupant(goal_worktree, 'd60e15e8-1111-2222-3333-444444444444'))
-        warning = session_start(goal_worktree, 'uuid-new', '/t.jsonl', 'resume')
-        compare(warning, expected=_warning('d60e15e8 (busy)'))
-        assert _archived(goal_worktree.parents[2])[0].native_id == 'uuid-new'  # still recorded
-
-    def test_a_free_worktree_is_silent(self, goal_worktree: Path) -> None:
-        assert session_start(goal_worktree, 'uuid-new', '/t.jsonl', 'resume') is None
-
-    def test_the_starting_session_is_not_its_own_occupant(
-        self, goal_worktree: Path, live_sessions: list[LiveSession]
-    ) -> None:
-        live_sessions.append(_occupant(goal_worktree, '7b657aac-0dce-4929-8584-de69fb61c4ce'))
-        assert (
-            session_start(goal_worktree, '7b657aac-0dce-4929-8584-de69fb61c4ce', '/t', 'resume')
-            is None
-        )
-
-    def test_a_short_registry_id_still_matches_the_starting_session(
-        self, goal_worktree: Path, live_sessions: list[LiveSession]
-    ) -> None:
-        # a registry entry with no full sessionId
-        live_sessions.append(_occupant(goal_worktree, '7b657aac'))
-        assert (
-            session_start(goal_worktree, '7b657aac-0dce-4929-8584-de69fb61c4ce', '/t', 'resume')
-            is None
-        )
-
-    def test_a_subagent_rides_along_without_a_warning(
-        self, goal_worktree: Path, live_sessions: list[LiveSession]
-    ) -> None:
-        # a subagent's cwd is its parent's worktree — the parent being live there is the
-        # normal state, not an occupancy
-        live_sessions.append(_occupant(goal_worktree, 'd60e15e8-1111-2222-3333-444444444444'))
-        assert (
-            session_start(goal_worktree, 'uuid-sub', '/t', 'startup', agent_type='researcher')
-            is None
-        )
-
-    def test_a_one_shot_print_run_is_never_warned(
-        self, goal_worktree: Path, live_sessions: list[LiveSession]
-    ) -> None:
-        live_sessions.append(_occupant(goal_worktree, 'd60e15e8-1111-2222-3333-444444444444'))
-        assert session_start(goal_worktree, 'uuid-p', '/t', 'startup', entrypoint='sdk-cli') is None
-
-    def test_only_goal_worktrees_are_policed(
-        self, goal_worktree: Path, live_sessions: list[LiveSession]
-    ) -> None:
-        # a chat deliberately sits alongside whatever its scope's cwd is running
-        project = goal_worktree.parents[1]
-        live_sessions.append(_occupant(project, 'd60e15e8-1111-2222-3333-444444444444'))
-        assert session_start(project, 'uuid-chat', '/t', 'startup') is None
-
-
-def test_hook_session_start_cli_warns_of_an_occupied_worktree(
-    goal_worktree: Path, command: Command, replace: Replacer, live_sessions: list[LiveSession]
-) -> None:
-    live_sessions.append(_occupant(goal_worktree, 'd60e15e8-1111-2222-3333-444444444444'))
-    payload = (
-        f'{{"cwd": "{goal_worktree}", "session_id": "7b657aac-0dce-4929-8584-de69fb61c4ce", '
-        f'"transcript_path": "/t.jsonl", "source": "resume"}}'
-    )
-    replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
-    start, end = action_logs('hook session-start', START, {})
-    command.run('hook', 'session-start').check(
-        output=_warning('d60e15e8 (busy)') + '\n',
-        logging=[
-            start,
-            {
-                'level': 'WARNING',
-                'session_id': '7b657aac-0dce-4929-8584-de69fb61c4ce',
-                'occupants': ['d60e15e8-1111-2222-3333-444444444444'],
-                'cwd': str(goal_worktree),
-                'message': 'hook session-start: worktree occupied by d60e15e8 (busy)',
-            },
-            end,
-        ],
-    )

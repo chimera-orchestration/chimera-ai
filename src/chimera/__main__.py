@@ -1888,7 +1888,7 @@ app.add_typer(hook_app, name='hook')
 @logs(_hook_session_start)
 def hook_session_start() -> None:
     payload = json.load(sys.stdin)
-    warning = _hook_session_start(
+    _hook_session_start(
         Path(str(payload['cwd'])),
         str(payload['session_id']),
         str(payload['transcript_path']),
@@ -1897,8 +1897,6 @@ def hook_session_start() -> None:
         entrypoint=os.environ.get('CLAUDE_CODE_ENTRYPOINT'),
         model=str(model) if (model := payload.get('model')) else None,
     )
-    if warning is not None:
-        typer.echo(warning)  # SessionStart stdout lands in the starting session's context
 
 
 @hook_app.command('session-end', cls=LoggingCommand, help='Mark a session ended (SessionEnd hook).')
