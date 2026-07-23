@@ -51,6 +51,31 @@ Commands resolve four axes (see `chimera.context`), each with an explicit overri
 trusted for goal/actor only when it matches the `<goal>/<actor>` shape — never for a review or
 feature branch.
 
+## Addresses: naming a session
+
+Those axes render into one string — the **address** — which is a session's `--name`, its
+Maildir under `state/mail/`, and its `caller` on every log line. One grammar, three shapes,
+always exactly three `@`-joined segments with an empty segment where a role has none
+(`chimera.addresses`):
+
+| Role | Address | Segments |
+|---|---|---|
+| captain | `@@captain` | project and goal both empty |
+| manager | `<project>@@manager` | goal empty |
+| goal actor | `<project>@<goal>@<actor>` | all three |
+
+The uniform segment count is what makes `Address.parse` total and unambiguous — which
+segments are empty picks the type, so there is exactly one string-parsing site in the
+codebase and every other caller builds or holds a typed `Captain`/`Manager`/`Actor`. An
+incomplete address (bare `manager`, missing its project) matches no shape and is refused
+where it enters — `ch msg send` parses `to` before writing, so a malformed address can
+never silently mint a mailbox nobody reads.
+
+`manager` and `captain` are reserved: never valid as a goal actor's own name, enforced both
+in `Actor`'s construction and in `require_valid_actor` off one shared `RESERVED_ACTORS`.
+The captain's persona (`captain:` in the workspace config) is *not* its address — see *Chat*
+below.
+
 ## Choosing the harness and model
 
 Every launching command (`agent start`/`resume`, `goal start`/`adopt`, `review`, `chat`, `errand`) — the
@@ -84,12 +109,13 @@ wall is the harness permission layer — the fence's value is not advertising fo
 ## Chat: the captain and scoped conversations
 
 `ch chat` launches a conversation at the current scope, resolved like the listers: in a project
-as `<project>@manager` in the project dir, and at the bare workspace as the **captain** — the
-workspace-level agent that directs all work. Session names carry the role at every layer: the
-captain's bare persona, a project's `<project>@manager`, a goal's `<project>@<goal>@agent`. The captain has no goal, branch or worktree: it
-works on the workspace as a whole. Its persona name comes from `config.yaml` (`captain: pegasus`,
+as `<project>@@manager` in the project dir, and at the bare workspace as the **captain** — the
+workspace-level agent that directs all work (its address `@@captain`; see *Addresses* above).
+The captain has no goal, branch or worktree: it
+works on the workspace as a whole. Its *persona* name comes from `config.yaml` (`captain: pegasus`,
 or the full form `captain: {name: …, harness: …, model: …}` to also override the agent cascade;
-`ch init --captain pegasus` sets it at creation) and *is* the session name. The captain's
+`ch init --captain pegasus` sets it at creation) and is cosmetic — it colours the captain's own
+prime, never its address, so renaming a persona can't orphan a session or a mailbox. The captain's
 context indexes workspace-wide knowledge (every project, qualified); a manager's is the
 project render (see *Launch context* below for the role section both lead with).
 

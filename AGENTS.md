@@ -23,8 +23,9 @@ isn't built yet — the vocabulary stands regardless; what's implemented is the 
 - **Agent** — a service running an AI agent instance (e.g. a Claude Code session) managed by Chimera; works in a **worktree** (only the captain works on the workspace itself)
 - **Role** — the function an agent is launched as; a role's directives live in `roles/{role}/` dirs, the workspace's (reaching every project) layered before the pinned project's (that project only), and each workspace names its own instance of a role (the concept/instance split mirrors workspace/lycia)
 - **Captain** — the role of the workspace-level agent chatted with to direct all work across the workspace; no goal, branch or worktree — it works on the workspace as a whole (each workspace names its own — *pegasus*, say)
-- **Manager** — the role of a project's chat session (`<project>@manager`), directing that project's goals; fenced to its project — cross-project work goes through the captain
-- **Message** — inter-agent mail (`ch msg`): one immutable file per message in a per-address Maildir under `state/`; an address *is* a session name (the captain's persona, `<project>@manager`, `<project>@<goal>@<actor>`), drained into a session then acked or deferred
+- **Manager** — the role of a project's chat session (`<project>@@manager`), directing that project's goals; fenced to its project — cross-project work goes through the captain
+- **Address** — what names a session: its `--name`, its mailbox, its `caller` in the log. Three `@`-joined segments, empty where a role has none — `@@captain`, `<project>@@manager`, `<project>@<goal>@<actor>` — so parsing is total and an incomplete one is refused, never silently misrouted. The captain's *persona* (`captain: pegasus`) is cosmetic, never its address. More in @agent-docs/workspace-layout.md.
+- **Message** — inter-agent mail (`ch msg`): one immutable file per message in a per-address Maildir under `state/`, drained into a session then acked or deferred
 - **Archive** — the queryable index over every LLM session on the machine, chimera-launched or not: one SQLite store (`state/archive.db`) tying sessions to harnesses, goals, actors and a timeline; fed by session hooks (doctor's claude-hooks check installs them)
 
 ## Principles
