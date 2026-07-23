@@ -2,15 +2,14 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-from chimera.agent_env import ROLE_MANAGER
+from chimera.addresses import Actor, Captain, Manager
 from chimera.agents import Session
 from chimera.archive import Archive
 from chimera.archive import Session as ArchivedSession
 from chimera.commands.agent import in_goal, scoped, under
 from chimera.comms import Comms
-from chimera.config import workspace_config
 from chimera.context import Scope, iter_projects
-from chimera.worktrees import AGENT, SEP, goals, session_name, worktree_actor
+from chimera.worktrees import AGENT, goals, worktree_actor
 
 HISTORY_LIMIT = 10
 """Rows shown in the archive catchall before the ``-v``-style withheld hint kicks in."""
@@ -118,7 +117,7 @@ def _actor_row(
     it, chimera-launched or not (a worktree is a strong signal, unlike the captain/manager's
     cwd-wide inference) — else the latest archived session at the address.
     """
-    address = session_name(project, goal, actor)
+    address = str(Actor(project, goal, actor))
     live = next((a for a in live_in_goal if worktree_actor(a.cwd, worktrees) == actor), None)
     last = None if live is not None else archive.latest_session_for(project, goal, actor)
     return Row(address, live, last, mail_map.get(address, _NO_MAIL))
@@ -146,7 +145,7 @@ def board(scope: Scope, listing: list[Session], archive: Archive, mail: Comms) -
         if row.live is not None or row.last is not None:
             claimed.append(row.address)
 
-    captain_address = workspace_config(scope.workspace).captain.name
+    captain_address = str(Captain())
     captain = _named_row(captain_address, universe, archive, mail_map, project=None)
     _claim(captain)
 
@@ -155,7 +154,7 @@ def board(scope: Scope, listing: list[Session], archive: Archive, mail: Comms) -
     placed: set[Session] = set()
     for p in projects:
         manager = _named_row(
-            f'{p.name}{SEP}{ROLE_MANAGER}', universe, archive, mail_map, project=p.name
+            str(Manager(project=p.name)), universe, archive, mail_map, project=p.name
         )
         _claim(manager)
 

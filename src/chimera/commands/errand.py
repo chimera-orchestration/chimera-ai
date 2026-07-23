@@ -22,7 +22,8 @@ from chimera.commands.worktree.rm import remove
 from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.git import Git
-from chimera.worktrees import AGENT, branch, goals, session_name, worktree_path
+from chimera.addresses import Actor
+from chimera.worktrees import AGENT, branch, goals, worktree_path
 
 # Prepended to every errand prompt. Affirmative — identity and the report contract,
 # never a prohibition list: what an errand must not do is held by the harness's read-only
@@ -58,8 +59,8 @@ def errand(
     fetch: bool = True,
     timeout: float | None = None,
     spec: AgentSpec = AgentSpec(),
-    context: Callable[[str], Path | None] | None = None,
-    env: Callable[[str], Mapping[str, str]] | None = None,
+    context: Callable[[str, str], Path | None] | None = None,
+    env: Callable[[str, str], Mapping[str, str]] | None = None,
     dry: Dry = Dry(),
 ) -> ErrandResult:
     """Dispatch a one-shot read-only agent into ``target``'s ``repo``; deliver its report.
@@ -69,8 +70,8 @@ def errand(
     its worktree on the guardrailed prompt, then hands the report off: written to
     ``out`` when given (logged with path/bytes/sha256 on ``errand: result`` — the
     audit twin of ``context: rendered``), else returned for the caller to print.
-    ``context``/``env`` are factories keyed by the session name, as on ``review`` —
-    only this function knows the generated goal.
+    ``context``/``env`` are factories keyed by ``(session name, goal)``, as on
+    ``review`` — only this function knows the generated goal.
 
     Unless ``keep``, the goal is then swept through ``worktree rm``'s safety checks:
     a clean, trivially merged errand vanishes; a refusal (work left behind) is warned
@@ -89,9 +90,9 @@ def errand(
     git = Git(repo)
     with git.ref_log('errand: refs', branch(goal, AGENT), goal=goal, worktree=str(worktree)):
         dry(add, repo, worktrees_root, goal=goal, frm=frm, fetch=fetch)
-    name = session_name(target, goal, AGENT)
-    rendered = context(name) if context is not None else None
-    stamp = env(name) if env is not None else {}
+    name = str(Actor(target, goal, AGENT))
+    rendered = context(name, goal) if context is not None else None
+    stamp = env(name, goal) if env is not None else {}
     report = ''
 
     def _run() -> None:

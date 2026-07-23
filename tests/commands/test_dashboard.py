@@ -108,9 +108,9 @@ def test_dashboard_cli_renders_the_tree(
         output=(
             'NAME               STATUS     DETAIL       NEW  CUR  DONE\n'
             'lycia\n'
-            'captain            never run                 ·    ·     ·\n'
+            '@@captain          never run                 ·    ·     ·\n'
             'alpha            \n'
-            '  alpha@manager    never run                 ·    ·     ·\n'
+            '  alpha@@manager   never run                 ·    ·     ·\n'
             '  g              \n'
             '    alpha@g@agent  busy       fix the bug    ·    ·     ·'
         ),

@@ -131,7 +131,7 @@ class TestFileSink:
                     'pid': os.getpid(),
                     'command': 'init',
                     'level': 'INFO',
-                    'caller': 'captain',  # cwd is neither a project nor a repo → captain
+                    'caller': '@@captain',  # cwd is neither a project nor a repo → captain
                     'phase': 'start',
                     'function': FUNC,
                     'params': {'path': '/ws'},
@@ -141,7 +141,7 @@ class TestFileSink:
                     'pid': os.getpid(),
                     'command': 'init',
                     'level': 'INFO',
-                    'caller': 'captain',
+                    'caller': '@@captain',
                     'phase': 'end',
                     'duration_ms': 0.0,
                 },
@@ -203,7 +203,7 @@ class TestFileSink:
         configure()
         logger.bind(session='proj@g@agent').info('agent stop')  # the session acted *on*
         line = json.loads(log_path(sink).read_text())
-        compare(line['caller'], expected='captain')
+        compare(line['caller'], expected='@@captain')
         compare(line['session'], expected='proj@g@agent')
 
     def test_unresolvable_identity_still_logs(self, sink: Path, replace: Replacer) -> None:
@@ -224,7 +224,7 @@ class TestFileSink:
             expected={
                 'pid': os.getpid(),
                 'level': 'DEBUG',
-                'caller': 'captain',  # even the trace says who ran the command
+                'caller': '@@captain',  # even the trace says who ran the command
                 'message': 'git rev-parse --git-dir',
                 'git_cwd': str(sink),
             },

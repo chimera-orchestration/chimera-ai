@@ -30,7 +30,7 @@ def test_session_start_records_the_session(tmpdir: TempDir, replace: Replacer) -
     session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
     [session] = _archived(ws)
     assert (session.platform, session.native_id, session.manager) == ('claude', 'uuid-1', 'none')
-    assert (session.name, session.status, session.workspace) == ('pegasus', 'startup', 'ws')
+    assert (session.name, session.status, session.workspace) == ('@@captain', 'startup', 'ws')
 
 
 def test_session_start_records_the_model(tmpdir: TempDir, replace: Replacer) -> None:

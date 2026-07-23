@@ -107,11 +107,11 @@ class TestBoard:
             result,
             expected=Board(
                 workspace='lycia',
-                captain=Row('captain', None, None, _NO_MAIL),
+                captain=Row('@@captain', None, None, _NO_MAIL),
                 projects=[
                     ProjectBoard(
                         'alpha',
-                        Row('alpha@manager', None, None, _NO_MAIL),
+                        Row('alpha@@manager', None, None, _NO_MAIL),
                         [GoalBoard('g', [Row('alpha@g@agent', in_goal, None, _NO_MAIL)])],
                         [in_repo],
                     )
@@ -134,11 +134,11 @@ class TestBoard:
             result,
             expected=Board(
                 'lycia',
-                Row('captain', None, None, _NO_MAIL),
+                Row('@@captain', None, None, _NO_MAIL),
                 [
                     ProjectBoard(
                         'alpha',
-                        Row('alpha@manager', None, None, _NO_MAIL),
+                        Row('alpha@@manager', None, None, _NO_MAIL),
                         [GoalBoard('g', [Row('alpha@g@agent', a, None, _NO_MAIL)])],
                         [],
                     )
@@ -152,7 +152,7 @@ class TestBoard:
     def test_captain_row_falls_back_to_the_archive_when_nothing_is_live(
         self, workspace: Path, store: Archive, mailbox: Comms
     ) -> None:
-        _record(workspace, 's1', name='captain', manager='chimera')
+        _record(workspace, 's1', name='@@captain', manager='chimera')
         result = board(Scope(workspace, None, None), [], store, mailbox)
         assert result.captain.live is None
         assert result.captain.last is not None
@@ -163,7 +163,7 @@ class TestBoard:
     ) -> None:
         # CHIMERA_ROLE (and so manager='chimera') doesn't survive a resume/reattach/
         # background job — identity here rides the address's own name, not that stamp
-        _record(workspace, 'raw', name='captain', manager='none')
+        _record(workspace, 'raw', name='@@captain', manager='none')
         result = board(Scope(workspace, None, None), [], store, mailbox)
         assert result.captain.live is None
         assert result.captain.last is not None
@@ -174,7 +174,7 @@ class TestBoard:
         self, tmpdir: TempDir, workspace: Path, store: Archive, mailbox: Comms
     ) -> None:
         _project(tmpdir, workspace, 'alpha')
-        _record(workspace, 's1', name='alpha@manager', manager='chimera', project='alpha')
+        _record(workspace, 's1', name='alpha@@manager', manager='chimera', project='alpha')
         result = board(Scope(workspace, None, None), [], store, mailbox)
         [project] = result.projects
         assert project.manager.last is not None
@@ -279,9 +279,9 @@ def test_ls_cli_renders_the_tree(
         output='\n'.join(
             [
                 'lycia',
-                '  captain  (never run)',
+                '  @@captain  (never run)',
                 '  alpha',
-                '    alpha@manager  (never run)',
+                '    alpha@@manager  (never run)',
                 '    g',
                 '      alpha@g@agent  012a9550  busy  fix the bug',
             ]
@@ -309,9 +309,9 @@ def test_ls_cli_renders_loose_agents(
         output='\n'.join(
             [
                 'lycia',
-                '  captain  (never run)',
+                '  @@captain  (never run)',
                 '  alpha',
-                '    alpha@manager  (never run)',
+                '    alpha@@manager  (never run)',
                 '    · 012a9550  repo-sess  busy  building',
                 f'  · 39d68dfa  stray  idle  {stray}',
             ]
@@ -331,13 +331,13 @@ def test_ls_cli_stays_global_from_inside_a_project(
         output='\n'.join(
             [
                 'lycia',
-                '  captain  (never run)',
+                '  @@captain  (never run)',
                 '  alpha',
-                '    alpha@manager  (never run)',
+                '    alpha@@manager  (never run)',
                 '    g',
                 '      alpha@g@agent  (never run)',
                 '  beta',
-                '    beta@manager  (never run)',
+                '    beta@@manager  (never run)',
                 '    (no goals)',
             ]
         ),
@@ -355,13 +355,13 @@ def test_ls_cli_marks_empty_goals_and_projects(
         output='\n'.join(
             [
                 'lycia',
-                '  captain  (never run)',
+                '  @@captain  (never run)',
                 '  alpha',
-                '    alpha@manager  (never run)',
+                '    alpha@@manager  (never run)',
                 '    g',
                 '      alpha@g@agent  (never run)',
                 '  beta',
-                '    beta@manager  (never run)',
+                '    beta@@manager  (never run)',
                 '    (no goals)',
             ]
         ),
@@ -374,15 +374,15 @@ def test_ls_cli_shows_mail_and_archive_fallback(
 ) -> None:
     _project(tmpdir, workspace_with_env, 'alpha')
     replace.in_module(agents, list, module=chimera_main)
-    _record(workspace_with_env, 's1', name='alpha@manager', manager='chimera', project='alpha')
-    _send(workspace_with_env, 'alpha@manager', state='new')
+    _record(workspace_with_env, 's1', name='alpha@@manager', manager='chimera', project='alpha')
+    _send(workspace_with_env, 'alpha@@manager', state='new')
     command.run('ls').check(
         output='\n'.join(
             [
                 'lycia',
-                '  captain  (never run)',
+                '  @@captain  (never run)',
                 '  alpha',
-                '    alpha@manager  s1  ended  mail 1n',
+                '    alpha@@manager  s1  ended  mail 1n',
                 '    (no goals)',
             ]
         ),
@@ -399,7 +399,7 @@ def test_ls_cli_shows_history_and_truncates_a_long_detail(
         output='\n'.join(
             [
                 'lycia',
-                '  captain  (never run)',
+                '  @@captain  (never run)',
                 f'  · ghost1  ghost1  ended  {"x" * 79}…',
             ]
         ),

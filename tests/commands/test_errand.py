@@ -136,7 +136,7 @@ class TestErrand:
         calls = _stub_run(replace)
         names: list[str] = []
 
-        def context(name: str) -> Path:
+        def context(name: str, goal: str) -> Path:
             names.append(name)
             return tmpdir / 'ctx.md'
 
@@ -149,7 +149,7 @@ class TestErrand:
             timeout=30,
             spec=AgentSpec(model='opus'),
             context=context,
-            env=lambda name: {'CHIMERA_ROLE': 'agent'},
+            env=lambda name, goal: {'CHIMERA_ROLE': 'agent'},
         )
         compare(names, expected=[f'proj@{result.goal}@agent'])
         compare(
@@ -361,13 +361,13 @@ def _stub_errand(
         fetch: bool = True,
         timeout: float | None = None,
         spec: AgentSpec = AgentSpec(),
-        context: Callable[[str], Path | None] | None = None,
-        env: Callable[[str], Mapping[str, str]] | None = None,
+        context: Callable[[str, str], Path | None] | None = None,
+        env: Callable[[str, str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> ErrandResult:
         name = f'{target}@errand-abc123@agent'
-        rendered = context(name) if call_context and context is not None else None
-        stamp = env(name) if env is not None else None
+        rendered = context(name, 'errand-abc123') if call_context and context is not None else None
+        stamp = env(name, 'errand-abc123') if env is not None else None
         calls.append(
             {
                 'repo': repo,

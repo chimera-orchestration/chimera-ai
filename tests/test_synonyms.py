@@ -160,6 +160,6 @@ def test_list_dispatches_to_ls(
     replace.in_module(agents, list, module=chimera_main)
     # the synonym runs the canonical `ls`, which is what gets logged
     command.run('list').check(
-        output='lycia\n  captain  (never run)',
+        output='lycia\n  @@captain  (never run)',
         logging=action_logs('ls', 'chimera.commands.ls.board', {'project': None, 'goal': None}),
     )

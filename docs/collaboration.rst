@@ -15,10 +15,12 @@ configuration, so none of it is tracked by the workspace's git (see
 Addresses
 ---------
 
-A mailbox address *is* a session name — the naming you already know:
+A mailbox address *is* a session name, in the one grammar every command
+routes on:
 
-* the captain's persona — ``pegasus``, or whatever you named yours;
-* a project's manager — ``<project>@manager``;
+* the captain — always ``@@captain``; its persona (``pegasus``, or whatever
+  you named yours) is cosmetic, used in its own prompt, never the address;
+* a project's manager — ``<project>@@manager``;
 * a goal's agent — ``<project>@<goal>@<actor>``, e.g.
   ``demo@add-greeting@agent``.
 
@@ -42,7 +44,7 @@ asking whom what, and where each message is in its life:
     session.run('ch worktree add --goal add-greeting -p demo')
     session.cwd = session.home / 'lycia'
     session.run(
-        'ch msg send pegasus "Ready to merge?" '
+        'ch msg send @@captain "Ready to merge?" '
         '"greeting.txt is committed and tests pass - shall I merge to main?" '
         '--kind request --from demo@add-greeting@agent'
     )
@@ -50,7 +52,7 @@ asking whom what, and where each message is in its life:
 .. code-block:: console
 
     $ ch msg ls
-    new   demo@add-greeting@agent → pegasus  [request] Ready to merge?
+    new   demo@add-greeting@agent → @@captain  [request] Ready to merge?
 
 The first column is the state: ``new`` — delivered, not yet seen by its
 recipient; ``cur`` — received, awaiting an answer or an acknowledgement;
@@ -87,10 +89,10 @@ can gather the conversation later); then ``ack`` the request to retire it:
     $ ch msg ack 20260712T091403521881-7c40d1a5
     Acked 20260712T091403521881-7c40d1a5
     $ ch msg ls
-    new   pegasus → demo@add-greeting@agent  [message] Re: Ready to merge?
+    new   @@captain → demo@add-greeting@agent  [message] Re: Ready to merge?
     (+1 disposed message — ch msg ls -v to show)
 
-Your reply went out as ``pegasus`` for the same seat-sharing reason; every
+Your reply went out as ``@@captain`` for the same seat-sharing reason; every
 command takes an explicit address (and ``send`` a ``--from``) when you mean
 someone else's mailbox, as the next section shows.
 
@@ -107,7 +109,7 @@ Chimera doesn't run (a reviewer, say):
 .. code-block:: console
 
     $ ch msg drain demo@add-greeting@agent
-    20260712T091447139022-3e8b90f2  from pegasus  [message] Re: Ready to merge?
+    20260712T091447139022-3e8b90f2  from @@captain  [message] Re: Ready to merge?
 
 A drained message still awaits its *disposition*: ``ack`` marks it handled,
 ``defer`` puts it aside with a reason (recorded in the log, like every send,

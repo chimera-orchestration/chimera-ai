@@ -17,11 +17,12 @@ from pathlib import Path
 
 from loguru import logger
 
+from chimera.addresses import Actor
 from chimera.agent_env import session_role
 from chimera.archive import Event, Session, archive
 from chimera.config import NotInWorkspaceError
 from chimera.context import caller, resolve_scope
-from chimera.worktrees import session_name, worktree_actor
+from chimera.worktrees import worktree_actor
 
 _Axes = tuple[Path, str | None, str | None, str | None]
 
@@ -80,7 +81,7 @@ def session_start(
     elif project and goal and actor:
         # in a goal worktree the name follows the *actual* actor (what `agent start -a`
         # would have named it), never caller()'s agent default — resume keys on these axes
-        name = session_name(project, goal, actor)
+        name = str(Actor(project, goal, actor))
     else:
         name = caller(cwd)
     now = datetime.now(timezone.utc)

@@ -4,14 +4,13 @@ from typing import cast
 
 from loguru import logger
 
-from chimera.agent_env import ROLE_MANAGER
+from chimera.addresses import Manager
 from chimera.agents import Launch
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import refuse_restricted
 from chimera.config import UserError
 from chimera.context import Scope
 from chimera.dry import Dry
-from chimera.worktrees import SEP
 
 
 class ChatAlreadyLiveError(UserError):
@@ -30,11 +29,11 @@ class GoalHasAgentError(UserError):
 def chat_target(scope: Scope, captain: str, goal: str | None = None) -> tuple[Path, str]:
     """Where a chat at ``scope`` runs and what its session is named.
 
-    Two scopes chat: a project in its project dir as ``<project>@manager`` — session
-    names carry the role at every layer (bare persona / ``<project>@manager`` /
-    ``<project>@<goal>@agent``) — and the bare workspace as the captain: its persona
-    name *is* the session name, and it works on the workspace as a whole (no goal,
-    branch or worktree).
+    Two scopes chat: a project in its project dir as ``<project>@@manager`` (see
+    ``chimera.addresses``) and the bare workspace as the captain: ``captain`` is its
+    technical address (``@@captain`` — its persona is a separate, cosmetic identity,
+    never the session name), and it works on the workspace as a whole (no goal, branch
+    or worktree).
 
     A goal never chats: it already has its agent, and a second session on the same
     branch/worktree invites launch-order traps and lifecycle interference — so a pinned
@@ -48,7 +47,7 @@ def chat_target(scope: Scope, captain: str, goal: str | None = None) -> tuple[Pa
         raise GoalHasAgentError(requested, scope.project.name if scope.project else None)
     if scope.project is None:
         return scope.workspace, captain
-    return scope.project.dir, f'{scope.project.name}{SEP}{ROLE_MANAGER}'
+    return scope.project.dir, str(Manager(project=scope.project.name))
 
 
 def chat(

@@ -5,6 +5,7 @@ from subprocess import DEVNULL, PIPE, run
 from giterator import GitError
 from loguru import logger
 
+from chimera.addresses import RESERVED_ACTORS
 from chimera.config import UserError
 from chimera.git import Git
 
@@ -58,8 +59,12 @@ def require_valid_goal(name: str) -> str:
 def require_valid_actor(name: str) -> str:
     """``name`` when it can be an actor, returned for chaining; ``UserError`` otherwise.
 
-    Same grammar and seam rule as :func:`require_valid_goal`, for the actor side of the pair.
+    Same grammar and seam rule as :func:`require_valid_goal`, for the actor side of the
+    pair, plus one more: ``manager``/``captain`` are reserved role names (see
+    ``chimera.addresses``) — never a valid actor, so an address can't misread as one.
     """
+    if name in RESERVED_ACTORS:
+        raise UserError(f'{name!r} is a reserved role name, not a valid actor')
     return _require_valid_name(name, 'actor', "'agent' or 'reviewer'", f'refs/heads/goal/{name}')
 
 
@@ -71,11 +76,6 @@ def branch(goal: str, actor: str) -> str:
 def worktree_path(root: Path, goal: str, actor: str) -> Path:
     """The worktree directory for an actor on a goal: ``<root>/<goal>@<actor>``."""
     return root / f'{goal}{SEP}{actor}'
-
-
-def session_name(project: str, goal: str, actor: str) -> str:
-    """The agent session label: ``<project>@<goal>@<actor>``."""
-    return SEP.join((project, goal, actor))
 
 
 def worktree_actor(cwd: Path, worktrees: Path) -> str | None:

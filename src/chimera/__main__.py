@@ -110,13 +110,13 @@ from chimera.git import completing
 from chimera.help import command_index, render_json, render_text
 from chimera.prime import prime as _prime
 from chimera.prime import resolve_role
+from chimera.addresses import Actor, Captain
 from chimera.processes import process_ancestry as _process_ancestry
 from chimera.worktrees import (
     AGENT,
     SEP,
     require_valid_actor,
     require_valid_goal,
-    session_name,
     worktree_path,
 )
 
@@ -888,21 +888,20 @@ def review(
     sources: tuple[Source, ...] = ()
     env: Mapping[str, str] = {}
 
-    def _render_context(name: str) -> Path | None:
-        # keyed by the session name _review resolves (pr-<N>, even from a URL argument);
-        # the handles are kept so the --dry preview shows the artifact rendered exactly once
+    def _render_context(name: str, goal: str) -> Path | None:
+        # keyed by the session name and goal _review resolves (pr-<N>, even from a URL
+        # argument); the handles are kept so --dry shows the artifact rendered exactly once
         nonlocal context, sources
-        goal = name.split(SEP)[1]  # only the resolved name knows the goal, as with _role_stamp
         context, sources = _context_file(
             p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=goal)
         )
         return context
 
-    def _role_stamp(name: str) -> Mapping[str, str]:
+    def _role_stamp(name: str, goal: str) -> Mapping[str, str]:
         # keyed the same way; the handle is kept so --dry previews the stamp the launch
         # actually got, never a re-derivation
         nonlocal env
-        env = role_env(ROLE_AGENT, role_scope_for(p.name, name.split(SEP)[1]))
+        env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
         return env
 
     worktree = _review(
@@ -980,18 +979,17 @@ def errand(
     sources: tuple[Source, ...] = ()
     env: Mapping[str, str] = {}
 
-    def _render_context(name: str) -> Path | None:
-        # keyed by the resolved session name: only _errand knows the generated goal —
-        # the handles are kept so the --dry preview shows the artifact rendered exactly once
+    def _render_context(name: str, goal: str) -> Path | None:
+        # keyed by the resolved session name and goal: only _errand knows the generated
+        # goal — the handles are kept so --dry shows the artifact rendered exactly once
         nonlocal context, sources
-        goal = name.split(SEP)[1]
         context, sources = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
         return context
 
-    def _role_stamp(name: str) -> Mapping[str, str]:
+    def _role_stamp(name: str, goal: str) -> Mapping[str, str]:
         # keyed the same way; the handle is kept so --dry previews the stamp the run got
         nonlocal env
-        env = role_env(ROLE_AGENT, role_scope_for(p.name, name.split(SEP)[1]))
+        env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
         return env
 
     result = _errand(
@@ -1063,12 +1061,12 @@ def chat(
     config = workspace_config(scope.workspace)
     # an explicit -g the scope couldn't pin (no project) must still reach the refusal
     cwd, name = chat_target(
-        scope, config.captain.name, goal if goal is not None else _overrides(ctx).goal
+        scope, str(Captain()), goal if goal is not None else _overrides(ctx).goal
     )
     if scope.project is None:
         spec = resolve_spec(harness, model, config.captain, config.agent)
         role = ROLE_CAPTAIN
-        intro = _prime(ROLE_CAPTAIN, persona=name, workspace=scope.workspace.name)
+        intro = _prime(ROLE_CAPTAIN, persona=config.captain.name, workspace=scope.workspace.name)
         env = role_env(ROLE_CAPTAIN)  # no scope: the captain is unfenced
     else:
         spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
@@ -1393,7 +1391,7 @@ def goal_start(
     spec = _spec(p, harness, model)
     context, sources = _context_file(
         p,
-        session_name(p.name, goal, AGENT),
+        str(Actor(p.name, goal, AGENT)),
         ROLE_AGENT,
         _prime(ROLE_AGENT, project=p.name, goal=goal),
     )
@@ -1402,7 +1400,7 @@ def goal_start(
         p.repo,
         p.worktrees,
         goal,
-        session_name(p.name, goal, AGENT),
+        str(Actor(p.name, goal, AGENT)),
         prompt,
         frm,
         _passthrough(ctx),
@@ -1440,7 +1438,7 @@ def goal_adopt(
     spec = _spec(p, harness, model)
     context, sources = _context_file(
         p,
-        session_name(p.name, goal, AGENT),
+        str(Actor(p.name, goal, AGENT)),
         ROLE_AGENT,
         _prime(ROLE_AGENT, project=p.name, goal=goal),
     )
@@ -1449,7 +1447,7 @@ def goal_adopt(
         p.repo,
         p.worktrees,
         goal,
-        session_name(p.name, goal, AGENT),
+        str(Actor(p.name, goal, AGENT)),
         prompt,
         _passthrough(ctx),
         dangerous,
@@ -1676,7 +1674,7 @@ def agent_start(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = require_valid_actor(actor or overrides.actor or AGENT)
     worktree = worktree_path(p.worktrees, g, actor)
-    name = session_name(p.name, g, actor)
+    name = str(Actor(p.name, g, actor))
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context, sources = _context_file(
@@ -1709,7 +1707,7 @@ def agent_resume(
     g = resolve_goal(Path.cwd(), p, goal if goal is not None else overrides.goal)
     actor = require_valid_actor(actor or overrides.actor or AGENT)
     worktree = worktree_path(p.worktrees, g, actor)
-    name = session_name(p.name, g, actor)
+    name = str(Actor(p.name, g, actor))
     dry_run = Dry(dry)
     spec = _spec(p, harness, model)
     context, sources = _context_file(

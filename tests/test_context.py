@@ -292,15 +292,17 @@ class TestCaller:
         assert caller(Path('/wherever')) == 'chimera@fix@agent'
 
     def test_at_the_bare_workspace_is_the_captain(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # the captain's persona (config's captain: key) is cosmetic only — caller()
+        # returns its technical address regardless of what persona is configured
         tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
         replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-        assert caller(tmpdir.path / 'ws') == 'pegasus'
+        assert caller(tmpdir.path / 'ws') == '@@captain'
 
     def test_in_a_project_dir_is_the_manager(self, tmpdir: TempDir, replace: Replacer) -> None:
         tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
         tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
         replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-        assert caller(tmpdir.path / 'ws' / 'proj') == 'proj@manager'
+        assert caller(tmpdir.path / 'ws' / 'proj') == 'proj@@manager'
 
     def test_in_a_goal_worktree_is_the_agent(self, tmpdir: TempDir, replace: Replacer) -> None:
         tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})

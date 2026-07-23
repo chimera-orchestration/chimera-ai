@@ -22,16 +22,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from chimera.agent_env import ROLE_MANAGER
+from chimera.addresses import Actor, Captain, Manager
 from chimera.archive import Archive, Session, archive
-from chimera.config import (
-    NotInWorkspaceError,
-    ProjectConfig,
-    find_workspace,
-    load_config,
-    workspace_config,
-)
-from chimera.worktrees import SEP, session_name
+from chimera.config import NotInWorkspaceError, ProjectConfig, find_workspace, load_config
+from chimera.worktrees import SEP
 
 CLAUDE_PROJECTS = Path.home() / '.claude' / 'projects'
 BACKFILLED = 'backfilled'
@@ -80,7 +74,7 @@ def backfill(projects: Path) -> Backfilled:
                 started_at=started,
                 ended_at=ended,
                 manager='chimera' if goal is not None else 'none',
-                name=_name(workspace, project, goal, actor),
+                name=_name(project, goal, actor),
                 cwd=cwd,
                 transcript=transcript,
                 workspace=workspace.name,
@@ -133,13 +127,13 @@ def _axes(cwd: Path) -> _Axes | None:
     return workspace, project.name, None, None
 
 
-def _name(workspace: Path, project: str | None, goal: str | None, actor: str | None) -> str:
+def _name(project: str | None, goal: str | None, actor: str | None) -> str:
     """The address the session would have had — ``caller``'s cwd inference, from the axes."""
     if project is None:
-        return workspace_config(workspace).captain.name
+        return str(Captain())
     if goal is None or actor is None:
-        return f'{project}{SEP}{ROLE_MANAGER}'
-    return session_name(project, goal, actor)
+        return str(Manager(project=project))
+    return str(Actor(project, goal, actor))
 
 
 def _placement(transcript: Path) -> tuple[Path, datetime, datetime] | None:

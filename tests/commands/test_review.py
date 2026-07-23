@@ -193,7 +193,7 @@ def test_review_keys_the_context_by_the_resolved_session_name(
     calls = _stub_agent(replace)
     names: list[str] = []
 
-    def factory(name: str) -> Path:
+    def factory(name: str, goal: str) -> Path:
         names.append(name)
         return tmpdir / 'ctx.md'
 
@@ -815,12 +815,12 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         launch: bool = True,
         review_step: str | None = None,
         spec: AgentSpec = AgentSpec(),
-        context: Callable[[str], Path | None] | None = None,
-        env: Callable[[str], Mapping[str, str]] | None = None,
+        context: Callable[[str, str], Path | None] | None = None,
+        env: Callable[[str, str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
-        rendered = context('project@pr-1@agent') if context is not None else None
-        stamp = env('project@pr-1@agent') if env is not None else None
+        rendered = context('project@pr-1@agent', 'pr-1') if context is not None else None
+        stamp = env('project@pr-1@agent', 'pr-1') if env is not None else None
         calls.append((project, pr, list(extra), dangerous, into, launch, spec, rendered, stamp))
         return worktrees / 'pr-1@agent'
 
@@ -913,12 +913,12 @@ def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         launch: bool = True,
         review_step: str | None = None,
         spec: AgentSpec = AgentSpec(),
-        context: Callable[[str], Path | None] | None = None,
-        env: Callable[[str], Mapping[str, str]] | None = None,
+        context: Callable[[str, str], Path | None] | None = None,
+        env: Callable[[str, str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
         if env is not None:  # the real review stamps the role through the factory on launch
-            env('project@pr-1@agent')
+            env('project@pr-1@agent', 'pr-1')
         calls.append(dry)
         return worktrees / 'pr-1@agent'
 

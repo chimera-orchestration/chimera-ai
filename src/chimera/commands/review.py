@@ -15,6 +15,7 @@ from chimera.commands.worktree.add import add
 from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.git import Git, remote_slug, repo_slug, sibling_url
+from chimera.addresses import Actor
 from chimera.worktrees import (
     ACTORS,
     AGENT,
@@ -22,7 +23,6 @@ from chimera.worktrees import (
     branch,
     checkout_here,
     registered_worktrees,
-    session_name,
     worktree_path,
 )
 
@@ -56,8 +56,8 @@ def review(
     launch: bool = True,
     review_step: str | None = None,
     spec: AgentSpec = AgentSpec(),
-    context: Callable[[str], Path | None] | None = None,
-    env: Callable[[str], Mapping[str, str]] | None = None,
+    context: Callable[[str, str], Path | None] | None = None,
+    env: Callable[[str, str], Mapping[str, str]] | None = None,
     dry: Dry = Dry(),
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
@@ -74,13 +74,13 @@ def review(
     the per-run knob for *how* the diff gets reviewed, leaving the surrounding template
     alone. A template with no such hole refuses it rather than dropping it silently.
 
-    ``context`` is a factory keyed by session name, called with the *resolved*
-    ``<project>@pr-<N>@agent`` — the number is only known here, once ``gh`` has resolved
-    ``pr``, so a URL argument still lands its context artifact (and the ``context:
-    rendered`` log line) under the real session name. Never called without ``launch``:
-    no session, nothing to render for. ``env`` — the role stamp overlaid on the
-    session's environment — is a factory keyed the same way, for the same reason: its
-    scope carries the goal only the resolved name knows.
+    ``context`` is a factory keyed by ``(session name, goal)`` — called with the
+    *resolved* ``<project>@pr-<N>@agent`` and ``pr-<N>`` — the number is only known
+    here, once ``gh`` has resolved ``pr``, so a URL argument still lands its context
+    artifact (and the ``context: rendered`` log line) under the real session name.
+    Never called without ``launch``: no session, nothing to render for. ``env`` — the
+    role stamp overlaid on the session's environment — is a factory keyed the same
+    way, for the same reason: its scope carries a goal only this function resolves.
 
     ``launch=False`` (CLI ``--no-agent``) stops after the checkout: branches, worktree and
     upstream all stand, but no agent runs — kick one off later with ``ch agent start``. The
@@ -119,7 +119,7 @@ def review(
     if into is not None:
         dry(checkout_here, git, branch(goal, HUMAN), into, 'review')
     if launch:
-        name = session_name(project, goal, AGENT)
+        name = str(Actor(project, goal, AGENT))
         prompt = _prompt(prompts_dir, meta, goal, project, review_step)
         agent(
             agent_worktree,
@@ -128,8 +128,8 @@ def review(
             extra,
             dangerous,
             spec,
-            context(name) if context is not None else None,
-            env(name) if env is not None else {},
+            context(name, goal) if context is not None else None,
+            env(name, goal) if env is not None else {},
             dry,
         )
     return agent_worktree

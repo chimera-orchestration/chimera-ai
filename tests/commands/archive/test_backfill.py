@@ -108,7 +108,7 @@ def test_bare_workspace_cwd_names_the_captain(tmpdir: TempDir) -> None:
                 status='backfilled',
                 started_at=datetime(2026, 7, 9, 6, 52, 57, 81000, tzinfo=timezone.utc),
                 ended_at=datetime(2026, 7, 9, 6, 52, 57, 81000, tzinfo=timezone.utc),
-                name='pegasus',
+                name='@@captain',
                 cwd=ws,
                 transcript=transcript,
                 workspace='ws',
@@ -127,7 +127,12 @@ def test_project_dir_cwd_names_the_manager(tmpdir: TempDir) -> None:
         _archived(tmpdir.path / 'ws'),
         expected=[
             like(
-                Session, name='proj@manager', manager='none', project='proj', goal=None, actor=None
+                Session,
+                name='proj@@manager',
+                manager='none',
+                project='proj',
+                goal=None,
+                actor=None,
             )
         ],
     )

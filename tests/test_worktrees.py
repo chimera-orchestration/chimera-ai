@@ -23,7 +23,6 @@ from chimera.worktrees import (
     registered_worktrees,
     require_valid_actor,
     require_valid_goal,
-    session_name,
     worktree_actor,
     worktree_dirs,
     worktree_path,
@@ -46,10 +45,6 @@ def test_branch_names_the_actor_under_the_goal() -> None:
 
 def test_worktree_path_joins_goal_and_actor_with_an_at_sign() -> None:
     compare(worktree_path(Path('/wt'), 'my-goal', 'agent'), expected=Path('/wt/my-goal@agent'))
-
-
-def test_session_name_joins_project_goal_and_actor() -> None:
-    compare(session_name('proj', 'my-goal', 'agent'), expected='proj@my-goal@agent')
 
 
 class TestRequireValidGoal:
@@ -102,6 +97,11 @@ class TestRequireValidActor:
     def test_rejects_names_git_refuses(self) -> None:
         with ShouldRaise(UserError("'a b' is not a valid actor name")):
             require_valid_actor('a b')
+
+    def test_rejects_reserved_role_names(self) -> None:
+        for name in ('manager', 'captain'):
+            with ShouldRaise(UserError(f'{name!r} is a reserved role name, not a valid actor')):
+                require_valid_actor(name)
 
 
 def test_worktree_dirs_lists_only_dirs_sorted(tmpdir: TempDir) -> None:

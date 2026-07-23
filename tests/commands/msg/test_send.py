@@ -35,7 +35,7 @@ def test_send_reply_threads_on_the_original(tmpdir: TempDir) -> None:
     message = send(
         tmpdir.path,
         sender='a',
-        to='b',
+        to='b@g@agent',
         subject='re',
         body='.',
         kind='message',
@@ -43,6 +43,22 @@ def test_send_reply_threads_on_the_original(tmpdir: TempDir) -> None:
         re='root-1',
     )
     assert (message.thread, message.re) == ('root-1', 'root-1')
+
+
+def test_send_rejects_an_incomplete_address(tmpdir: TempDir) -> None:
+    # the incident this closes: a message addressed to bare 'manager' (missing its
+    # project) must refuse up front, never silently write to the wrong Maildir
+    with ShouldRaise(UserError("'manager' is not a valid address: expected exactly 2 '@'s")):
+        send(
+            tmpdir.path,
+            sender='a@@manager',
+            to='manager',
+            subject='s',
+            body='.',
+            kind='message',
+            priority='normal',
+            re=None,
+        )
 
 
 def test_send_rejects_an_unknown_kind(tmpdir: TempDir) -> None:
