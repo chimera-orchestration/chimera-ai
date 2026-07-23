@@ -46,6 +46,7 @@ from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_ch
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.dump import dump as _dump
+from chimera.commands.dump import process_ancestry as _process_ancestry
 from chimera.commands.errand import errand as _errand
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
@@ -709,21 +710,26 @@ def logtail(
 
 @app.command(
     cls=LoggingCommand,
-    help='Log a debug snapshot (cwd, pid, argv, env, stdin payload) — for chasing hook/'
-    'environment problems by hand or wired temporarily into a hooks.json entry.',
+    help='Log a debug snapshot (cwd, pid, process ancestry, argv, env, stdin payload) — '
+    'for chasing hook/environment problems by hand or wired temporarily into a hooks.json '
+    'entry.',
 )
 @logs(_dump)
 def dump(
-    context: Annotated[str, typer.Argument(help='Label: a hook event name, or free text')],
+    context: Annotated[
+        str | None, typer.Argument(help='Label: a hook event name, or free text (optional)')
+    ] = None,
     stdout: Annotated[
         bool, typer.Option('--stdout', help='Also print the captured snapshot to stdout')
     ] = False,
 ) -> None:
+    pid = os.getpid()
     record = _dump(
         context,
         Path.cwd(),
-        os.getpid(),
+        pid,
         os.getppid(),
+        _process_ancestry(pid),
         sys.argv,
         dict(os.environ),
         None if sys.stdin.isatty() else sys.stdin.read(),
@@ -731,7 +737,7 @@ def dump(
     if stdout:
         typer.echo(json.dumps(record, indent=2, default=str))
     else:
-        typer.echo(f'dumped: {context}')
+        typer.echo(f'dumped: {context}' if context is not None else 'dumped')
 
 
 @app.command(

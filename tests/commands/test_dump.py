@@ -1,17 +1,21 @@
 import io
 import json
 import os
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from testfixtures import LogCapture, Replacer, compare
 
 import chimera.__main__ as main
-from chimera.commands.dump import dump
+from chimera.commands.dump import dump, process_ancestry, ps_parent_info
 from tests.cli import Command, action_logs
 
-type _Call = tuple[str, Path, int, int, list[str], dict[str, str], str | None]
+type _Call = tuple[
+    str | None, Path, int, int, list[dict[str, object]], list[str], dict[str, str], str | None
+]
 
 
 def _no_stdin(replace: Replacer) -> None:
@@ -26,6 +30,7 @@ def test_dump_returns_and_logs_the_snapshot(full_logs: LogCapture) -> None:
         Path('/ws/proj/worktrees/g@agent'),
         123,
         45,
+        [{'pid': 45, 'name': 'sh'}, {'pid': 9, 'name': 'claude'}],
         ['ch', 'dump', 'PreToolUse'],
         {'CHIMERA_ROLE': 'agent'},
         '{"tool_name": "Bash"}',
@@ -36,6 +41,7 @@ def test_dump_returns_and_logs_the_snapshot(full_logs: LogCapture) -> None:
             'cwd': '/ws/proj/worktrees/g@agent',
             'pid': 123,
             'ppid': 45,
+            'ancestry': [{'pid': 45, 'name': 'sh'}, {'pid': 9, 'name': 'claude'}],
             'argv': ['ch', 'dump', 'PreToolUse'],
             'env': {'CHIMERA_ROLE': 'agent'},
             'stdin': '{"tool_name": "Bash"}',
@@ -45,31 +51,100 @@ def test_dump_returns_and_logs_the_snapshot(full_logs: LogCapture) -> None:
 
 
 def test_dump_with_no_stdin(full_logs: LogCapture) -> None:
-    record = dump('manual check', Path('/ws'), 1, 0, ['ch', 'dump'], {}, None)
+    record = dump('manual check', Path('/ws'), 1, 0, [], ['ch', 'dump'], {}, None)
     compare(record['stdin'], expected=None)
     full_logs.check({'level': 'INFO', 'message': 'dump: manual check', **record})
+
+
+def test_dump_with_no_context(full_logs: LogCapture) -> None:
+    record = dump(None, Path('/ws'), 1, 0, [], ['ch', 'dump'], {}, None)
+    full_logs.check({'level': 'INFO', 'message': 'dump', **record})
+
+
+class TestProcessAncestry:
+    def test_walks_up_to_a_root_process(self) -> None:
+        parents = {100: (10, 'sh'), 10: (1, 'claude')}
+        compare(
+            process_ancestry(100, get_parent=lambda pid: parents[pid]),
+            expected=[{'pid': 10, 'name': 'sh'}, {'pid': 1, 'name': 'claude'}],
+        )
+
+    def test_stops_once_a_process_is_unqueryable(self) -> None:
+        parents = {100: (10, 'sh')}
+        compare(
+            process_ancestry(100, get_parent=lambda pid: parents.get(pid)),
+            expected=[{'pid': 10, 'name': 'sh'}],
+        )
+
+    def test_bounds_a_pathological_chain(self) -> None:
+        compare(
+            process_ancestry(100, get_parent=lambda pid: (pid + 1, 'x')),
+            expected=[{'pid': n, 'name': 'x'} for n in range(101, 121)],
+        )
+
+
+class TestPsParentInfo:
+    def test_parses_ppid_and_comm(self, replace: Replacer) -> None:
+        replace.in_module(
+            subprocess.run,
+            lambda *_a, **_kw: CompletedProcess([], 0, stdout='42  claude\n'),
+        )
+        compare(ps_parent_info(123), expected=(42, 'claude'))
+
+    def test_none_when_ps_fails(self, replace: Replacer) -> None:
+        replace.in_module(subprocess.run, lambda *_a, **_kw: CompletedProcess([], 1, stdout=''))
+        compare(ps_parent_info(123), expected=None)
+
+    def test_none_when_process_is_gone(self, replace: Replacer) -> None:
+        replace.in_module(subprocess.run, lambda *_a, **_kw: CompletedProcess([], 0, stdout=''))
+        compare(ps_parent_info(123), expected=None)
+
+    def test_none_when_ps_is_missing(self, replace: Replacer) -> None:
+        def raise_oserror(*_a: object, **_kw: object) -> CompletedProcess[str]:
+            raise OSError('ps not found')
+
+        replace.in_module(subprocess.run, raise_oserror)
+        compare(ps_parent_info(123), expected=None)
 
 
 def test_cli_wires_the_real_process_snapshot_through(
     workspace: Path, replace: Replacer, command: Command
 ) -> None:
-    # proves the wrapper's own job — gathering cwd/pid/ppid/argv/env/stdin and passing
-    # them through — rather than trusting placeholders; the pure function's own behaviour
-    # (logging, return value) is already pinned exactly by the tests above
+    # proves the wrapper's own job — gathering cwd/pid/ppid/ancestry/argv/env/stdin and
+    # passing them through — rather than trusting placeholders; the pure function's own
+    # behaviour (logging, return value) is already pinned exactly by the tests above
     os.chdir(workspace)
     _no_stdin(replace)
+    replace(
+        target=main._process_ancestry,
+        container=main,
+        name='_process_ancestry',
+        replacement=lambda pid: [{'pid': pid, 'name': 'stub'}],
+    )
     calls: list[_Call] = []
 
     def record(
-        context: str,
+        context: str | None,
         cwd: Path,
         pid: int,
         ppid: int,
+        ancestry: Sequence[Mapping[str, object]],
         argv: Sequence[str],
         env: Mapping[str, str],
         stdin: str | None,
     ) -> dict[str, object]:
-        calls.append((context, cwd, pid, ppid, list(argv), dict(env), stdin))
+        calls.append(
+            (
+                context,
+                cwd,
+                pid,
+                ppid,
+                [dict(entry) for entry in ancestry],
+                list(argv),
+                dict(env),
+                stdin,
+            )
+        )
         return {}
 
     replace(target=dump, container=main, name='_dump', replacement=record)
@@ -80,14 +155,34 @@ def test_cli_wires_the_real_process_snapshot_through(
             'dump', 'chimera.commands.dump.dump', {'context': 'manual check', 'stdout': False}
         ),
     )
-    [(context, cwd, pid, ppid, argv, env, stdin)] = calls
+    [(context, cwd, pid, ppid, ancestry, argv, env, stdin)] = calls
     compare(context, expected='manual check')
     compare(cwd, expected=Path.cwd())
     compare(pid, expected=os.getpid())
     compare(ppid, expected=os.getppid())
+    compare(ancestry, expected=[{'pid': pid, 'name': 'stub'}])
     compare(argv[1:], expected=['dump', 'manual check'])  # [0] is the harness's own program name
     compare(env, expected=expected_env)
     compare(stdin, expected='')
+
+
+def test_cli_context_is_optional(workspace: Path, replace: Replacer, command: Command) -> None:
+    os.chdir(workspace)
+    _no_stdin(replace)
+    calls: list[str | None] = []
+    replace(
+        target=dump,
+        container=main,
+        name='_dump',
+        replacement=lambda context, *_a, **_kw: (calls.append(context), {})[1],
+    )
+    command.run('dump').check(
+        output='dumped',
+        logging=action_logs(
+            'dump', 'chimera.commands.dump.dump', {'context': None, 'stdout': False}
+        ),
+    )
+    compare(calls, expected=[None])
 
 
 def test_cli_stdout_prints_whatever_dump_returns(
