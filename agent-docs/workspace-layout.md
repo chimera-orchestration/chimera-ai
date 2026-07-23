@@ -283,6 +283,12 @@ add/retire via the `CHECKS` tuple). Current checks:
   is reported for a human
 - **orphaned-worktrees** — prune stale git worktree registrations; flag untracked dirs under
   `worktrees/`
+- **occupied-worktrees** — a goal worktree with more than one verified-live claude session
+  (an interactive attach alongside a background job, or the reverse) — the state behind the
+  SessionStart hook's occupancy warning (see *Worktrees*) firing on every subsequent launch
+  there. `--fix` stops any `idle` occupant through its own harness — costs nothing, since it
+  has no work in flight — but leaves occupants that are all actively working for a human
+  (`ch agent stop`): there's no safe pick between two busy sessions
 - **chimera-up-to-date** — chimera's own dev checkout (found by walking up from the running
   `chimera` package's own `__file__` to the nearest `.git`; for an editable install that resolves
   to the source checkout, so it works for a real globally-installed `ch` — a non-editable/wheel
