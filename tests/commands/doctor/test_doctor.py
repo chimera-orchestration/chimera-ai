@@ -23,6 +23,9 @@ from chimera.commands.init import TEMPLATE
 from chimera.config import NotInWorkspaceError
 from tests.cli import Command, action_logs
 
+N_CHECKS = len(CHECKS)  # the count doctor's CLI output reports — kept live so a check
+# added or removed elsewhere never needs every expectation below re-counted by hand
+
 
 @pytest.fixture(autouse=True)
 def _no_chimera_checkout(replace: Replacer) -> None:
@@ -297,7 +300,7 @@ def test_doctor_cli_all_clean(tmpdir: TempDir, replace: Replacer, command: Comma
     command.run('doctor').check(  # cwd is the tmpdir, not ws, so the note appears
         output=(
             f'note: resolved workspace root: {ws.resolve()}\n'
-            'All checks passed! (ch doctor -v lists the 18 checks run)'
+            f'All checks passed! (ch doctor -v lists the {N_CHECKS} checks run)'
         ),
         logging=_doctor_logs(None, fix=False),
     )
@@ -396,7 +399,8 @@ def test_doctor_cli_flags_unset_workspace_env(
     replace.in_environ('CHIMERA_WORKSPACE', not_there)
     os.chdir(ws)  # no env: doctor finds the workspace by walking up from cwd
     command.run('doctor').check(
-        output=_env_not_set(ws.resolve()) + '\n(+17 checks passed — ch doctor -v to list)',
+        output=_env_not_set(ws.resolve())
+        + f'\n(+{N_CHECKS - 1} checks passed — ch doctor -v to list)',
         return_code=1,
         logging=_doctor_logs(
             None, fix=False, findings={'workspace-env': [_env_finding(ws.resolve())]}
@@ -413,7 +417,7 @@ def test_doctor_cli_reports_and_exits_nonzero(tmpdir: TempDir, command: Command)
                 f'[workspace-config] (would fix — run with --fix) {ws.resolve()}/config.yaml missing',
                 f'[captain] (would fix — run with --fix) {_no_captain_message(ws.resolve())}',
                 _env_not_set(ws.resolve()),
-                '(+15 checks passed — ch doctor -v to list)',
+                f'(+{N_CHECKS - 3} checks passed — ch doctor -v to list)',
             ]
         ),
         return_code=1,
@@ -445,7 +449,7 @@ def test_doctor_cli_fix_resolves_and_exits_zero(
         output=(
             f'[workspace-config] (fixed) {ws.resolve()}/config.yaml missing\n'
             f'[captain] (fixed) {_no_captain_message(ws.resolve())}\n'
-            '(+16 checks passed — ch doctor -v to list)'
+            f'(+{N_CHECKS - 2} checks passed — ch doctor -v to list)'
         ),
         logging=_doctor_logs(
             str(ws),
@@ -480,7 +484,7 @@ def test_doctor_cli_fix_leaves_manual_items_nonzero(tmpdir: TempDir, command: Co
                 'has kind: nonsense at the workspace root',
                 f'[captain] (fixed) {_no_captain_message(ws.resolve())}',
                 _env_not_set(ws.resolve()),
-                '(+15 checks passed — ch doctor -v to list)',
+                f'(+{N_CHECKS - 3} checks passed — ch doctor -v to list)',
             ]
         ),
         return_code=1,
@@ -600,7 +604,7 @@ def test_doctor_cli_exclude_mutes_a_finding(
     os.chdir(ws)
     dropped = _excluded_log('workspace-env', _env_not_set_message(ws.resolve()))
     command.run('doctor', '-x', 'workspace-env').check(
-        output=('(+18 checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
+        output=(f'(+{N_CHECKS} checks passed — ch doctor -v to list)\n(1 finding excluded by -x)'),
         logging=_doctor_logs(
             None, fix=False, exclude=('workspace-env',), excluded={'workspace-env': [dropped]}
         ),
@@ -615,7 +619,7 @@ def test_doctor_cli_exclude_prevents_the_fix(
     dropped_config = _excluded_log('workspace-config', f'{ws.resolve()}/config.yaml missing')
     dropped_captain = _excluded_log('captain', _no_captain_message(ws.resolve()))
     command.run('doctor', str(ws), '--fix', '-x', 'workspace-config', '-x', 'captain').check(
-        output=('(+18 checks passed — ch doctor -v to list)\n(2 findings excluded by -x)'),
+        output=(f'(+{N_CHECKS} checks passed — ch doctor -v to list)\n(2 findings excluded by -x)'),
         logging=_doctor_logs(
             str(ws),
             fix=True,
@@ -636,7 +640,7 @@ def test_doctor_cli_exclude_unmatched_warns(
     command.run('doctor', str(ws), '-x', 'bogus').check(
         output=(
             "warning: -x 'bogus' matched nothing\n"
-            'All checks passed! (ch doctor -v lists the 18 checks run)'
+            f'All checks passed! (ch doctor -v lists the {N_CHECKS} checks run)'
         ),
         logging=_doctor_logs(str(ws), fix=False, exclude=('bogus',)),
     )
@@ -655,7 +659,7 @@ def test_doctor_cli_navigates_from_a_project(
             [
                 f'note: resolved workspace root: {ws.resolve()}',
                 f'[project-config] (fixed) {ws.resolve()}/chimera/config.yaml missing kind: project',
-                '(+17 checks passed — ch doctor -v to list)',
+                f'(+{N_CHECKS - 1} checks passed — ch doctor -v to list)',
             ]
         ),
         logging=_doctor_logs(
