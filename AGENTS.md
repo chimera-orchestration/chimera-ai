@@ -33,6 +33,7 @@ When implementing chimera, the following principles must be adhered to:
 
 - **Everything must be a CLI** – Every action is a CLI command thinly wrapping a pure, importable function. Compose from pure functions; put logic tests at the function layer and still cover the CLI itself. More in @agent-docs/commands.md.
 - **Every CLI action must be logged** – Every action must be logged to the log file, with enough of what it examined, decided and changed that the log alone can debug the run — outcomes only, never spew; mutating a git ref must log its before/after shas first. More in @agent-docs/logging.md.
+- **No tokens for admin** – observation, liveness and delivery must never cost a model turn. If a design can only be satisfied by waking an agent just to check something, the design is wrong, not the workaround.
 - **Every CLI action must be self-documenting** – every command carries a terse, agent-optimised `help=` summary; `--help` works on group and leaf alike, and `ch help` derives the whole tree from that same single source. More in @agent-docs/commands.md.
 - **Terse defaults signpost their depth** – any view that hides detail behind `--verbose` must, when it actually hid something and `-v` wasn't given, end with a one-line hint naming the `-v` command to reveal it. No silent dead ends. More in @agent-docs/commands.md.
 - **Document everything** - Read @agent-docs/documentation.md when you need to.
