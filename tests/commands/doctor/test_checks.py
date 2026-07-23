@@ -1,4 +1,3 @@
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,7 +20,6 @@ from chimera.commands.doctor.checks import (
     GitignoreCheck,
     InertBranchCheck,
     LegacyWorktreeSeparatorCheck,
-    OccupiedWorktreeCheck,
     OrphanedWorktreeCheck,
     ProjectConfigCheck,
     RuntimeStateDirCheck,
@@ -1230,146 +1228,6 @@ class TestOrphanedWorktree:
         ws = _ws(tmpdir)
         tmpdir.dump('lycia/ref/config.yaml', {'kind': 'project'})
         compare(_run(OrphanedWorktreeCheck(), ws), expected=[])
-
-
-def _stop_calls(Popen: MockPopen) -> list[list[str]]:
-    """The ``claude stop <id>`` argv of every root ``Popen(...)`` construction call made."""
-    return [
-        call.args[0]
-        for call in Popen.all_calls
-        if call.args and isinstance(call.args[0], list) and call.args[0][:2] == ['claude', 'stop']
-    ]
-
-
-def _registry_at(replace: Replacer, worktree: Path, sessions: str) -> MockPopen:
-    """Stub ``claude agents --json --cwd <worktree>``, and make every claimed pid alive."""
-    Popen = MockPopen()
-    replace.in_module(subprocess.Popen, Popen)
-    Popen.set_command(
-        shell_join(['claude', 'agents', '--json', '--cwd', str(worktree)]), stdout=sessions.encode()
-    )
-    replace.in_module(os.kill, lambda pid, sig: None, module=os)
-    return Popen
-
-
-class TestOccupiedWorktree:
-    def test_no_worktrees_dir_is_silent(self, tmpdir: TempDir) -> None:
-        ws = _ws(tmpdir)
-        (ws / 'proj').mkdir()
-        tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project'})
-        compare(_run(OccupiedWorktreeCheck(), ws), expected=[])
-
-    def test_single_live_session_is_silent(
-        self, tmpdir: TempDir, git_repo: Repo, replace: Replacer
-    ) -> None:
-        ws = _ws(tmpdir)
-        project = _project(tmpdir, ws, git_repo.path)
-        worktree = _agent_worktree(git_repo, project, 'g')
-        _registry_at(
-            replace, worktree, '[{"sessionId": "aaaaaaaa-0-0-0-0", "status": "busy", "pid": 111}]'
-        )
-        compare(_run(OccupiedWorktreeCheck(), ws), expected=[])
-
-    def test_two_busy_sessions_reported_and_not_fixable(
-        self, tmpdir: TempDir, git_repo: Repo, replace: Replacer
-    ) -> None:
-        ws = _ws(tmpdir)
-        project = _project(tmpdir, ws, git_repo.path)
-        worktree = _agent_worktree(git_repo, project, 'g')
-        _registry_at(
-            replace,
-            worktree,
-            '[{"sessionId": "aaaaaaaa-0-0-0-0", "status": "busy", "pid": 111, "kind": "interactive"},'
-            ' {"sessionId": "bbbbbbbb-0-0-0-0", "status": "busy", "pid": 222, "kind": "background"}]',
-        )
-        compare(
-            _run(OccupiedWorktreeCheck(), ws, fix=True),
-            expected=[
-                Finding(
-                    'occupied-worktrees',
-                    f'{worktree} has 2 live sessions: aaaaaaaa (busy), bbbbbbbb (busy) '
-                    '— resolve with `ch agent stop`',
-                    resolved=False,
-                    fixable=False,
-                )
-            ],
-        )
-
-    def test_idle_occupant_reported_when_not_fixing(
-        self, tmpdir: TempDir, git_repo: Repo, replace: Replacer
-    ) -> None:
-        ws = _ws(tmpdir)
-        project = _project(tmpdir, ws, git_repo.path)
-        worktree = _agent_worktree(git_repo, project, 'g')
-        _registry_at(
-            replace,
-            worktree,
-            '[{"sessionId": "aaaaaaaa-0-0-0-0", "status": "busy", "pid": 111, "kind": "interactive"},'
-            ' {"sessionId": "bbbbbbbb-0-0-0-0", "status": "idle", "pid": 222, "kind": "background"}]',
-        )
-        compare(
-            _run(OccupiedWorktreeCheck(), ws),
-            expected=[
-                Finding(
-                    'occupied-worktrees',
-                    f'{worktree} occupied by bbbbbbbb (idle) alongside aaaaaaaa (busy), bbbbbbbb (idle)',
-                    resolved=False,
-                    fixable=True,
-                )
-            ],
-        )
-
-    def test_idle_occupant_stopped_through_its_own_harness(
-        self, tmpdir: TempDir, git_repo: Repo, replace: Replacer
-    ) -> None:
-        ws = _ws(tmpdir)
-        project = _project(tmpdir, ws, git_repo.path)
-        worktree = _agent_worktree(git_repo, project, 'g')
-        Popen = _registry_at(
-            replace,
-            worktree,
-            '[{"sessionId": "aaaaaaaa-0-0-0-0", "status": "busy", "pid": 111, "kind": "interactive"},'
-            ' {"sessionId": "bbbbbbbb-0-0-0-0", "status": "idle", "pid": 222, "kind": "background"}]',
-        )
-        Popen.set_command(shell_join(['claude', 'stop', 'bbbbbbbb']), returncode=0)
-        compare(
-            _run(OccupiedWorktreeCheck(), ws, fix=True),
-            expected=[
-                Finding(
-                    'occupied-worktrees',
-                    f'{worktree} occupied by bbbbbbbb (idle) alongside aaaaaaaa (busy), bbbbbbbb (idle)',
-                    resolved=True,
-                    fixable=True,
-                )
-            ],
-        )
-        # the background job was stopped by job id, the busy interactive session left alone
-        compare(_stop_calls(Popen), expected=[['claude', 'stop', 'bbbbbbbb']])
-
-    def test_excluded_idle_occupant_is_left_running(
-        self, tmpdir: TempDir, git_repo: Repo, replace: Replacer
-    ) -> None:
-        ws = _ws(tmpdir)
-        project = _project(tmpdir, ws, git_repo.path)
-        worktree = _agent_worktree(git_repo, project, 'g')
-        Popen = _registry_at(
-            replace,
-            worktree,
-            '[{"sessionId": "aaaaaaaa-0-0-0-0", "status": "busy", "pid": 111, "kind": "interactive"},'
-            ' {"sessionId": "bbbbbbbb-0-0-0-0", "status": "idle", "pid": 222, "kind": "background"}]',
-        )
-        compare(
-            _run(OccupiedWorktreeCheck(), ws, fix=True, exclude=Exclusions((str(worktree),))),
-            expected=[
-                Finding(
-                    'occupied-worktrees',
-                    f'{worktree} occupied by bbbbbbbb (idle) alongside aaaaaaaa (busy), bbbbbbbb (idle)',
-                    resolved=False,
-                    fixable=True,
-                )
-            ],
-        )
-        compare(_stop_calls(Popen), expected=[])
 
 
 class TestChimeraRepoDiscovery:

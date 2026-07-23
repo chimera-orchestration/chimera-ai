@@ -7,9 +7,6 @@ from pathlib import Path
 from giterator import GitError
 from loguru import logger
 
-from chimera.agents import Session
-from chimera.agents.registry import AGENTS
-from chimera.commands.agent import live as live_sessions
 from chimera.commands.doctor.core import (
     Check,
     Exclusions,
@@ -550,62 +547,6 @@ class OrphanedWorktreeCheck:
                         )
 
 
-class OccupiedWorktreeCheck:
-    """A goal worktree with more than one verified-live claude session.
-
-    Resuming or attaching interactively into a worktree a background job already
-    occupies (or the reverse) leaves two writers registered there — the SessionStart
-    hook's occupancy warning (``ch hook session-start``) then fires on every
-    subsequent session start in that worktree until one stops. ``--fix`` reaps the
-    unambiguous case: an ``idle`` occupant has no work in flight, so ending it costs
-    nothing — it's stopped through its own harness (:meth:`~chimera.agents.Agent.stop`).
-    Occupants that are all actively working is a real ambiguity with no safe pick,
-    left for a human (``ch agent stop``).
-    """
-
-    name = 'occupied-worktrees'
-
-    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
-        for project in iter_project_dirs(workspace):
-            worktrees_dir = project / 'worktrees'
-            if not worktrees_dir.is_dir():
-                continue
-            for worktree in sorted(worktrees_dir.iterdir()):
-                if worktree.is_dir():
-                    yield from self._check(worktree.resolve(), fix, exclude)
-
-    def _check(self, worktree: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
-        sessions = live_sessions(worktree)
-        if len(sessions) < 2:
-            return
-        named = ', '.join(f'{s.short} ({s.status})' for s in sessions)
-        idle = [s for s in sessions if s.status == 'idle']
-        if not idle:
-            yield Finding(
-                self.name,
-                f'{worktree} has {len(sessions)} live sessions: {named} '
-                '— resolve with `ch agent stop`',
-                resolved=False,
-                fixable=False,
-            )
-            return
-        for session in idle:
-            message = f'{worktree} occupied by {session.short} ({session.status}) alongside {named}'
-            fixing = fix and not exclude.matches(self.name, message)
-            if fixing:
-                _stop_session(worktree, session)
-            yield Finding(self.name, message, resolved=fixing, fixable=True)
-
-
-def _stop_session(worktree: Path, session: Session) -> None:
-    """Stop ``session`` (already verified live in ``worktree``) through its own harness."""
-    for harness in AGENTS.values():
-        for candidate in harness.live(worktree):
-            if candidate.id == session.id:
-                harness.stop(candidate)
-                return
-
-
 def chimera_repo(start: Path = Path(__file__)) -> Path | None:
     """The git checkout chimera itself is running from, None for a git-less install.
 
@@ -1001,7 +942,6 @@ CHECKS: tuple[Check, ...] = (
     LegacyWorktreeSeparatorCheck(),
     WorktreeBranchCheck(),
     OrphanedWorktreeCheck(),
-    OccupiedWorktreeCheck(),
     ChimeraUpToDateCheck(),
     WorkspaceEnvCheck(),
     ShellCompletionCheck(),
