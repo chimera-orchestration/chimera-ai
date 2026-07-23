@@ -13,6 +13,7 @@ from chimera.commands.doctor import checks as doctor_checks
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
     WorkspaceDirsCheck,
+    BgIsolationCheck,
     CaptainCheck,
     ChimeraUpToDateCheck,
     ClaudeHooksCheck,
@@ -1923,3 +1924,60 @@ class TestClaudeHooks:
             h['command'] for entry in data['hooks']['UserPromptSubmit'] for h in entry['hooks']
         ]
         compare(prompts, expected=['echo mine', 'ch hook deliver'])
+
+
+class TestBgIsolation:
+    def test_current_is_silent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / 'settings.json'
+        hook_install.write(settings, {'worktree': {'bgIsolation': 'none'}})
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        compare(_run(BgIsolationCheck(), _ws(tmpdir)), expected=[])
+
+    def test_missing_reported(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'  # absent
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        compare(
+            _run(BgIsolationCheck(), _ws(tmpdir)),
+            expected=[
+                Finding(
+                    'bg-isolation',
+                    f'{settings} missing worktree.bgIsolation: "none"',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+
+    def test_worktree_set_to_the_claude_default_is_still_reported(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # "worktree" is Claude's own default value, not chimera's — still a finding
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        hook_install.write(settings, {'worktree': {'bgIsolation': 'worktree'}})
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        [finding] = _run(BgIsolationCheck(), _ws(tmpdir))
+        assert not finding.resolved
+
+    def test_fix_sets_it(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        [finding] = _run(BgIsolationCheck(), _ws(tmpdir), fix=True)
+        assert finding.resolved
+        compare(hook_install.read(settings), expected={'worktree': {'bgIsolation': 'none'}})
+
+    def test_fix_preserves_a_users_own_settings(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        hook_install.write(settings, {'model': 'opus', 'worktree': {'baseRef': 'head'}})
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        _run(BgIsolationCheck(), _ws(tmpdir), fix=True)
+        compare(
+            hook_install.read(settings),
+            expected={'model': 'opus', 'worktree': {'baseRef': 'head', 'bgIsolation': 'none'}},
+        )
+
+    def test_fix_is_idempotent(self, tmpdir: TempDir, replace: Replacer) -> None:
+        settings = tmpdir.path / '.claude' / 'settings.json'
+        replace.in_module(hook_install.settings_path, lambda: settings)
+        ws = _ws(tmpdir)
+        _run(BgIsolationCheck(), ws, fix=True)
+        compare(_run(BgIsolationCheck(), ws, fix=True), expected=[])  # nothing left to do
