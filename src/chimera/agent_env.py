@@ -71,6 +71,7 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
             'agent stop',
             'review',
             'errand',
+            'dump',
         }
     )
     | _MSG_COMMANDS
@@ -78,7 +79,7 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
     # errand is deliberately in both trees: cross-project *reading* is knowledge, not
     # capability (same rule that leaves listers unfenced), and its target axis has its
     # own containment (see __main__._foreign)
-    ROLE_AGENT: frozenset({'help', 'prime', 'errand'}) | _MSG_COMMANDS | _HOOK_COMMANDS,
+    ROLE_AGENT: frozenset({'help', 'prime', 'errand', 'dump'}) | _MSG_COMMANDS | _HOOK_COMMANDS,
 }
 
 

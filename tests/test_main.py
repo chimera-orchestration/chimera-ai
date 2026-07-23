@@ -166,7 +166,18 @@ class TestStripToRole:
         # chat/init/doctor gone; project and worktree emptied by the prune, so gone whole
         compare(
             set(tree.commands),
-            expected={'help', 'prime', 'ls', 'review', 'errand', 'goal', 'agent', 'msg', 'hook'},
+            expected={
+                'help',
+                'prime',
+                'ls',
+                'review',
+                'errand',
+                'goal',
+                'agent',
+                'msg',
+                'hook',
+                'dump',
+            },
         )
         goal = cast(TyperGroup, _leaf(tree, 'goal'))
         compare(
@@ -188,7 +199,7 @@ class TestStripToRole:
 
     def test_agent_tree_is_help_prime_errand_mail_and_hooks(self) -> None:
         tree = _role_tree(ROLE_AGENT)
-        compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg', 'hook'})
+        compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg', 'hook', 'dump'})
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
             expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain', 'watch'},
@@ -390,6 +401,7 @@ class TestMainRole:
                 'agent',
                 'msg',
                 'hook',
+                'dump',
             },
         )
 

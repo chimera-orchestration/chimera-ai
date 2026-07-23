@@ -45,6 +45,7 @@ from chimera.commands.chat import chat_target
 from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
+from chimera.commands.dump import dump as _dump
 from chimera.commands.errand import errand as _errand
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
@@ -704,6 +705,33 @@ def logtail(
     code = _logtail(resolve_workspace(Path.cwd()), lines=lines, follow=follow, dump=dump)
     if code:
         raise typer.Exit(code)
+
+
+@app.command(
+    cls=LoggingCommand,
+    help='Log a debug snapshot (cwd, pid, argv, env, stdin payload) — for chasing hook/'
+    'environment problems by hand or wired temporarily into a hooks.json entry.',
+)
+@logs(_dump)
+def dump(
+    context: Annotated[str, typer.Argument(help='Label: a hook event name, or free text')],
+    stdout: Annotated[
+        bool, typer.Option('--stdout', help='Also print the captured snapshot to stdout')
+    ] = False,
+) -> None:
+    record = _dump(
+        context,
+        Path.cwd(),
+        os.getpid(),
+        os.getppid(),
+        sys.argv,
+        dict(os.environ),
+        None if sys.stdin.isatty() else sys.stdin.read(),
+    )
+    if stdout:
+        typer.echo(json.dumps(record, indent=2, default=str))
+    else:
+        typer.echo(f'dumped: {context}')
 
 
 @app.command(
