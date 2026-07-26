@@ -10,6 +10,7 @@ dependencies = [
   "giterator>=1.1.0",
   "pyyaml>=6.0.3",
   "loguru>=0.7.3",
+  "psutil>=7.1.4",
 ]
 
 [project.urls]

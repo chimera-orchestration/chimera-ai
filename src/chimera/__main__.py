@@ -46,7 +46,6 @@ from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_ch
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.dump import dump as _dump
-from chimera.commands.dump import process_ancestry as _process_ancestry
 from chimera.commands.errand import errand as _errand
 from chimera.commands.goal.adopt import adopt as _goal_adopt
 from chimera.commands.goal.ls import goals_in_scope
@@ -105,6 +104,7 @@ from chimera.git import completing
 from chimera.help import command_index, render_json, render_text
 from chimera.prime import prime as _prime
 from chimera.prime import resolve_role
+from chimera.processes import process_ancestry as _process_ancestry
 from chimera.worktrees import (
     AGENT,
     SEP,
