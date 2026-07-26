@@ -2,11 +2,7 @@
 the current process (a harness typically runs a hook command through an intermediate
 shell, so the immediate parent pid alone doesn't name the real launcher)."""
 
-from collections.abc import Callable
-
 import psutil
-
-ParentInfo = Callable[[int], tuple[int, str] | None]
 
 _MAX_ANCESTORS = 20
 
@@ -19,20 +15,20 @@ def psutil_parent_info(pid: int) -> tuple[int, str] | None:
         if parent is None:
             return None
         return parent.pid, parent.name()
-    except psutil.Error:
+    # the only two errors Process()/.parent()/.name() can raise; TimeoutExpired is
+    # wait()-only (never called here), so it's left to propagate rather than hidden
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
         return None
 
 
-def process_ancestry(
-    pid: int, get_parent: ParentInfo = psutil_parent_info
-) -> list[dict[str, object]]:
+def process_ancestry(pid: int) -> list[dict[str, object]]:
     """Walk the process tree upward from ``pid``, returning one ``{'pid', 'name'}``
     entry per ancestor (immediate parent first), stopping at pid 1, an unqueryable
     process, or ``_MAX_ANCESTORS`` levels (defends against a pathological loop)."""
     chain: list[dict[str, object]] = []
     current = pid
     for _ in range(_MAX_ANCESTORS):
-        info = get_parent(current)
+        info = psutil_parent_info(current)
         if info is None:
             break
         parent_pid, name = info
