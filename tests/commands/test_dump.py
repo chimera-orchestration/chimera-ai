@@ -1,16 +1,14 @@
 import io
 import json
 import os
-import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from subprocess import CompletedProcess
 
 from testfixtures import LogCapture, Replacer, compare
 
 import chimera.__main__ as main
-from chimera.commands.dump import dump, process_ancestry, ps_parent_info
+from chimera.commands.dump import dump
 from tests.cli import Command, action_logs
 
 type _Call = tuple[
@@ -59,52 +57,6 @@ def test_dump_with_no_stdin(full_logs: LogCapture) -> None:
 def test_dump_with_no_context(full_logs: LogCapture) -> None:
     record = dump(None, Path('/ws'), 1, 0, [], ['ch', 'dump'], {}, None)
     full_logs.check({'level': 'INFO', 'message': 'dump', **record})
-
-
-class TestProcessAncestry:
-    def test_walks_up_to_a_root_process(self) -> None:
-        parents = {100: (10, 'sh'), 10: (1, 'claude')}
-        compare(
-            process_ancestry(100, get_parent=lambda pid: parents[pid]),
-            expected=[{'pid': 10, 'name': 'sh'}, {'pid': 1, 'name': 'claude'}],
-        )
-
-    def test_stops_once_a_process_is_unqueryable(self) -> None:
-        parents = {100: (10, 'sh')}
-        compare(
-            process_ancestry(100, get_parent=lambda pid: parents.get(pid)),
-            expected=[{'pid': 10, 'name': 'sh'}],
-        )
-
-    def test_bounds_a_pathological_chain(self) -> None:
-        compare(
-            process_ancestry(100, get_parent=lambda pid: (pid + 1, 'x')),
-            expected=[{'pid': n, 'name': 'x'} for n in range(101, 121)],
-        )
-
-
-class TestPsParentInfo:
-    def test_parses_ppid_and_comm(self, replace: Replacer) -> None:
-        replace.in_module(
-            subprocess.run,
-            lambda *_a, **_kw: CompletedProcess([], 0, stdout='42  claude\n'),
-        )
-        compare(ps_parent_info(123), expected=(42, 'claude'))
-
-    def test_none_when_ps_fails(self, replace: Replacer) -> None:
-        replace.in_module(subprocess.run, lambda *_a, **_kw: CompletedProcess([], 1, stdout=''))
-        compare(ps_parent_info(123), expected=None)
-
-    def test_none_when_process_is_gone(self, replace: Replacer) -> None:
-        replace.in_module(subprocess.run, lambda *_a, **_kw: CompletedProcess([], 0, stdout=''))
-        compare(ps_parent_info(123), expected=None)
-
-    def test_none_when_ps_is_missing(self, replace: Replacer) -> None:
-        def raise_oserror(*_a: object, **_kw: object) -> CompletedProcess[str]:
-            raise OSError('ps not found')
-
-        replace.in_module(subprocess.run, raise_oserror)
-        compare(ps_parent_info(123), expected=None)
 
 
 def test_cli_wires_the_real_process_snapshot_through(
