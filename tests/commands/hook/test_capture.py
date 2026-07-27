@@ -247,3 +247,63 @@ def test_hook_session_end_cli(tmpdir: TempDir, command: Command, replace: Replac
         output='', logging=action_logs('hook session-end', END, {})
     )
     assert _archived(ws)[0].status == 'logout'
+
+
+def test_hook_session_start_cli_surfaces_unmodeled_payload_keys(
+    tmpdir: TempDir, command: Command, replace: Replacer
+) -> None:
+    # hook_event_name is known-and-ignored; parent_session_id stands in for whatever
+    # the harness starts sending next — surfaced with its value, never silently dropped
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_ROLE', '')
+    payload = (
+        f'{{"cwd": "{ws}", "session_id": "uuid-f", "transcript_path": "/t.jsonl", '
+        f'"source": "fork", "hook_event_name": "SessionStart", '
+        f'"parent_session_id": "uuid-parent"}}'
+    )
+    replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
+    start, end = action_logs('hook session-start', START, {})
+    command.run('hook', 'session-start').check(
+        output='',
+        logging=[
+            start,
+            {
+                'level': 'INFO',
+                'session_id': 'uuid-f',
+                'payload': {'parent_session_id': 'uuid-parent'},
+                'message': 'hook session-start: unmodeled payload keys',
+            },
+            end,
+        ],
+    )
+
+
+def test_hook_session_end_cli_surfaces_unmodeled_payload_keys(
+    tmpdir: TempDir, command: Command, replace: Replacer
+) -> None:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CHIMERA_ROLE', '')
+    session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
+    payload = (
+        f'{{"cwd": "{ws}", "session_id": "uuid-1", "reason": "other", '
+        f'"hook_event_name": "SessionEnd", "bridge_session_id": "cse_abc"}}'
+    )
+    replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
+    start, end = action_logs('hook session-end', END, {})
+    command.run('hook', 'session-end').check(
+        output='',
+        logging=[
+            start,
+            {
+                'level': 'INFO',
+                'session_id': 'uuid-1',
+                'payload': {'bridge_session_id': 'cse_abc'},
+                'message': 'hook session-end: unmodeled payload keys',
+            },
+            end,
+        ],
+    )

@@ -55,6 +55,7 @@ from chimera.commands.goal.rename import rename as _goal_rename
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
+from chimera.commands.hook.capture import KNOWN_END_KEYS, KNOWN_START_KEYS
 from chimera.commands.hook.capture import session_end as _hook_session_end
 from chimera.commands.hook.capture import session_start as _hook_session_start
 from chimera.commands.hook.deliver import deliver as _hook_deliver
@@ -1980,6 +1981,7 @@ def hook_session_start() -> None:
         agent_type=str(agent_type) if (agent_type := payload.get('agent_type')) else None,
         entrypoint=os.environ.get('CLAUDE_CODE_ENTRYPOINT'),
         model=str(model) if (model := payload.get('model')) else None,
+        extra={k: v for k, v in payload.items() if k not in KNOWN_START_KEYS},
     )
 
 
@@ -1991,6 +1993,7 @@ def hook_session_end() -> None:
         Path(str(payload['cwd'])),
         str(payload['session_id']),
         str(payload.get('reason') or 'ended'),
+        extra={k: v for k, v in payload.items() if k not in KNOWN_END_KEYS},
     )
 
 

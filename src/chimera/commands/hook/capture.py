@@ -12,6 +12,7 @@ the cheap summary (one row per identity, however many lives it has) while ``even
 the append-only lifecycle history.
 """
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +32,27 @@ PRINT_ENTRYPOINT = 'sdk-cli'
 gets ``cli``). Undocumented but field-verified: claude stamps it into its own process
 per-mode, so a ``-p`` spawned from inside a session never inherits the parent's value.
 See ``knowledge/claude-session-type-signals.md`` for the full signal matrix."""
+
+KNOWN_START_KEYS = frozenset(
+    {'cwd', 'session_id', 'transcript_path', 'source', 'agent_type', 'model', 'hook_event_name'}
+)
+"""SessionStart payload keys the hook models (or deliberately ignores: ``hook_event_name``
+just names the hook). Anything else is surfaced by :func:`unmodeled`, never dropped silently."""
+
+KNOWN_END_KEYS = frozenset({'cwd', 'session_id', 'reason', 'hook_event_name'})
+"""SessionEnd's equivalent of :data:`KNOWN_START_KEYS`."""
+
+
+def unmodeled(hook: str, session_id: str, extra: Mapping[str, object]) -> None:
+    """Surface payload keys the hook doesn't model — the harness may start sending
+    signals (a fork's parent id, say) before chimera learns to read them, and a field
+    dropped on the floor is invisible precisely when it would have mattered. One line,
+    only when something was actually unmodeled; the whole values ride the bound field.
+    """
+    if extra:
+        logger.bind(session_id=session_id, payload=dict(extra)).info(
+            f'hook {hook}: unmodeled payload keys'
+        )
 
 
 def addressed(agent_type: str | None, entrypoint: str | None) -> bool:
@@ -54,6 +76,7 @@ def session_start(
     agent_type: str | None = None,
     entrypoint: str | None = None,
     model: str | None = None,
+    extra: Mapping[str, object] = {},
 ) -> None:
     """Record a starting session from a SessionStart hook. No-op outside any workspace.
 
@@ -66,7 +89,9 @@ def session_start(
     (also from the payload) rides through to the archive; it's optional on the payload
     (absent on some firings, e.g. after ``/clear``) — :meth:`~chimera.archive.Archive.
     record_session` keeps the last known value rather than blanking it on an omitted one.
+    ``extra`` is whatever else rode the payload — logged via :func:`unmodeled`.
     """
+    unmodeled('session-start', session_id, extra)
     axes = _axes(cwd)
     if axes is None:
         return
@@ -108,12 +133,14 @@ def session_start(
         )
 
 
-def session_end(cwd: Path, session_id: str, reason: str) -> None:
+def session_end(cwd: Path, session_id: str, reason: str, extra: Mapping[str, object] = {}) -> None:
     """Mark a session ended from a SessionEnd hook. No-op outside any workspace.
 
     Appends the ``end`` event (``reason`` as detail) — unless the session was never
     recorded (its start predated the hooks), where there is no row to stitch it to.
+    ``extra`` is whatever else rode the payload — logged via :func:`unmodeled`.
     """
+    unmodeled('session-end', session_id, extra)
     axes = _axes(cwd)
     if axes is None:
         return
