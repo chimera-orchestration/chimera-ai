@@ -174,10 +174,15 @@ class TestStripToRole:
                 'errand',
                 'goal',
                 'agent',
+                'prompt',
                 'msg',
                 'hook',
                 'dump',
             },
+        )
+        compare(  # prompt edit is human-only, so the manager's group is the read/copy trio
+            set(cast(TyperGroup, _leaf(tree, 'prompt')).commands),
+            expected={'ls', 'show', 'init'},
         )
         goal = cast(TyperGroup, _leaf(tree, 'goal'))
         compare(
@@ -399,6 +404,7 @@ class TestMainRole:
                 'errand',
                 'goal',
                 'agent',
+                'prompt',
                 'msg',
                 'hook',
                 'dump',

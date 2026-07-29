@@ -160,7 +160,7 @@ introduces. The rest follows the Principle/Knowledge split: workspace + project
 of trigger lines (`- topic: <abs path>`) the agent reads on demand with its own tools — a
 pinned project indexes only its own knowledge, an unpinned scope indexes every project's,
 qualified by name. `prompts/` is *not* injected — those are hand-curated prompt templates
-(e.g. `review.md`).
+(e.g. `review.md`; see *Prompt templates* below).
 
 Every inlined file sits behind a source-attribution line — `<!-- <abs path> (workspace) -->`
 or `(project)` — so the session can resolve a tension between directives by layer order
@@ -184,6 +184,40 @@ renders, so every workspace launch injects context.
 scope's role-shaped golden path (the role from `CHIMERA_ROLE` when the session was launched
 by chimera, else inferred from cwd) — the same text `ch chat` pushes — see
 `agent-docs/commands.md`, *Self-documentation*.
+
+## Prompt templates
+
+The prompts chimera *renders for you* — `review` (the review agent's brief) and `pr` (what
+the model writing a PR description is asked for). Not context: these are the text of a
+launch, one file each, and they are the only things `prompts/` is read for.
+
+Each ships with chimera (`chimera/prompts/*.md`) and is overridden **whole** by a file of
+the same name in `<project>/prompts/` — nothing is merged, so the packaged text is a
+starting point, not a base to extend. `chimera.commands.prompt.resolve` is the single place
+that knows the cascade; `ch review`, `ch goal pr` and `ch prompt show` all read through it,
+so what `show` prints is provably what a launch renders. The names come from the packaged
+dir itself, so adding a template there lists, completes and copies with no second list to
+update.
+
+Holes are `string.Template` `$VAR`s (`safe_substitute` — an unknown `$` is left intact, so a
+template predating a new hole still renders). What each one fills with is declared beside the
+cascade (`prompt.HOLES`) so `ch prompt show` can print it; a test pins every hole a packaged
+template uses to a declaration (the reverse doesn't hold — `$SOURCE` is offered to `pr.md` and
+unused by it).
+
+- `ch prompt ls` — every template and the file it currently resolves to, `(packaged)` marking
+  the ones the project hasn't taken over.
+- `ch prompt show <name>` — the source file, the text, and each `$hole` with the value it
+  renders as (`<angle brackets>` for one only a launch can fill).
+- `ch prompt init <name>` — copy the packaged text into `<project>/prompts/`. Idempotent and
+  it **never** clobbers: an existing override is exactly the work a re-run would destroy.
+- `ch prompt edit <name>` — `init` then `$VISUAL`/`$EDITOR` (or `--editor`). Human-only
+  (`RESTRICTED_COMMANDS`): blocking on an editor is a dead end for an agent, which runs
+  `prompt init` and writes the file with its own tools. Neither variable set is a refusal, not
+  a guess — an editor that isn't yours can be unquittable.
+
+A manager's tree carries `ls`/`show`/`init` (its project's templates are its to tune); the
+scope fence applies as to any project-scoped action.
 
 The `-p/-g/-a` flags may appear at any level of a project-scoped command — before the group,
 between group and subcommand, or after it — so `ch -p chimera goal ls`, `ch goal -p chimera ls`
@@ -512,7 +546,7 @@ worktree at all (a typo must never read as "nothing running"). `goal merge` — 
 `goal finish`/`worktree rm` — call the same machinery before their sweeps. `--dry` previews
 which sessions would be stopped.
 
-`ch review <PR|url>` stands a goal up from a pull request and launches a pre-human review agent. A project with no `origin` at all (workspace-only, not yet pushed) is refused up front, pointing at `ch project push`. It resolves the PR through `gh` (authoritative `headRefOid`); the *project* is still resolved from cwd/`-p`, so a URL naming a repo other than the resolved project's github origin is refused up front (both must carry a github identity — a local-path origin skips the check). The URL needn't be github's: any review tool's URL that embeds `owner/repo` and the PR number in its path (reviewable.io, graphite, …) works generically — the origin's slug is located in the path and the first numeric segment after it is the number, no per-tool table; a URL not naming the origin's repo (or a local-path origin, with no slug to match) is refused with a pointer to pass the number. It then fetches `refs/pull/<N>/head` into the `origin/pr/<N>` remote-tracking ref (targeted, so a missing PR ref fails cleanly), persists the refspec only after that fetch succeeds (so `git status` compares against the PR without a failed run leaving a dead refspec that bricks future fetches), verifies the fetch matches `headRefOid`, then branches `pr-<N>/{human,agent}` off that verified head with the PR ref as upstream — reusing `worktree add`, so a re-run only relaunches. The agent's prompt is the project's `prompts/review.md` (rendered with `string.Template`; `$PR $PR_URL $PR_TITLE $BASE $GOAL $PROJECT`) if present, else a packaged default, always behind a hardcoded guardrail forbidding any post to the PR — publishing stays the human's call. Like `goal sync`, a clean project-repo cwd is landed on `pr-<N>/human`. `--no-agent` stops after that checkout — branches, worktree and upstream all stand, but no agent launches (the output hints both follow-ups: `ch agent start -g <goal>` for an agent, re-running `ch review <N>` for the standard review); the agent-only knobs (`--dangerous`, `-- …` passthrough) are refused with it.
+`ch review <PR|url>` stands a goal up from a pull request and launches a pre-human review agent. A project with no `origin` at all (workspace-only, not yet pushed) is refused up front, pointing at `ch project push`. It resolves the PR through `gh` (authoritative `headRefOid`); the *project* is still resolved from cwd/`-p`, so a URL naming a repo other than the resolved project's github origin is refused up front (both must carry a github identity — a local-path origin skips the check). The URL needn't be github's: any review tool's URL that embeds `owner/repo` and the PR number in its path (reviewable.io, graphite, …) works generically — the origin's slug is located in the path and the first numeric segment after it is the number, no per-tool table; a URL not naming the origin's repo (or a local-path origin, with no slug to match) is refused with a pointer to pass the number. It then fetches `refs/pull/<N>/head` into the `origin/pr/<N>` remote-tracking ref (targeted, so a missing PR ref fails cleanly), persists the refspec only after that fetch succeeds (so `git status` compares against the PR without a failed run leaving a dead refspec that bricks future fetches), verifies the fetch matches `headRefOid`, then branches `pr-<N>/{human,agent}` off that verified head with the PR ref as upstream — reusing `worktree add`, so a re-run only relaunches. The agent's prompt is the project's `prompts/review.md` (rendered with `string.Template`; `$PR $PR_URL $PR_TITLE $BASE $GOAL $PROJECT`) if present, else a packaged default, always behind a hardcoded guardrail forbidding any post to the PR — publishing stays the human's call. See *Prompt templates* below for `ch prompt`, which prints and copies them. Like `goal sync`, a clean project-repo cwd is landed on `pr-<N>/human`. `--no-agent` stops after that checkout — branches, worktree and upstream all stand, but no agent launches (the output hints both follow-ups: `ch agent start -g <goal>` for an agent, re-running `ch review <N>` for the standard review); the agent-only knobs (`--dangerous`, `-- …` passthrough) are refused with it.
 
 `ch agent start` launches `claude` in an existing worktree (`--name <project>@<goal>@<actor>`); `ch agent resume` revives that session — never attaching to one still running (that's refused up front, below), always continuing a dead one from its transcript. Identity comes from the **archive**, not the name: the address `(project, goal, actor)` resolves to its newest archived session — live or dead — and resume revives by that immutable native id, re-asserting the canonical `--name` (registry names are mutable; a rename in claude's own UI must neither orphan the session nor survive the resume). Only when the archive has never seen the address (or there's no workspace to hold one) does it fall back to `claude --resume <name>`. Liveness and pids stay with the registry (`agent stop` is keyed by worktree cwd, never name). Resume exists because `claude` has no `--cwd`: Chimera knows the worktree and sets it, so a dead session is revived in the right place from anywhere. Both run foreground, or background (`--bg`) when a `[prompt]` is given, and both refuse if a session is already live in the worktree — the exclusive-launch guard every goal-worktree launcher (`agent start`/`resume`, `goal start`/`adopt`, `review`) takes; only `ch chat` opts out, and it refuses goal scopes anyway. A harness-native attach or revive — the `claude agents` browser, a raw `claude --resume` run in the worktree — never reaches those launchers, so it can't be refused there; a SessionStart-level warning for this case was tried and removed (`ch doctor`'s `occupancy-warning` check sweeps its config remnant) — it fired on a harmless attach into a worktree its own background job already occupied as readily as a genuine second writer, so the guard those launchers already give is what stands.
 

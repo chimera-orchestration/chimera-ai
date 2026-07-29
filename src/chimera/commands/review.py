@@ -1,7 +1,6 @@
 import json
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from importlib.resources import files
 from pathlib import Path
 from string import Template
 from urllib.parse import urlsplit
@@ -11,6 +10,7 @@ from loguru import logger
 
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
+from chimera.commands.prompt import resolve
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
 from chimera.dry import Dry
@@ -392,13 +392,12 @@ def _ensure_goal(
 def _prompt(prompts_dir: Path, meta: dict[str, object], goal: str, project: str) -> str:
     """The review prompt: the no-publish guardrail plus a rendered template.
 
-    Uses the project's ``prompts/review.md`` when present, else the packaged default. Rendered
-    with :class:`string.Template` (``$VAR``; unknown ``$`` left intact), so a template is plain
-    text with a handful of holes — never a logic language.
+    Uses the project's ``prompts/review.md`` when present, else the packaged default (see
+    :func:`chimera.commands.prompt.resolve`). Rendered with :class:`string.Template` (``$VAR``;
+    unknown ``$`` left intact), so a template is plain text with a handful of holes — never a
+    logic language.
     """
-    override = prompts_dir / 'review.md'
-    text = override.read_text() if override.exists() else _default_template()
-    return GUARDRAIL + Template(text).safe_substitute(
+    return GUARDRAIL + Template(resolve(prompts_dir, 'review').text).safe_substitute(
         PR=meta['number'],
         PR_URL=meta['url'],
         PR_TITLE=meta['title'],
@@ -406,8 +405,3 @@ def _prompt(prompts_dir: Path, meta: dict[str, object], goal: str, project: str)
         GOAL=goal,
         PROJECT=project,
     )
-
-
-def _default_template() -> str:
-    """The packaged fallback review template, shipped as ``chimera`` package data."""
-    return (files('chimera.prompts') / 'review.md').read_text()

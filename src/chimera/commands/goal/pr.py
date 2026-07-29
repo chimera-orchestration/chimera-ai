@@ -2,7 +2,6 @@ import json
 import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
-from importlib.resources import files
 from pathlib import Path
 from string import Template
 
@@ -10,6 +9,7 @@ from giterator import GitError
 from loguru import logger
 
 from chimera.commands.goal.merge import source_branch
+from chimera.commands.prompt import resolve
 from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.git import Git, remote_repo, remote_slug
@@ -307,8 +307,7 @@ def _compose(
     each way lands a ``goal pr: description`` line binding the path, key and whether it
     was reused.
     """
-    override = prompts_dir / 'pr.md'
-    text = override.read_text() if override.exists() else _default_template()
+    text = resolve(prompts_dir, 'pr').text
     log_text = '\n\n'.join(f'{subject}\n\n{body}' if body else subject for subject, body in commits)
     prompt = Template(text).safe_substitute(
         PROJECT=project, GOAL=goal, BASE=base, SOURCE=source, COMMITS=log_text
@@ -347,11 +346,6 @@ def _title_and_body(output: str) -> tuple[str, str]:
     """Split a composed description: first line is the title, the rest the body."""
     title, _, body = output.partition('\n')
     return title.strip(), body.strip()
-
-
-def _default_template() -> str:
-    """The packaged fallback PR prompt, shipped as ``chimera`` package data."""
-    return (files('chimera.prompts') / 'pr.md').read_text()
 
 
 def _repo_flag(origin_repo: str) -> list[str]:

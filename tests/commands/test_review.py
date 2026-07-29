@@ -16,12 +16,12 @@ from chimera.commands import review as review_mod
 from chimera.agents.registry import AgentSpec
 from chimera.dry import Dry
 from chimera.commands.agent import agent
+from chimera.commands.prompt import PACKAGED
 from chimera.commands.review import (
     GUARDRAIL,
     _PR_FIELDS,
     _check_pr_repo,
     _check_remote,
-    _default_template,
     _pr_argument,
     _pr_metadata,
     _prompt,
@@ -67,6 +67,10 @@ def _fork_pr(tmpdir: TempDir, delete_branch: bool = False) -> tuple[Repo, Repo, 
         fork('checkout', '-q', 'main')
         fork('branch', '-q', '-D', 'feature')
     return origin, fork, head
+
+
+def _packaged() -> str:
+    return (PACKAGED / 'review.md').read_text()
 
 
 def _meta(head: str, **overrides: object) -> dict[str, object]:
@@ -153,8 +157,13 @@ def test_review_builds_the_goal_tracking_the_pr_and_launches(
     )
     # the agent's worktree is checked out on the PR head, launched on the guardrailed prompt
     compare(Git(worktrees / 'pr-1@agent')('rev-parse', 'HEAD').strip(), expected=head)
-    expected_prompt = GUARDRAIL + Template(_default_template()).safe_substitute(
-        PR=1, PR_URL=meta['url'], PR_TITLE=meta['title'], BASE='main', GOAL='pr-1', PROJECT='proj'
+    expected_prompt = GUARDRAIL + Template(_packaged()).safe_substitute(
+        PR=1,
+        PR_URL=meta['url'],
+        PR_TITLE=meta['title'],
+        BASE='main',
+        GOAL='pr-1',
+        PROJECT='proj',
     )
     compare(
         calls,
@@ -191,8 +200,13 @@ def test_review_keys_the_context_by_the_resolved_session_name(
     url = 'https://github.com/o/r/pull/1'
     review(repo, worktrees, 'proj', tmpdir / 'prompts', url, context=factory)
     compare(names, expected=['proj@pr-1@agent'])
-    expected_prompt = GUARDRAIL + Template(_default_template()).safe_substitute(
-        PR=1, PR_URL=meta['url'], PR_TITLE=meta['title'], BASE='main', GOAL='pr-1', PROJECT='proj'
+    expected_prompt = GUARDRAIL + Template(_packaged()).safe_substitute(
+        PR=1,
+        PR_URL=meta['url'],
+        PR_TITLE=meta['title'],
+        BASE='main',
+        GOAL='pr-1',
+        PROJECT='proj',
     )
     compare(
         calls,
@@ -313,7 +327,7 @@ def test_prompt_uses_the_packaged_default_without_an_override(tmpdir: TempDir) -
     compare(
         _prompt(tmpdir / 'absent', meta, 'pr-1', 'proj'),
         expected=GUARDRAIL
-        + Template(_default_template()).safe_substitute(
+        + Template(_packaged()).safe_substitute(
             PR=1,
             PR_URL=meta['url'],
             PR_TITLE=meta['title'],
@@ -322,10 +336,6 @@ def test_prompt_uses_the_packaged_default_without_an_override(tmpdir: TempDir) -
             PROJECT='proj',
         ),
     )
-
-
-def test_default_template_ships_as_package_data() -> None:
-    assert '$PR_TITLE' in _default_template()  # importlib.resources found it
 
 
 def test_pr_metadata_parses_gh_json(tmpdir: TempDir, replace: Replacer) -> None:
@@ -873,7 +883,7 @@ def test_review_cli_dry_with_packaged_template(
                 f'Would review 1 in {expected}',
                 'harness: claude',
                 'role: agent (scope: project@pr-1)',
-                'prompt: review template (packaged default) + guardrail',
+                f'prompt: review template ({PACKAGED / "review.md"} (packaged)) + guardrail',
                 'context: (none)',
             ]
         ),

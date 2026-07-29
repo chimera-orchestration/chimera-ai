@@ -77,6 +77,11 @@ from chimera.commands.project.ls import projects as _projects
 from chimera.commands.project.new import new as _project_new
 from chimera.commands.project.push import push as _project_push
 from chimera.commands.project.rm import remove as _project_remove
+from chimera.commands.prompt import Prompt
+from chimera.commands.prompt import resolve as _prompt_resolve
+from chimera.commands.prompt.edit import edit as _prompt_edit
+from chimera.commands.prompt.init import init as _prompt_init
+from chimera.commands.prompt.ls import prompts as _prompts
 from chimera.commands.review import review as _review
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
@@ -88,6 +93,7 @@ from chimera.completions import (
     complete_harness,
     complete_project,
     complete_remote,
+    complete_template,
 )
 from chimera.config import NotInWorkspaceError, UserError, workspace_config
 from chimera.context import (
@@ -918,8 +924,7 @@ def review(
     else:
         typer.echo(f'{dry_run.verb("Reviewing", "Would review")} {pr} in {worktree}')
         if dry:
-            override = p.prompts / 'review.md'
-            template = str(override) if override.exists() else 'packaged default'
+            template = _source(_prompt_resolve(p.prompts, 'review'))
             _dry_preview(
                 spec,
                 f'review template ({template}) + guardrail',
@@ -1205,6 +1210,73 @@ def project_rm(
 def project_ls() -> None:
     for name in _projects(resolve_workspace(Path.cwd())):
         typer.echo(name)
+
+
+prompt_app = typer.Typer(
+    callback=_context,
+    cls=alias_group({'list': 'ls'}),
+    help='The prompt templates ch review and ch goal pr render.',
+)
+app.add_typer(prompt_app, name='prompt')
+
+TemplateArg = Annotated[str, typer.Argument(help='Template name', autocompletion=complete_template)]
+
+
+def _source(prompt: Prompt) -> str:
+    """A template's file, marked when it is still the packaged one rather than the project's."""
+    return f'{prompt.source}' if prompt.overridden else f'{prompt.source} (packaged)'
+
+
+@prompt_app.command('ls', cls=LoggingCommand, help='List the templates and where each resolves.')
+@logs(_prompts)
+def prompt_ls(ctx: typer.Context, project: ProjectOpt = None) -> None:
+    for prompt in _prompts(_project(ctx, project).prompts):
+        typer.echo(f'{prompt.name:<8} {_source(prompt)}')
+
+
+@prompt_app.command(
+    'show',
+    cls=LoggingCommand,
+    help='Print a template with its file and what each $hole fills with.',
+)
+@logs(_prompt_resolve)
+def prompt_show(ctx: typer.Context, name: TemplateArg, project: ProjectOpt = None) -> None:
+    prompt = _prompt_resolve(_project(ctx, project).prompts, name)
+    typer.echo(f'source: {_source(prompt)}')
+    if not prompt.overridden:
+        typer.echo(f'  ch prompt init {name} copies it into the project to edit')
+    typer.echo(f'\n{prompt.text.rstrip()}\n')
+    typer.echo('substitutions:')
+    for hole in prompt.holes:
+        typer.echo(f'  ${hole.name} = {hole.value}' + (f'  ({hole.flag})' if hole.flag else ''))
+
+
+@prompt_app.command(
+    'init',
+    cls=LoggingCommand,
+    help="Copy a packaged template into the project's prompts/ (never overwrites).",
+)
+@logs(_prompt_init)
+def prompt_init(ctx: typer.Context, name: TemplateArg, project: ProjectOpt = None) -> None:
+    prompt, created = _prompt_init(_project(ctx, project).prompts, name)
+    typer.echo(f'{"Created" if created else "Already yours:"} {prompt.source}')
+
+
+@prompt_app.command(
+    'edit',
+    cls=LoggingCommand,
+    help="Edit the project's copy of a template, creating it from the packaged one if absent.",
+)
+@logs(_prompt_edit)
+def prompt_edit(
+    ctx: typer.Context,
+    name: TemplateArg,
+    editor: Annotated[
+        str | None, typer.Option('--editor', help='Editor to run (default: $VISUAL, then $EDITOR)')
+    ] = None,
+    project: ProjectOpt = None,
+) -> None:
+    typer.echo(f'Edited {_prompt_edit(_project(ctx, project).prompts, name, editor).source}')
 
 
 worktree_app = typer.Typer(

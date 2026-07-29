@@ -118,6 +118,49 @@ agent's review. ``--no-agent`` does the checkout plumbing and stops there.
 Any review tool's URL that embeds the repository and PR number works, not
 just GitHub's own.
 
+Tuning the templates: ``ch prompt``
+-----------------------------------
+
+``review`` and ``pr`` are templates chimera ships and your project can own.
+``ch prompt ls`` shows which is which:
+
+.. code-block:: console
+
+    $ ch prompt ls
+    pr       .../chimera/prompts/pr.md (packaged)
+    review   .../chimera/prompts/review.md (packaged)
+
+``ch prompt show <name>`` prints one with its file and every ``$hole`` it
+fills, each with the value it renders as — so a default is something you can
+read rather than something buried in the code:
+
+.. code-block:: console
+
+    $ ch prompt show review
+    source: .../chimera/prompts/review.md (packaged)
+      ch prompt init review copies it into the project to edit
+    ...
+    substitutions:
+      $PR = <the pull request number>
+    ...
+      $PROJECT = <the project name>
+
+To make one yours, copy it into the project and edit it. ``ch prompt init``
+never overwrites an existing copy; ``ch prompt edit`` does the same thing and
+then opens your ``$VISUAL``/``$EDITOR``:
+
+.. code-block:: console
+
+    $ ch prompt init review
+    Created /Users/you/lycia/demo/prompts/review.md
+    $ ch prompt ls
+    pr       .../chimera/prompts/pr.md (packaged)
+    review   /Users/you/lycia/demo/prompts/review.md
+
+An override wins whole — nothing is merged — which is why copying beats
+writing one from scratch. Drop a hole you don't want and it simply stops
+being substituted.
+
 Renaming and finishing
 ----------------------
 

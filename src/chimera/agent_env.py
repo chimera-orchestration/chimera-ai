@@ -18,7 +18,9 @@ RESTRICTED_OPTIONS = frozenset({'--force', '--dangerous'})
 # until Ctrl-C, a dead end for an agent, which reads the JSONL directly instead.
 # `dashboard` is `ls`'s colorized/columnar twin for a human terminal — the ANSI codes are
 # noise for an agent parsing text, so it reads `ch ls` instead (same underlying board()).
-RESTRICTED_COMMANDS = frozenset({'logtail', 'dashboard'})
+# `prompt edit` blocks on $EDITOR, the same dead end as logtail's follow; an agent that
+# wants a project template writes the file its own way after `ch prompt init`.
+RESTRICTED_COMMANDS = frozenset({'logtail', 'dashboard', 'prompt edit'})
 
 # The session-layer roles: the workspace captain, a project's manager (its chat), and a
 # goal's agent. ROLE_-prefixed to avoid colliding with chimera.worktrees.AGENT — the same
@@ -72,6 +74,11 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
             'review',
             'errand',
             'dump',
+            # the templates review and goal pr render are the manager's to tune for its
+            # project; `prompt edit` stays human-only (RESTRICTED_COMMANDS, above)
+            'prompt ls',
+            'prompt show',
+            'prompt init',
         }
     )
     | _MSG_COMMANDS

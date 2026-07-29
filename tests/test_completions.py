@@ -9,7 +9,12 @@ from typer.main import get_command
 
 from chimera.__main__ import app
 from chimera.commands.doctor import CHECKS
-from chimera.completions import complete_harness, complete_actor, complete_check
+from chimera.completions import (
+    complete_actor,
+    complete_check,
+    complete_harness,
+    complete_template,
+)
 
 completion_init()
 
@@ -124,6 +129,11 @@ def test_check_option_value() -> None:
 def test_complete_harness_directly() -> None:
     compare(complete_harness(''), expected=['claude'])
     compare(complete_harness('co'), expected=[])
+
+
+def test_complete_template_directly() -> None:
+    compare(complete_template(''), expected=['pr', 'review'])
+    compare(complete_template('r'), expected=['review'])
 
 
 def test_complete_check_directly() -> None:

@@ -18,6 +18,7 @@ from chimera.agents.registry import AGENTS
 from chimera.commands.doctor import CHECKS
 from chimera.commands.goal.ls import goals_in_scope
 from chimera.commands.project.ls import projects
+from chimera.commands.prompt import names
 from chimera.context import resolve_project, resolve_scope, resolve_workspace
 from chimera.git import Git
 from chimera.worktrees import ACTORS
@@ -71,6 +72,11 @@ def complete_remote(ctx: Context, incomplete: str) -> list[str]:
 def complete_check(incomplete: str) -> list[str]:
     """Doctor check names matching the typed prefix."""
     return [check.name for check in CHECKS if check.name.startswith(incomplete)]
+
+
+def complete_template(incomplete: str) -> list[str]:
+    """Prompt template names matching the typed prefix."""
+    return [name for name in names() if name.startswith(incomplete)]
 
 
 def complete_harness(incomplete: str) -> list[str]:
