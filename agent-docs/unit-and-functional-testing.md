@@ -106,6 +106,28 @@ Reach for the typed helper that fits:
 If (and only if) none of those can express it, fall back to the explicit form:
 `replace(target=thing, container=parent, name='<attr>', replacement=<>)`.
 
+**Stub the chokepoint, not the wrapper it happens to use.** `subprocess.run` is a thin wrapper
+over `subprocess.Popen`, so a stub on `Popen` covers `run`/`check_output`/`call` and any future
+spelling, while a stub on `run` covers exactly one. For anything irreversible — spawning an
+agent, pushing, deleting — stub `Popen`; stub `run` only to shape the return value of something
+harmless if it *did* execute (a `git log`, a `gh` read). Every launch test once stubbed `run`
+and was correct when written; production moving down one layer silently un-guarded all of them
+and started real sessions.
+
+**A stand-in must answer to the name it replaces.** `Replacer.in_module` addresses its target by
+the `__module__`/`__name__` of the object handed to it, so if something already replaced that
+attribute, a later `in_module` resolves to the *stand-in's* defining module and fails with
+`Original '<stand-in>' not found` (testfixtures#259). A replacement that outlives one test —
+a conftest guard — sets `stand_in.__module__, stand_in.__name__ = real.__module__, real.__name__`.
+
+**Never launch a real agent session.** An autouse `_no_real_harness` fixture (`tests/conftest.py`)
+refuses any `Popen` whose argv names a registered harness. Observe a launch with
+`tests.cli.capture_launches`, a registry query with `MockPopen` — never by stubbing a layer of the
+launcher's choosing. This is a guard, not a convention: the env clearing beside it *cannot* help,
+because a spawned session is served by a pooled worker holding the daemon's environment (the user's
+real `$CHIMERA_WORKSPACE`), so its hooks write to the live archive. The launch is the only place
+this can be stopped.
+
 ## Fixture return types
 
 yield-based fixtures return `Iterator[T]` — not `Generator[T, None, None]` (verbose) or `Iterable[T]` (too broad):

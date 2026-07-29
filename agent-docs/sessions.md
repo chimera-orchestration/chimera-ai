@@ -75,6 +75,15 @@ So an env var injected by a launcher (a role stamp, a tracking token) reaches a 
 session only. Tracer-verified. `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID` and friends survive
 everywhere because *claude* stamps them into every process it spawns, not the launcher.
 
+**The pooled worker's env is the *daemon's*, which makes this a containment problem, not just
+an injection one.** A `claude bg-spare` worker was started from the user's own shell, so it
+carries that shell's `$CHIMERA_WORKSPACE` — whatever the launching process had set, or cleared.
+Observed 2.1.220: sessions accidentally spawned by the *test suite* (cwds in pytest tempdirs,
+`CHIMERA_WORKSPACE` deliberately unset) had hooks that resolved the user's **live** workspace and
+wrote five junk rows into its `archive.db`. Clearing an env var in the launching process is
+therefore not a defence against a stray session — nothing downstream of the spawn is. Only
+refusing the spawn is (`tests/conftest.py`'s `_no_real_harness`).
+
 **`$CLAUDE_ENV_FILE` works, and must still not be built on.** A SessionStart hook is handed
 `~/.claude/session-env/<session-id>/sessionstart-hook-1.sh`; a line of `export FOO=bar`
 written there **does** reach the session's shell environment. Verified 2.1.220 on both a

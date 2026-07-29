@@ -5,7 +5,8 @@ from giterator import Git
 from giterator.testing import Repo
 from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
-from chimera.agents import Session
+from chimera.agents import AgentSession
+from chimera.agents.claude import Claude
 from chimera.commands.agent import live
 from chimera.commands.project.new import new
 from chimera.commands.project.rm import remove
@@ -18,7 +19,11 @@ from tests.cli import Command, action_logs
 
 @pytest.fixture(autouse=True)
 def _no_agents(replace: Replacer) -> None:
-    replace.in_module(live, lambda worktree: [])  # what the forced sweep's stop() consults
+    # at the adapter, so every consumer is covered: the module-level live() the sweep
+    # calls *and* the harness.live() stop() reaches for directly, which would otherwise
+    # shell out to the real `claude agents --json`
+    replace.on_class(Claude.reported, lambda self, cwd=None: [])
+    replace.in_module(live, lambda worktree: [])
     replace.in_module(live, lambda worktree: [], module=worktree_rm)
 
 
@@ -83,7 +88,7 @@ def test_remove_force_aborts_when_an_agent_is_running(
     replace.in_module(
         live,
         lambda worktree: (
-            [Session('x', 'x', 'idle', worktree, None)] if worktree.name == 'g@agent' else []
+            [AgentSession('x', 'x', 'idle', worktree, None)] if worktree.name == 'g@agent' else []
         ),
         module=worktree_rm,
     )
@@ -103,7 +108,7 @@ def test_remove_aborts_when_a_project_chat_is_live(
     workspace, project = _project(tmpdir, git_repo)  # no goals: the dir is still swept
     replace.in_module(
         live,
-        lambda worktree: [Session('x', 'myproj@manager', 'idle', worktree, None)],
+        lambda worktree: [AgentSession('x', 'myproj@manager', 'idle', worktree, None)],
         module=worktree_rm,
     )
     message = (

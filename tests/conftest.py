@@ -1,5 +1,7 @@
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from giterator import Git
@@ -7,6 +9,7 @@ from giterator.testing import DEFAULT_USER, Repo
 from testfixtures import LogCapture, Replacer, TempDir, not_there
 
 from chimera.__main__ import app
+from chimera.agents.registry import AGENTS
 from chimera.commands.init import init
 from tests.cli import Command, Run, full_capture
 
@@ -15,6 +18,40 @@ from tests.cli import Command, Run, full_capture
 def replace() -> Iterator[Replacer]:
     with Replacer() as replacer:
         yield replacer
+
+
+@pytest.fixture(autouse=True)
+def _no_real_harness(replace: Replacer) -> None:
+    """Make it impossible for a test to launch a real agent session.
+
+    A stray ``claude`` doesn't just waste a session: its serving process is a pooled
+    worker holding the *daemon's* environment, so it reads the user's real
+    ``$CHIMERA_WORKSPACE`` and its hooks write into the live archive — which the env
+    clearing below cannot prevent, because that env never came from this process (see
+    ``agent-docs/sessions.md``). Refusing the spawn is the only thing that can.
+
+    Guarding :class:`subprocess.Popen` rather than ``subprocess.run`` is deliberate:
+    ``run`` is a wrapper *over* ``Popen``, so this one guard covers every spelling and
+    sits below any layer a test — or the launcher — might otherwise stub. A test that
+    means to observe a launch opts in with :func:`tests.cli.capture_launches`.
+    """
+    real = subprocess.Popen
+
+    def guarded(args: Any, *rest: Any, **kw: Any) -> Any:
+        argv = list(args) if isinstance(args, list | tuple) else [args]
+        if argv and Path(str(argv[0])).name in AGENTS:
+            raise AssertionError(
+                f'a test tried to run the real harness binary: {argv}\n'
+                'stub the launch with tests.cli.capture_launches, or the registry query '
+                'with a MockPopen — never at subprocess.run, which the harness may not use'
+            )
+        return real(args, *rest, **kw)
+
+    # the stand-in must answer to the name it replaces: Replacer.in_module reads
+    # __module__/__name__ off whatever it's handed, so a test replacing Popen again
+    # would otherwise be sent looking for tests.conftest.guarded
+    guarded.__module__, guarded.__name__ = real.__module__, real.__name__
+    replace.in_module(subprocess.Popen, guarded)
 
 
 @pytest.fixture(autouse=True)
