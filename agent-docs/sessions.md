@@ -53,8 +53,9 @@ will drift. Detection must be free and automatic — no one will remember to re-
   `--fork-session`'s documented "create a new session ID". **No id survives a bridge.**
 - The SessionStart payload's `session_id` has been seen to diverge from env/registry/job-dir
   on a background job (2.1.212, chimera issue #41). It did *not* diverge in 22 firings on
-  2.1.220 — treat as latent, not fixed. Always cross-check payload vs env vs transcript stem
-  and prefer the env id.
+  2.1.220 — treat as latent, not fixed. Always cross-check payload id, transcript stem and env
+  id; anchor on the **transcript stem** and log loudly on disagreement (see *What is actually
+  documented* for why the stem, not the env id).
 - `TERM_SESSION_ID` is **not** session identity: Terminal.app mints it per *tab* and zsh
   inherits it, so every session from that tab shares one value, and a daemon started from
   that tab hands the same value to unrelated sessions days later.
@@ -147,7 +148,8 @@ hold an address, nor count as occupants:
   `cli`). Chimera's own commit-message and PR-description writers and `ch errand` are these,
   so they fire inside project and worktree cwds routinely.
 
-`chimera.commands.hook.capture.addressed()` already filters both. It fails open (both signals
+`chimera.commands.hook.capture.addressed()` already filters both — the verdict chimera
+stores as **`addressable`**. It fails open (both signals
 absent ⇒ treat as a conversation), because a real chat losing its mail is worse than a draft
 gaining one.
 
@@ -169,17 +171,25 @@ gaining one.
 
 ## Adding a harness
 
-Everything claude-specific lives behind the `Agent` adapter, so a new harness fills in a
-table rather than editing capture logic:
+The adapter answers **chimera's questions**; it is never asked to hold an opinion about
+another harness's mechanics. So the contract is behaviour, not declared trivia — every claude
+peculiarity above (`--session-id` working foreground but refused by `--bg`, the
+`backgrounded · <short>` line, `agent_type`, `sdk-cli`, `source == 'fork'`, `claude stop`)
+lives *inside* `Claude` and appears nowhere in the interface:
 
-| contract | claude |
-|---|---|
-| `session_env` — env var holding the native id | `CLAUDE_CODE_SESSION_ID` |
-| `supplied_id` — may the launcher choose the id? | foreground only |
-| `launch_id_from(stdout)` — when the harness assigns it | parse `backgrounded · <short>` |
-| `is_conversation(payload, env)` | no `agent_type`, entrypoint ≠ `sdk-cli` |
-| fork signal | `source == 'fork'` |
-| stop | `claude stop <id>` for background, SIGTERM for interactive |
+| chimera asks | meaning | how `Claude` answers it |
+|---|---|---|
+| `start(…) -> native id` | launch a session and tell me its id | foreground: mint a uuid and pass `--session-id`; background: read back `backgrounded · <short>` |
+| `session_id_from_env()` | am I running inside one of your sessions — which? | `CLAUDE_CODE_SESSION_ID` |
+| `identity(payload)` | which session does this start event name? | the transcript stem, cross-checked against payload and env |
+| `addressable(payload, env)` | may this session hold an address? | no `agent_type`, entrypoint ≠ `sdk-cli` |
+| `lifecycle(payload)` | started, resumed, or branched from another? | `source`, mapping `fork` → branched |
+| `stop(session)` | end it | `claude stop <id>` for background, SIGTERM otherwise |
 
-A harness declaring none of these degrades to payload-only identity, which is still enough to
-record sessions — just not to guarantee them.
+The line: **declare data chimera must compare against** (`platform`, `restricted`'s bypass
+spellings — chimera matches user input against these), **encapsulate every decision the
+harness itself makes**. A capability flag chimera would branch on is a decision wearing a
+fact's clothing; push it behind a method.
+
+A harness that can't answer `start`'s id or `session_id_from_env` degrades to payload-only
+identity — still enough to record sessions, just not to guarantee them.
