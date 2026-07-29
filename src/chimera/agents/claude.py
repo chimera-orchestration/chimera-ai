@@ -7,14 +7,32 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from functools import cache
 from dataclasses import replace
+from uuid import uuid4
 from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
 
-from chimera.agents import Agent, AgentSession
+from chimera.agents import BRANCHED, Agent, AgentSession
 from chimera.config import UserError
 from chimera.processes import process_create_time
+
+SESSION_ID_VAR = 'CLAUDE_CODE_SESSION_ID'
+"""Claude stamps this into every process it spawns, so it survives where a launcher's own
+env overlay cannot (a pooled background worker, a fork). Observed reliable in all five
+start modes — but absent from the documented hook environment, so never trusted alone."""
+
+ENTRYPOINT_VAR = 'CLAUDE_CODE_ENTRYPOINT'
+
+PRINT_ENTRYPOINT = 'sdk-cli'
+"""``$CLAUDE_CODE_ENTRYPOINT`` in a one-shot ``claude -p`` run (an interactive session
+gets ``cli``). Undocumented but field-verified: claude stamps it into its own process
+per-mode, so a ``-p`` spawned from inside a session never inherits the parent's value."""
+
+FORK_SOURCE = 'fork'
+"""SessionStart ``source`` when a running session is backgrounded. The fork gets a brand
+new id everywhere — env, registry and transcript — so no id survives a bridge; the payload
+doesn't name the parent either (five keys, and no ``model``)."""
 
 # claude only makes bypass-permissions mode reachable via shift-tab when launched with this;
 # availability is fixed at launch, so it must ride on the very command that starts the session.
@@ -71,7 +89,7 @@ class Claude(Agent):
         context: Path | None = None,
         env: Mapping[str, str] = {},
         exclusive: bool = True,
-    ) -> subprocess.CompletedProcess[bytes]:
+    ) -> str | None:
         """Run a claude session named ``name``, with cwd set to ``cwd``.
 
         Runs interactively in the foreground unless ``prompt`` is given, in which case
@@ -80,9 +98,19 @@ class Claude(Agent):
         ``--dangerously-skip-permissions``). ``dangerous`` makes bypass-permissions mode
         reachable (see ``_session_args``). ``env`` is overlaid on the parent environment
         (see ``Agent``).
+
+        A foreground launch is given its id rather than asked for it: chimera mints a
+        uuid and passes ``--session-id``, which claude honours across its environment,
+        its hook payloads and the transcript filename alike. ``--bg`` refuses that flag
+        ("``--bg`` manages the session id") and only prints a *short* id, so a background
+        launch answers ``None`` — the full id arrives later, from the session's own
+        SessionStart hook. Never the short form: it isn't resumable.
         """
-        args = _session_args(['--name', name], prompt, extra, dangerous, model, context)
-        return self._launch(cwd, args, exclusive, env)
+        supplied = None if prompt is not None else str(uuid4())
+        lead = ['--name', name] if supplied is None else ['--session-id', supplied, '--name', name]
+        args = _session_args(lead, prompt, extra, dangerous, model, context)
+        self._launch(cwd, args, exclusive, env)
+        return supplied
 
     def resume(
         self,
@@ -97,7 +125,7 @@ class Claude(Agent):
         context: Path | None = None,
         env: Mapping[str, str] = {},
         exclusive: bool = True,
-    ) -> subprocess.CompletedProcess[bytes]:
+    ) -> str | None:
         """Resume a claude session, with cwd set to ``cwd``.
 
         With ``id`` (the session's full UUID — ``--resume``'s documented argument) the
@@ -107,11 +135,14 @@ class Claude(Agent):
         claude's name-to-session DWIM, the pre-archive behaviour. The cwd is the key —
         claude has no ``--cwd``, so setting it here is what lets a dead session be
         revived in its worktree from anywhere. Interactive foreground by default; with
-        ``prompt`` it resumes in the background (``--bg``) to keep working.
+        ``prompt`` it resumes in the background (``--bg``) to keep working. Returns the
+        ``id`` it resumed by — a resume adds no new identity, and without one there is
+        nothing to report but the mutable name.
         """
         lead = ['--resume', id, '--name', name] if id is not None else ['--resume', name]
         args = _session_args(lead, prompt, extra, dangerous, model, context)
-        return self._launch(cwd, args, exclusive, env)
+        self._launch(cwd, args, exclusive, env)
+        return id
 
     def run(
         self,
@@ -170,6 +201,63 @@ class Claude(Agent):
             duration_ms=envelope.get('duration_ms'),
         ).info('errand: run')
         return text
+
+    def session_id_from_env(self) -> str | None:
+        """``$CLAUDE_CODE_SESSION_ID`` — claude stamps it into every process it spawns.
+
+        Present and fresh in all five ways a session starts (foreground, born-background,
+        bridge, resume, and the non-conversation firings), which makes it the reliable
+        channel *from inside* a session. It is nonetheless not among the variables the
+        hooks documentation guarantees, so :meth:`identity` never leans on it alone.
+        """
+        return os.environ.get(SESSION_ID_VAR) or None
+
+    def identity(self, payload: Mapping[str, object]) -> str:
+        """The session id a SessionStart payload names: its transcript's filename stem.
+
+        Three ids are in play and they are not equally trustworthy. The **transcript
+        stem** is documented *and* definitionally the resumable id — claude finds a
+        session by its transcript file — so it anchors. The payload's ``session_id`` is
+        the documented identity channel but has been seen to diverge on a background job
+        (2.1.212, chimera issue #41); ``$CLAUDE_CODE_SESSION_ID`` is empirically reliable
+        but undocumented. Both are cross-checked against the anchor and any disagreement
+        is logged loudly, because a harness changing which id is authoritative must never
+        pass silently. The anchor still wins: picking a different one on the strength of
+        a disagreement would be guessing.
+        """
+        stem = Path(str(payload.get('transcript_path') or '')).stem
+        if not stem:  # no transcript to anchor on — the payload's own id is all there is
+            return str(payload.get('session_id') or '')
+        for source, other in (
+            ('payload', payload.get('session_id')),
+            ('env', self.session_id_from_env()),
+        ):
+            if other and str(other) != stem:
+                logger.bind(transcript_stem=stem, source=source, id=str(other)).warning(
+                    'agent: session id disagrees with its transcript, anchoring on the transcript'
+                )
+        return stem
+
+    def addressable(self, payload: Mapping[str, object], env: Mapping[str, str]) -> bool:
+        """Whether this start event is a conversation, not a draft or a one-shot run.
+
+        Two signals, either of which disqualifies: an ``agent_type`` on the payload (the
+        ``claude agents`` browser pre-spawns a draft carrying one, as any subagent does),
+        and the print-mode entrypoint (:data:`PRINT_ENTRYPOINT`) that chimera's own
+        description writers and errands run under. Both absent keeps the address — see
+        :meth:`Agent.addressable` for why this fails open.
+        """
+        return payload.get('agent_type') is None and env.get(ENTRYPOINT_VAR) != PRINT_ENTRYPOINT
+
+    def lifecycle(self, payload: Mapping[str, object]) -> str:
+        """``startup``/``resume``/``branched`` from the payload's ``source``.
+
+        ``fork`` is claude's word for backgrounding a running session, which mints an
+        entirely new id — no id survives a bridge — so it maps to ``branched``: the
+        session is new, but its address is inherited rather than launched.
+        """
+        source = str(payload.get('source') or 'startup')
+        return BRANCHED if source == FORK_SOURCE else source
 
     def sessions(self) -> list[AgentSession]:
         """Every checked claude session, enriched with a one-line summary.

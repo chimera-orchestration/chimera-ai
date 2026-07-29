@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import NoReturn
+from uuid import UUID
 
 import pytest
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
@@ -273,7 +274,7 @@ def test_launch_is_on_record_before_the_session_ends(
     Claude().start(worktree, 'proj@g@agent', exclusive=False)
     [entry] = full_logs.actual()
     compare(entry['message'], expected='agent: launched')
-    compare(entry['argv'], expected=['claude', '--name', 'proj@g@agent'])
+    compare(entry['argv'][:1] + entry['argv'][3:], expected=['claude', '--name', 'proj@g@agent'])
     compare(entry['cwd'], expected=str(worktree))
     assert entry['pid']
 
@@ -283,9 +284,10 @@ def test_launch_that_exits_nonzero_raises(tmpdir: TempDir, replace: Replacer) ->
     Popen = MockPopen()
     replace.in_module(subprocess.Popen, Popen)
     Popen.set_default(returncode=2)
-    argv = ['claude', '--name', 'n']
-    with ShouldRaise(subprocess.CalledProcessError(2, argv)):
+    Popen.set_default(returncode=2)
+    with ShouldRaise(subprocess.CalledProcessError) as raised:
         Claude().start(tmpdir.makedir('wt'), 'n', exclusive=False)
+    compare(raised.raised.returncode, expected=2)
 
 
 _ENVELOPE = (
@@ -680,3 +682,95 @@ def test_sessions_skips_enrichment_when_the_registry_had_no_cwd(replace: Replace
     lonely = AgentSession(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
     replace.on_class(Claude.checked, lambda self, cwd=None: [lonely])
     compare(Claude().sessions(), expected=[lonely])
+
+
+class TestIdentity:
+    # three ids are in play and they disagree in real failures; the transcript stem is the
+    # documented one *and* the resumable one, so it anchors — see agent-docs/sessions.md
+
+    def _payload(self, **kw: object) -> dict[str, object]:
+        return {'transcript_path': '/t/uuid-1.jsonl', 'session_id': 'uuid-1', **kw}
+
+    def test_anchors_on_the_transcript_stem(self) -> None:
+        compare(Claude().identity(self._payload()), expected='uuid-1')
+
+    def test_a_payload_id_that_disagrees_is_logged_and_overruled(
+        self, full_logs: LogCapture
+    ) -> None:
+        compare(Claude().identity(self._payload(session_id='other')), expected='uuid-1')
+        full_logs.check_present(
+            {
+                'level': 'WARNING',
+                'message': 'agent: session id disagrees with its transcript, '
+                'anchoring on the transcript',
+                'transcript_stem': 'uuid-1',
+                'source': 'payload',
+                'id': 'other',
+            }
+        )
+
+    def test_an_env_id_that_disagrees_is_logged_and_overruled(
+        self, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        replace.in_environ('CLAUDE_CODE_SESSION_ID', 'other')
+        compare(Claude().identity(self._payload()), expected='uuid-1')
+        full_logs.check_present(
+            {
+                'level': 'WARNING',
+                'message': 'agent: session id disagrees with its transcript, '
+                'anchoring on the transcript',
+                'transcript_stem': 'uuid-1',
+                'source': 'env',
+                'id': 'other',
+            }
+        )
+
+    def test_without_a_transcript_the_payload_id_is_all_there_is(self) -> None:
+        compare(Claude().identity({'session_id': 'uuid-1'}), expected='uuid-1')
+
+    def test_session_id_from_env(self, replace: Replacer) -> None:
+        assert Claude().session_id_from_env() is None
+        replace.in_environ('CLAUDE_CODE_SESSION_ID', 'uuid-9')
+        compare(Claude().session_id_from_env(), expected='uuid-9')
+
+
+class TestAddressable:
+    def test_fails_open(self) -> None:
+        assert Claude().addressable({}, {})  # older claude with no entrypoint stamp
+        assert Claude().addressable({}, {'CLAUDE_CODE_ENTRYPOINT': 'cli'})
+
+    def test_a_browser_draft_is_not_a_conversation(self) -> None:
+        assert not Claude().addressable({'agent_type': 'claude'}, {})
+
+    def test_a_print_run_is_not_a_conversation(self) -> None:
+        assert not Claude().addressable({}, {'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
+
+
+class TestLifecycle:
+    def test_a_fork_is_branched(self) -> None:
+        # claude's word for backgrounding a running session; the id is new, the address isn't
+        compare(Claude().lifecycle({'source': 'fork'}), expected='branched')
+
+    def test_other_sources_pass_through(self) -> None:
+        compare(Claude().lifecycle({'source': 'resume'}), expected='resume')
+        compare(Claude().lifecycle({}), expected='startup')
+
+
+def test_a_foreground_start_supplies_and_reports_its_own_session_id(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # the id chimera hands claude is the one it reports back, so a launcher can record it
+    Popen = _launched(replace)
+    supplied = Claude().start(tmpdir.makedir('wt'), 'n', exclusive=False)
+    assert supplied is not None
+    UUID(supplied)  # a real uuid, not a handle claude would refuse
+    argv = Popen.all_calls[0].args[0]
+    compare(argv[: argv.index('--name')], expected=['claude', '--session-id', supplied])
+
+
+def test_a_background_start_cannot_name_its_session(tmpdir: TempDir, replace: Replacer) -> None:
+    # --bg refuses --session-id ("--bg manages the session id"), so chimera doesn't guess:
+    # the full id arrives later from the session's own hook
+    Popen = _launched(replace)
+    assert Claude().start(tmpdir.makedir('wt'), 'n', 'do it', exclusive=False) is None
+    assert '--session-id' not in Popen.all_calls[0].args[0]

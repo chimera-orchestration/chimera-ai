@@ -152,10 +152,9 @@ The archive
 The archive is one SQLite database, ``<workspace>/state/archive.db``,
 indexing every LLM session the hooks have seen — Chimera-launched or not.
 Each session is recorded with the harness that ran it and its native session
-id, who orchestrated it (``chimera``, or ``none`` for one you launched
-yourself), when it started and ended, its working directory and transcript
-path, and — for sessions inside a managed worktree — the workspace, project,
-goal and actor it served. Where the :doc:`log <logging>` records what
+id, when it started and ended, its working directory and transcript path,
+and — for sessions inside a managed worktree — the workspace, project, goal
+and actor it served. Where the :doc:`log <logging>` records what
 *happened* line by line, the archive ties happenings to sessions: which
 sessions worked a goal, what ran yesterday, where a transcript lives.
 
@@ -167,10 +166,13 @@ sessions worked a goal, what ran yesterday, where a transcript lives.
     import subprocess
     import sys
 
+    # the transcript is named after the session, as claude names it: that filename
+    # is what chimera anchors identity on, being both documented and resumable.
+    id = '4f6b2a90-51de-4c3d-9e2a-8f7b6c5d4e3a'
     payload = {
         'cwd': str(session.home / 'lycia/demo/worktrees/add-greeting@agent'),
-        'session_id': '4f6b2a90-51de-4c3d-9e2a-8f7b6c5d4e3a',
-        'transcript_path': str(session.home / '.claude/transcript.jsonl'),
+        'session_id': id,
+        'transcript_path': str(session.home / f'.claude/{id}.jsonl'),
         'source': 'startup',
     }
     subprocess.run(
@@ -185,11 +187,16 @@ that speaks SQL can ask:
 
 .. code-block:: console
 
-    $ sqlite3 ~/lycia/state/archive.db "SELECT address, project, goal, actor FROM sessions"
-    demo@add-greeting@agent|demo|add-greeting|agent
+    $ sqlite3 ~/lycia/state/archive.db "SELECT project, goal, actor, address FROM sessions"
+    demo|add-greeting|agent|
 
-The ``address`` column is the same string ``ch msg`` routes on, so mail and
-history meet in the middle: the archive can tell you who to write to, and the
-mailboxes hold what they said. The ``project``/``goal``/``actor`` columns
-beside it are only *where* the session ran — an address is claimed on
-evidence, never inferred from a location.
+Note the empty last column. ``project``/``goal``/``actor`` say *where* the
+session ran, and the hook above was a bare ``claude`` opened in that worktree
+by hand — so it has them. ``address`` says *who it is*: the name ``ch msg``
+routes mail to and ``ch agent resume`` revives by. Chimera writes that only for
+a session it launched itself, recording it a moment before the session exists,
+and the session's own hook claims it on the way up.
+
+Sitting in an agent's worktree is not evidence of being that agent, so a
+hand-launched session gets no address, and no amount of running there earns it
+one. That is deliberate: an address decides who receives another agent's mail.

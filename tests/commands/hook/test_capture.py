@@ -1,11 +1,13 @@
 import io
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from testfixtures import Replacer, TempDir, not_there
+from testfixtures import Replacer, TempDir, compare
 
-from chimera.archive import Archive, ArchiveSession, Event
-from chimera.commands.hook.capture import addressed, session_end, session_start
+from chimera.archive import LAUNCH_WINDOW, Archive, ArchiveSession, Event, PendingLaunch
+from chimera.agents.claude import Claude
+from chimera.commands.hook.capture import session_end, session_start
 from tests.cli import Command, action_logs
 
 START = 'chimera.commands.hook.capture.session_start'
@@ -22,21 +24,46 @@ def _events(ws: Path, session_id: str) -> list[Event]:
         return a.events(platform='claude', native_id=session_id)
 
 
+def _start(
+    cwd: Path,
+    session_id: str,
+    source: str = 'startup',
+    *,
+    transcript: str | None = None,
+    env: dict[str, str] | None = None,
+    **payload: object,
+) -> None:
+    """Fire a SessionStart the way claude would: a payload plus the process environment."""
+    session_start(
+        Claude(),
+        {
+            'cwd': str(cwd),
+            'session_id': session_id,
+            'transcript_path': transcript if transcript is not None else f'/t/{session_id}.jsonl',
+            'source': source,
+            **payload,
+        },
+        env if env is not None else {},
+    )
+
+
 def test_session_start_records_the_session(tmpdir: TempDir, replace: Replacer) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
+    _start(ws, 'uuid-1', 'startup')
     [session] = _archived(ws)
     assert (session.platform, session.native_id) == ('claude', 'uuid-1')
-    assert (session.address, session.status, session.workspace) == ('@@captain', 'startup', 'ws')
+    assert (session.status, session.workspace) == ('startup', 'ws')
+    # standing in the workspace root is not evidence of being its captain
+    assert session.address is None
 
 
 def test_session_start_records_the_model(tmpdir: TempDir, replace: Replacer) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    session_start(ws, 'uuid-1', '/t.jsonl', 'startup', model='claude-sonnet-5')
+    _start(ws, 'uuid-1', 'startup', model='claude-sonnet-5')
     [session] = _archived(ws)
     assert session.model == 'claude-sonnet-5'
 
@@ -47,10 +74,11 @@ def test_session_start_in_a_goal_worktree_sets_the_axes(tmpdir: TempDir, replace
     worktree = tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@agent'
     worktree.mkdir(parents=True)
     replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-    session_start(worktree, 'uuid-2', '/t.jsonl', 'startup')
+    _start(worktree, 'uuid-2', 'startup')
     [session] = _archived(tmpdir.path / 'ws')
+    # the axes record where it sat; a hand-launched claude here still claims nothing
     assert (session.project, session.goal, session.actor) == ('proj', 'g', 'agent')
-    assert session.address == 'proj@g@agent'
+    assert session.address is None
 
 
 def test_session_start_in_a_reviewer_worktree_records_the_true_actor(
@@ -66,10 +94,9 @@ def test_session_start_in_a_reviewer_worktree_records_the_true_actor(
     # sits alongside, as `ch worktree add --actor` leaves things
     (tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@agent').mkdir()
     replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-    session_start(worktree, 'uuid-r', '/t.jsonl', 'startup')
+    _start(worktree, 'uuid-r', 'startup')
     [session] = _archived(tmpdir.path / 'ws')
     assert (session.project, session.goal, session.actor) == ('proj', 'g', 'reviewer')
-    assert session.address == 'proj@g@reviewer'
 
 
 def test_session_start_records_the_harness_version(tmpdir: TempDir, replace: Replacer) -> None:
@@ -77,8 +104,7 @@ def test_session_start_records_the_harness_version(tmpdir: TempDir, replace: Rep
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    replace.in_environ('AI_AGENT', 'claude-code_2-1-220_agent')
-    session_start(ws, 'uuid-3', '/t.jsonl', 'startup')
+    _start(ws, 'uuid-3', 'startup', env={'AI_AGENT': 'claude-code_2-1-220_agent'})
     assert _archived(ws)[0].harness_version == 'claude-code_2-1-220_agent'
 
 
@@ -88,13 +114,12 @@ def test_session_start_without_a_harness_version_records_none(
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    replace.in_environ('AI_AGENT', not_there)
-    session_start(ws, 'uuid-4', '/t.jsonl', 'startup')
+    _start(ws, 'uuid-4', 'startup')
     assert _archived(ws)[0].harness_version is None
 
 
 def test_session_start_outside_a_workspace_is_a_noop(tmpdir: TempDir) -> None:
-    session_start(tmpdir.path / 'nowhere', 'uuid-x', '/t.jsonl', 'startup')
+    _start(tmpdir.path / 'nowhere', 'uuid-x', 'startup')
     assert not (tmpdir.path / 'nowhere' / 'state').exists()
 
 
@@ -103,18 +128,11 @@ def test_session_end_marks_the_session_ended(tmpdir: TempDir, replace: Replacer)
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     replace.in_environ('CHIMERA_ROLE', '')
-    session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
+    _start(ws, 'uuid-1', 'startup')
     session_end(ws, 'uuid-1', 'logout')
     [session] = _archived(ws)
     assert session.status == 'logout'
     assert session.ended_at is not None
-
-
-def test_addressed_is_the_default_and_fails_open() -> None:
-    assert addressed(None, None)  # older claude with no entrypoint stamp: keep the address
-    assert addressed(None, 'cli')  # interactive chats and --bg agents alike
-    assert not addressed('claude', 'cli')  # a `claude agents` TUI draft / subagent
-    assert not addressed(None, 'sdk-cli')  # a one-shot `claude -p` run
 
 
 def test_a_tui_draft_session_never_acquires_a_mail_address(
@@ -123,7 +141,7 @@ def test_a_tui_draft_session_never_acquires_a_mail_address(
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    session_start(ws, 'uuid-tui', '/t.jsonl', 'startup', agent_type='claude')
+    _start(ws, 'uuid-tui', 'startup', agent_type='claude')
     [session] = _archived(ws)
     assert session.address is None  # recorded, but no address for mail to route to
     assert session.workspace == 'ws'  # the location facts survive
@@ -137,10 +155,10 @@ def test_a_one_shot_print_run_never_acquires_a_mail_address(
     worktree = tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@agent'
     worktree.mkdir(parents=True)
     replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-    session_start(worktree, 'uuid-p', '/t.jsonl', 'startup', entrypoint='sdk-cli')
+    _start(worktree, 'uuid-p', 'startup', env={'CLAUDE_CODE_ENTRYPOINT': 'sdk-cli'})
     [session] = _archived(tmpdir.path / 'ws')
     assert session.address is None
-    assert session.actor is None  # live_session_for(project, goal, 'agent') can't match it
+    assert not session.addressable  # …and never eligible for one, whatever it does next
     assert (session.project, session.goal) == ('proj', 'g')  # where it ran is still on record
 
 
@@ -151,10 +169,10 @@ def test_a_resumed_session_keeps_its_row_and_gains_the_history(
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     replace.in_environ('CHIMERA_ROLE', '')
-    session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
+    _start(ws, 'uuid-1', 'startup')
     started = _archived(ws)[0].started_at
     session_end(ws, 'uuid-1', 'other')
-    session_start(ws, 'uuid-1', '/t.jsonl', 'resume')
+    _start(ws, 'uuid-1', 'resume')
     [session] = _archived(ws)  # one row per identity, however many lives
     assert session.started_at == started
     assert session.ended_at is None
@@ -186,7 +204,7 @@ def test_hook_session_start_cli(tmpdir: TempDir, command: Command, replace: Repl
     replace.in_environ('CHIMERA_ROLE', '')
     payload = (
         f'{{"cwd": "{ws}", "session_id": "uuid-1", '
-        f'"transcript_path": "/t.jsonl", "source": "startup"}}'
+        f'"transcript_path": "/t/uuid-1.jsonl", "source": "startup"}}'
     )
     replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
     command.run('hook', 'session-start').check(
@@ -203,7 +221,7 @@ def test_hook_session_start_cli_reads_the_model_from_the_payload(
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     replace.in_environ('CHIMERA_ROLE', '')
     payload = (
-        f'{{"cwd": "{ws}", "session_id": "uuid-1", "transcript_path": "/t.jsonl", '
+        f'{{"cwd": "{ws}", "session_id": "uuid-1", "transcript_path": "/t/uuid-1.jsonl", '
         f'"source": "startup", "model": "claude-sonnet-5"}}'
     )
     replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
@@ -223,7 +241,7 @@ def test_hook_session_start_cli_fences_on_payload_and_environment(
     replace.in_environ('CLAUDE_CODE_ENTRYPOINT', 'sdk-cli')
     payload = (
         f'{{"cwd": "{ws}", "session_id": "uuid-p", '
-        f'"transcript_path": "/t.jsonl", "source": "startup", "agent_type": "claude"}}'
+        f'"transcript_path": "/t/uuid-p.jsonl", "source": "startup", "agent_type": "claude"}}'
     )
     replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
     start, end = action_logs('hook session-start', START, {})
@@ -234,9 +252,8 @@ def test_hook_session_start_cli_fences_on_payload_and_environment(
             {
                 'level': 'INFO',
                 'session_id': 'uuid-p',
-                'agent_type': 'claude',
-                'entrypoint': 'sdk-cli',
-                'message': 'hook session-start: not a conversation, recording without a mail address',
+                'lifecycle': 'startup',
+                'message': 'hook session-start: not a conversation, recording without an address',
             },
             end,
         ],
@@ -249,7 +266,7 @@ def test_hook_session_end_cli(tmpdir: TempDir, command: Command, replace: Replac
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     replace.in_environ('CHIMERA_ROLE', '')
-    session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
+    _start(ws, 'uuid-1', 'startup')
     payload = f'{{"cwd": "{ws}", "session_id": "uuid-1", "reason": "logout"}}'
     replace(target=sys.stdin, container=sys, name='stdin', replacement=io.StringIO(payload))
     command.run('hook', 'session-end').check(
@@ -268,7 +285,7 @@ def test_hook_session_start_cli_surfaces_unmodeled_payload_keys(
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     replace.in_environ('CHIMERA_ROLE', '')
     payload = (
-        f'{{"cwd": "{ws}", "session_id": "uuid-f", "transcript_path": "/t.jsonl", '
+        f'{{"cwd": "{ws}", "session_id": "uuid-f", "transcript_path": "/t/uuid-f.jsonl", '
         f'"source": "fork", "hook_event_name": "SessionStart", '
         f'"parent_session_id": "uuid-parent"}}'
     )
@@ -296,7 +313,7 @@ def test_hook_session_end_cli_surfaces_unmodeled_payload_keys(
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     replace.in_environ('CHIMERA_ROLE', '')
-    session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
+    _start(ws, 'uuid-1', 'startup')
     payload = (
         f'{{"cwd": "{ws}", "session_id": "uuid-1", "reason": "other", '
         f'"hook_event_name": "SessionEnd", "bridge_session_id": "cse_abc"}}'
@@ -316,3 +333,114 @@ def test_hook_session_end_cli_surfaces_unmodeled_payload_keys(
             end,
         ],
     )
+
+
+class TestAddressIsClaimedOnEvidence:
+    # the rule this whole design turns on: a location never entitles a session to an
+    # address. Only a launch chimera itself recorded, or inheritance across a bridge.
+
+    def _worktree(self, tmpdir: TempDir, replace: Replacer) -> Path:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
+        worktree = tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@agent'
+        worktree.mkdir(parents=True)
+        replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
+        return worktree
+
+    def _record_launch(self, ws: Path, cwd: Path, address: str, model: str | None = None) -> None:
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            store.record_launch(
+                PendingLaunch(
+                    at=datetime.now(timezone.utc),
+                    platform='claude',
+                    cwd=cwd,
+                    address=address,
+                    model=model,
+                )
+            )
+
+    def test_a_recorded_launch_is_claimed(self, tmpdir: TempDir, replace: Replacer) -> None:
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        self._record_launch(ws, worktree, 'proj@g@agent', model='opus')
+        _start(worktree, 'uuid-a', 'startup')
+        [session] = _archived(ws)
+        compare((session.address, session.model), expected=('proj@g@agent', 'opus'))
+
+    def test_a_launch_is_claimed_only_once(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # two sessions starting in one worktree must not both take the address
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        self._record_launch(ws, worktree, 'proj@g@agent')
+        _start(worktree, 'uuid-a', 'startup')
+        _start(worktree, 'uuid-b', 'startup')
+        addressed = {s.native_id: s.address for s in _archived(ws)}
+        compare(addressed, expected={'uuid-a': 'proj@g@agent', 'uuid-b': None})
+
+    def test_a_stale_launch_is_never_claimed(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # a launch that never produced a session must not lie in wait for an unrelated one
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            store.record_launch(
+                PendingLaunch(
+                    at=datetime.now(timezone.utc) - LAUNCH_WINDOW - timedelta(seconds=1),
+                    platform='claude',
+                    cwd=worktree,
+                    address='proj@g@agent',
+                )
+            )
+        _start(worktree, 'uuid-a', 'startup')
+        assert _archived(ws)[0].address is None
+
+    def test_a_launch_in_another_directory_is_not_claimed(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        self._record_launch(ws, ws, '@@captain')  # the captain's launch, elsewhere
+        _start(worktree, 'uuid-a', 'startup')
+        assert _archived(ws)[0].address is None
+
+    def test_a_branched_session_inherits_its_presumed_parent(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # backgrounding mints a brand-new id, so without inheritance the chat's mail
+        # would be silently orphaned the moment it was bridged
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        self._record_launch(ws, worktree, 'proj@g@agent')
+        _start(worktree, 'uuid-parent', 'startup')
+        _start(worktree, 'uuid-fork', 'fork')
+        addressed = {s.native_id: s.address for s in _archived(ws)}
+        compare(addressed, expected={'uuid-parent': 'proj@g@agent', 'uuid-fork': 'proj@g@agent'})
+
+    def test_a_branch_of_an_unaddressed_session_inherits_nothing(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        _start(worktree, 'uuid-parent', 'startup')  # raw session, no claim
+        _start(worktree, 'uuid-fork', 'fork')
+        assert all(s.address is None for s in _archived(ws))
+
+    def test_a_resume_keeps_the_address_it_already_had(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        self._record_launch(ws, worktree, 'proj@g@agent')
+        _start(worktree, 'uuid-a', 'startup')
+        _start(worktree, 'uuid-a', 'resume')
+        [session] = _archived(ws)
+        compare((session.address, session.status), expected=('proj@g@agent', 'resume'))
+
+    def test_a_draft_never_claims_a_launch(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # the browser pre-spawns drafts around a bridge; one must not eat the address
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        self._record_launch(ws, worktree, 'proj@g@agent')
+        _start(worktree, 'uuid-draft', 'startup', agent_type='claude')
+        _start(worktree, 'uuid-real', 'startup')
+        addressed = {s.native_id: s.address for s in _archived(ws)}
+        compare(addressed, expected={'uuid-draft': None, 'uuid-real': 'proj@g@agent'})

@@ -32,7 +32,7 @@ lexicographically, so keep them in a single zone (UTC) for a correct timeline.
 
 import sqlite3
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Self
 
@@ -98,6 +98,32 @@ class ArchiveSession(BaseModel):
         return self.transcript is not None and not self.transcript.exists()
 
 
+LAUNCH_WINDOW = timedelta(minutes=2)
+"""How long a :class:`PendingLaunch` stays claimable. A session's start hook fires within
+seconds of the spawn, so this is generous; the bound exists because an *unclaimed* record
+is an address waiting to be handed to whatever starts in that directory next."""
+
+
+class PendingLaunch(BaseModel):
+    """A launch chimera is about to make: everything about the session except its id.
+
+    The seam between "chimera decided to start a session" and "a session started". A
+    launcher writes one of these *before* spawning, because it cannot write a complete
+    row: a foreground launch blocks until the session exits, and a background one is
+    refused the chance to choose an id at all. The session's own start hook then claims
+    it and binds the identity — so the address is on record before the session's first
+    turn by construction, not by winning a race.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    at: datetime
+    platform: str
+    cwd: Path
+    address: str
+    model: str | None = None
+
+
 class Event(BaseModel):
     """One timestamped happening, optionally tied to a session by ``(platform, native_id)``."""
 
@@ -143,6 +169,15 @@ CREATE TABLE IF NOT EXISTS events (
     FOREIGN KEY (platform, native_id) REFERENCES sessions(platform, native_id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS events_by_session ON events(platform, native_id, at);
+
+CREATE TABLE IF NOT EXISTS pending_launches (
+    at        TEXT NOT NULL,
+    platform  TEXT NOT NULL,
+    cwd       TEXT NOT NULL,
+    address   TEXT NOT NULL,
+    model     TEXT
+);
+CREATE INDEX IF NOT EXISTS pending_by_cwd ON pending_launches(platform, cwd, at);
 """
 
 
@@ -289,18 +324,20 @@ class Archive:
         ).fetchall()
         return [row['actor'] for row in rows]
 
-    def live_session_for(self, project: str, goal: str, actor: str) -> ArchiveSession | None:
-        """The newest still-live session for a ``project@goal@actor`` address, else ``None``.
+    def live_session_for(self, address: str) -> ArchiveSession | None:
+        """The newest still-live session holding ``address``, else ``None``.
 
-        The address→session resolver comms routes on: an actor address maps to whichever
-        of its sessions is currently live (most recently started wins a rare tie).
+        The address→session resolver comms routes on. Keyed on the address itself, not
+        on the axes it was derived from: the axes say where a session sat, and several
+        sessions can sit in one worktree — a one-shot print run, a browser draft, a
+        hand-launched claude — while only one of them was ever *given* the address. Most
+        recently started wins a rare tie.
         """
         row = self._db.execute(
             'live_session_for',
-            'SELECT * FROM sessions '
-            'WHERE project=? AND goal=? AND actor=? AND ended_at IS NULL '
+            'SELECT * FROM sessions WHERE address=? AND ended_at IS NULL '
             'ORDER BY started_at DESC, platform, native_id LIMIT 1',
-            (project, goal, actor),
+            (address,),
         ).fetchone()
         return _row_to_session(row) if row is not None else None
 
@@ -353,6 +390,25 @@ class Archive:
         ).fetchone()
         return _row_to_session(row) if row is not None else None
 
+    def latest_open_session(
+        self, platform: str, cwd: Path, *, excluding: str
+    ) -> ArchiveSession | None:
+        """The newest session still open in ``cwd``, ignoring ``excluding``, else ``None``.
+
+        Answers "what was running here a moment ago" — used to presume the parent a
+        branched session split off from, since the harness doesn't name it. Ordered by
+        start time, so the most recent claimant wins; ``excluding`` keeps the asking
+        session from finding itself, its own row having just been written.
+        """
+        row = self._db.execute(
+            'latest_open_session',
+            'SELECT * FROM sessions '
+            'WHERE platform=? AND cwd=? AND native_id != ? AND ended_at IS NULL '
+            'ORDER BY started_at DESC, native_id LIMIT 1',
+            (platform, str(cwd), excluding),
+        ).fetchone()
+        return _row_to_session(row) if row is not None else None
+
     def recent_sessions(
         self, workspace: str, *, exclude: Sequence[str] = (), limit: int
     ) -> list[ArchiveSession]:
@@ -387,6 +443,57 @@ class Archive:
             (*params, limit),
         ).fetchall()
         return [_row_to_session(row) for row in rows]
+
+    def record_launch(self, launch: PendingLaunch) -> None:
+        """Put a launch on record before it is made (see :class:`PendingLaunch`)."""
+        self._db.execute(
+            'record_launch',
+            'INSERT INTO pending_launches (at, platform, cwd, address, model) VALUES (?, ?, ?, ?, ?)',
+            (
+                launch.at.isoformat(),
+                launch.platform,
+                str(launch.cwd),
+                launch.address,
+                launch.model,
+            ),
+        )
+
+    def claim_launch(self, platform: str, cwd: Path, *, now: datetime) -> PendingLaunch | None:
+        """Take the newest fresh launch pending in ``cwd``, removing it; ``None`` if none.
+
+        Claiming *consumes* the record, so two sessions starting in one directory can't
+        both take the same address — the second finds nothing and stays unaddressed,
+        which is the safe way to be wrong.
+
+        Only launches within :data:`LAUNCH_WINDOW` of ``now`` count. A launch that never
+        produced a session (the harness binary was missing, the user hit Ctrl-C) would
+        otherwise sit there indefinitely, waiting to hand its address to whatever started
+        in that directory next — granting a claim on no evidence, which is the one thing
+        this design exists to prevent. Stale records are swept on the way past.
+        """
+        self._db.execute(
+            'sweep_launches',
+            'DELETE FROM pending_launches WHERE platform=? AND cwd=? AND at < ?',
+            (platform, str(cwd), (now - LAUNCH_WINDOW).isoformat()),
+        )
+        row = self._db.execute(
+            'claim_launch',
+            'SELECT rowid, * FROM pending_launches WHERE platform=? AND cwd=? '
+            'ORDER BY at DESC, rowid DESC LIMIT 1',
+            (platform, str(cwd)),
+        ).fetchone()
+        if row is None:
+            return None
+        self._db.execute(
+            'claim_launch: consume', 'DELETE FROM pending_launches WHERE rowid=?', (row['rowid'],)
+        )
+        return PendingLaunch(
+            at=datetime.fromisoformat(row['at']),
+            platform=row['platform'],
+            cwd=Path(row['cwd']),
+            address=row['address'],
+            model=row['model'],
+        )
 
     def record_event(self, event: Event) -> None:
         """Append ``event`` to the timeline."""

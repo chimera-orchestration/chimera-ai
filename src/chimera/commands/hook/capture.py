@@ -1,32 +1,34 @@
-"""Session capture: Claude's SessionStart/SessionEnd hooks feed the archive.
+"""Session capture: a harness's session-start/end hooks feed the archive.
 
-Every session on the machine is recorded — a chimera-launched agent or a raw ``claude`` you
-ran yourself — with the chimera axes resolved from the session's ``cwd``. A session whose
-cwd is outside any workspace has nowhere to record to, so it is the one no-op. The hook
-payload's ``session_id`` is the full UUID (verified), which is the archive's ``native_id``
-directly.
+Every session on the machine is recorded — a chimera-launched agent or a raw ``claude``
+you ran yourself — with the chimera axes resolved from the session's ``cwd``. A session
+whose cwd is outside any workspace has nowhere to record to, so it is the one no-op.
 
-Each hook firing also appends one :class:`~chimera.archive.Event` — ``startup``/``resume``/
-``clear`` from SessionStart's ``source``, ``end`` from SessionEnd — so the session row stays
-the cheap summary (one row per identity, however many lives it has) while ``events`` carries
-the append-only lifecycle history.
+The payload is never read directly here. Which id names the session, whether it is a
+conversation at all, and what kind of start it is are all questions only the harness can
+answer, so they go through :class:`~chimera.agents.Agent` (see ``agent-docs/sessions.md``
+for what those answers cost to learn). What this module owns is the *policy* on top:
 
-``agent-docs/sessions.md`` records what harnesses actually do — which ids can be trusted,
-what survives a bridge, which firings aren't conversations — and is the first read before
-changing anything here.
+**An address is claimed on evidence, never inferred from a location.** A chimera launcher
+writes the address before the session exists; a branched session inherits its presumed
+parent's, the only channel that survives a bridge. Everything else — a raw ``claude`` in a
+goal worktree included — is recorded with its axes and no address. The axes say where a
+session sat; only the address says who it is, and being somewhere was never evidence.
+
+Each hook firing also appends one :class:`~chimera.archive.Event`, so the session row
+stays the cheap current-state summary while ``events`` carries the lifecycle history.
 """
 
-import os
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
 
-from chimera.addresses import Actor
-from chimera.archive import ArchiveSession, Event, archive
+from chimera.agents import BRANCHED, RESUME, Agent
+from chimera.archive import Archive, ArchiveSession, Event, archive
 from chimera.config import NotInWorkspaceError
-from chimera.context import caller, resolve_scope
+from chimera.context import resolve_scope
 from chimera.worktrees import worktree_actor
 
 _Axes = tuple[Path, str | None, str | None, str | None]
@@ -37,13 +39,6 @@ session so "which versions have we seen?" is a query — and a session recorded 
 version ``agent-docs/sessions.md`` has never validated is itself the alarm. Stored whole:
 it names the harness, its version and its mode together, and only the harness gets to say
 what those mean."""
-
-PRINT_ENTRYPOINT = 'sdk-cli'
-"""``CLAUDE_CODE_ENTRYPOINT`` in a one-shot ``claude -p`` run (an interactive session
-gets ``cli``). Undocumented but field-verified: claude stamps it into its own process
-per-mode, so a ``-p`` spawned from inside a session never inherits the parent's value.
-See ``agent-docs/sessions.md`` for the full signal matrix — the ``claude agents`` browser
-self-identifies several other ways too."""
 
 KNOWN_START_KEYS = frozenset(
     {'cwd', 'session_id', 'transcript_path', 'source', 'agent_type', 'model', 'hook_event_name'}
@@ -67,82 +62,116 @@ def unmodeled(hook: str, session_id: str, extra: Mapping[str, object]) -> None:
         )
 
 
-def addressed(agent_type: str | None, entrypoint: str | None) -> bool:
-    """Whether a starting session may claim a mail address (a name, an actor).
+def inherited(store: Archive, platform: str, cwd: Path, native_id: str) -> str | None:
+    """The address a branched session takes over, from the parent it was split off.
 
-    Sessions that aren't conversations still fire SessionStart: the ``claude agents``
-    TUI pre-spawns a draft whose payload carries ``agent_type`` (as any subagent's
-    does), and a one-shot ``claude -p`` (chimera's own description writers, errands)
-    runs with the :data:`PRINT_ENTRYPOINT`. An address receives mail, so such a session
-    must not be recorded holding one. Fails open — both signals absent keeps the
-    address — because a real chat losing its mail over signal drift is the worse error.
+    A bridge mints a brand-new id everywhere and its payload doesn't name what it forked
+    from, so the parent is *presumed*: the newest session still open in the same cwd. That
+    is the only channel an address can cross a bridge by — and it has to cross, or
+    backgrounding a chat would silently orphan its mail. Presumption is the cost of the
+    harness not saying; it's logged as such, and wrong only if two sessions were open in
+    one directory at the moment of the fork.
     """
-    return agent_type is None and entrypoint != PRINT_ENTRYPOINT
+    parent = store.latest_open_session(platform, cwd, excluding=native_id)
+    if parent is None or parent.address is None:
+        return None
+    logger.bind(session_id=native_id, parent=parent.native_id, address=parent.address).info(
+        'hook session-start: branched session inherits its presumed parent address'
+    )
+    return parent.address
 
 
-def session_start(
+def _claimed(
+    store: Archive,
+    agent: Agent,
     cwd: Path,
-    session_id: str,
-    transcript: str,
-    source: str,
-    agent_type: str | None = None,
-    entrypoint: str | None = None,
-    model: str | None = None,
-    extra: Mapping[str, object] = {},
-) -> None:
-    """Record a starting session from a SessionStart hook. No-op outside any workspace.
+    native_id: str,
+    lifecycle: str,
+    conversation: bool,
+    now: datetime,
+) -> tuple[str | None, str | None]:
+    """The address and model this starting session is entitled to: ``(address, model)``.
 
-    A ``resume``/``clear`` firing lands on the session's existing row (``started_at``
-    kept, ``ended_at`` cleared — see :meth:`~chimera.archive.Archive.record_session`)
-    and appends its lifecycle event, ``source`` as the kind. ``agent_type`` (from the
-    payload) and ``entrypoint`` (``$CLAUDE_CODE_ENTRYPOINT``) decide whether the session
-    is :func:`addressed`: one that isn't is still recorded — cwd, transcript and the
-    location axes — but with no name and no actor, so no mail routes to it. ``model``
-    (also from the payload) rides through to the archive; it's optional on the payload
-    (absent on some firings, e.g. after ``/clear``) — :meth:`~chimera.archive.Archive.
-    record_session` keeps the last known value rather than blanking it on an omitted one.
-    ``extra`` is whatever else rode the payload — logged via :func:`unmodeled`.
+    The whole of the address rule, in one place:
+
+    - a session that isn't a conversation gets nothing, whatever else is true;
+    - a **branched** one inherits its presumed parent's — the only channel across a bridge;
+    - a **resume** takes nothing new, because the row it lands on already holds its claim
+      (``record_session`` keeps an address rather than blanking it), and a resume is not
+      fresh evidence of anything;
+    - a cold start claims the launch chimera recorded for this directory, if there is one.
+
+    What's left over is the case that used to go wrong: a raw session, in a goal worktree
+    or anywhere else, matching no pending launch. It gets no address — being somewhere is
+    not evidence of being someone.
     """
-    unmodeled('session-start', session_id, extra)
-    axes = _axes(cwd)
+    if not conversation:
+        return None, None
+    if lifecycle == BRANCHED:
+        return inherited(store, agent.platform, cwd, native_id), None
+    if lifecycle == RESUME:
+        return None, None
+    launch = store.claim_launch(agent.platform, cwd, now=now)
+    if launch is None:
+        return None, None
+    logger.bind(session_id=native_id, address=launch.address, cwd=str(cwd)).info(
+        'hook session-start: claimed the launch chimera recorded'
+    )
+    return launch.address, launch.model
+
+
+def session_start(agent: Agent, payload: Mapping[str, object], env: Mapping[str, str]) -> None:
+    """Record a starting session from a session-start hook. No-op outside any workspace.
+
+    ``agent`` is the harness whose hook fired; it answers which session this is
+    (:meth:`~chimera.agents.Agent.identity`), whether it may hold an address
+    (:meth:`~chimera.agents.Agent.addressable`) and what kind of start it is
+    (:meth:`~chimera.agents.Agent.lifecycle`). Nothing here parses the payload itself.
+
+    A ``resume`` lands on the session's existing row — ``started_at`` kept, ``ended_at``
+    cleared, address preserved (see :meth:`~chimera.archive.Archive.record_session`) — and
+    appends its lifecycle event. A ``branched`` one is a *new* row that inherits its
+    presumed parent's address (:func:`inherited`). Anything else gets whatever address a
+    launcher already recorded for it, and none if there wasn't one.
+    """
+    native_id = agent.identity(payload)
+    unmodeled(
+        'session-start', native_id, {k: v for k, v in payload.items() if k not in KNOWN_START_KEYS}
+    )
+    axes = _axes(Path(str(payload['cwd'])))
     if axes is None:
         return
     workspace, project, goal, actor = axes
-    mail = addressed(agent_type, entrypoint)
-    if not mail:
-        logger.bind(session_id=session_id, agent_type=agent_type, entrypoint=entrypoint).info(
-            'hook session-start: not a conversation, recording without a mail address'
+    cwd = Path(str(payload['cwd']))
+    lifecycle = agent.lifecycle(payload)
+    conversation = agent.addressable(payload, env)
+    if not conversation:
+        logger.bind(session_id=native_id, lifecycle=lifecycle).info(
+            'hook session-start: not a conversation, recording without an address'
         )
-    if not mail:
-        name = None
-    elif project and goal and actor:
-        # in a goal worktree the name follows the *actual* actor (what `agent start -a`
-        # would have named it), never caller()'s agent default — resume keys on these axes
-        name = str(Actor(project, goal, actor))
-    else:
-        name = caller(cwd)
     now = datetime.now(timezone.utc)
     with archive(workspace) as store:
+        address, model = _claimed(store, agent, cwd, native_id, lifecycle, conversation, now)
         store.record_session(
             ArchiveSession(
-                platform='claude',
-                native_id=session_id,
-                status=source or 'running',
+                platform=agent.platform,
+                native_id=native_id,
+                status=lifecycle,
                 started_at=now,
-                model=model,
-                address=name,
-                addressable=mail,
-                harness_version=os.environ.get(HARNESS_VERSION_VAR) or None,
+                model=model or (str(m) if (m := payload.get('model')) else None),
+                address=address,
+                addressable=conversation,
+                harness_version=env.get(HARNESS_VERSION_VAR) or None,
                 cwd=cwd,
-                transcript=Path(transcript),
+                transcript=Path(str(payload.get('transcript_path') or '')),
                 workspace=workspace.name,
                 project=project,
                 goal=goal,
-                actor=actor if mail else None,
+                actor=actor,
             )
         )
         store.record_event(
-            Event(at=now, kind=source or 'startup', platform='claude', native_id=session_id)
+            Event(at=now, kind=lifecycle, platform=agent.platform, native_id=native_id)
         )
 
 
@@ -169,11 +198,11 @@ def session_end(cwd: Path, session_id: str, reason: str, extra: Mapping[str, obj
 def _axes(cwd: Path) -> _Axes | None:
     """``(workspace, project, goal, actor)`` resolved from cwd, or ``None`` outside a workspace.
 
-    A goal worktree resolves all four — the actor read from the ``<goal>@<actor>`` dir
-    itself, never assumed: a reviewer's session archived as the agent's would hand
-    ``agent resume`` the wrong conversation. A project dir has no goal or actor (a
-    manager chat); the bare workspace has none (the captain). The address that
-    distinguishes captain from manager rides the session's ``name`` (see :func:`caller`).
+    Pure geography — where the session sat, never who it is. A goal worktree resolves all
+    four, the actor read from the ``<goal>@<actor>`` dir itself rather than assumed; a
+    project dir has no goal or actor; the bare workspace has none. Recorded for every
+    session, addressed or not, because "what was running in this worktree" is a question
+    worth answering about a raw ``claude`` too.
     """
     try:
         scope = resolve_scope(cwd)

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from testfixtures import Replacer, TempDir, compare, like
 
+from chimera.agents.claude import Claude
 from chimera.archive import Archive, ArchiveSession
 from chimera.commands.archive.backfill import Backfilled, backfill
 from chimera.commands.hook.capture import session_start
@@ -194,7 +195,11 @@ def test_rerun_leaves_backfilled_rows_untouched(tmpdir: TempDir) -> None:
 def test_hook_recorded_session_is_left_untouched(tmpdir: TempDir) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
     ws = tmpdir.path / 'ws'
-    session_start(ws, UUID, '/t.jsonl', 'startup')
+    session_start(
+        Claude(),
+        {'cwd': str(ws), 'session_id': UUID, 'transcript_path': f'/t/{UUID}.jsonl'},
+        {},
+    )
     before = _archived(ws)
     store = tmpdir.path / 'claude'
     _write(store, UUID, _entry(ws, '2020-01-01T00:00:00Z'))

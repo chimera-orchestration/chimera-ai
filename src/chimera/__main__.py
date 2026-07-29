@@ -31,7 +31,7 @@ from chimera.agent_env import (
 )
 from chimera.agents import AgentSession
 from chimera.agents.context import Source, assemble, materialize
-from chimera.agents.registry import AgentSpec, resolve_spec
+from chimera.agents.registry import AGENTS, AgentSpec, resolve_spec
 from chimera.archive import archive
 from chimera.commands.agent import agents, resume_target, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
@@ -55,7 +55,7 @@ from chimera.commands.goal.rename import rename as _goal_rename
 from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
-from chimera.commands.hook.capture import KNOWN_END_KEYS, KNOWN_START_KEYS
+from chimera.commands.hook.capture import KNOWN_END_KEYS
 from chimera.commands.hook.capture import session_end as _hook_session_end
 from chimera.commands.hook.capture import session_start as _hook_session_start
 from chimera.commands.hook.deliver import deliver as _hook_deliver
@@ -1969,17 +1969,9 @@ app.add_typer(hook_app, name='hook')
 )
 @logs(_hook_session_start)
 def hook_session_start() -> None:
-    payload = json.load(sys.stdin)
-    _hook_session_start(
-        Path(str(payload['cwd'])),
-        str(payload['session_id']),
-        str(payload['transcript_path']),
-        str(payload.get('source') or ''),
-        agent_type=str(agent_type) if (agent_type := payload.get('agent_type')) else None,
-        entrypoint=os.environ.get('CLAUDE_CODE_ENTRYPOINT'),
-        model=str(model) if (model := payload.get('model')) else None,
-        extra={k: v for k, v in payload.items() if k not in KNOWN_START_KEYS},
-    )
+    # the hooks are installed into claude's own settings, so claude is what fired this;
+    # a second harness would install its own hook command naming itself
+    _hook_session_start(AGENTS['claude'], json.load(sys.stdin), os.environ)
 
 
 @hook_app.command('session-end', cls=LoggingCommand, help='Mark a session ended (SessionEnd hook).')

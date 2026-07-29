@@ -16,13 +16,17 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
-from subprocess import CompletedProcess
 from typing import ClassVar, Protocol
 
 from loguru import logger
 
 from chimera.config import UserError
 from chimera.processes import process_create_time, same_process
+
+STARTUP, RESUME, BRANCHED = 'startup', 'resume', 'branched'
+"""What :meth:`Agent.lifecycle` may answer — chimera's vocabulary, not any harness's.
+``BRANCHED`` is the one that carries weight: a session split off another inherits an
+address it was never launched with, so it must be told apart from a cold start."""
 
 
 @dataclass(frozen=True)
@@ -93,7 +97,7 @@ class Launch(Protocol):
         context: Path | None = None,
         env: Mapping[str, str] = {},
         exclusive: bool = True,
-    ) -> CompletedProcess[bytes]: ...
+    ) -> str | None: ...
 
 
 class Agent(ABC):
@@ -133,8 +137,16 @@ class Agent(ABC):
         context: Path | None = None,
         env: Mapping[str, str] = {},
         exclusive: bool = True,
-    ) -> CompletedProcess[bytes]:
-        """Launch a new session named ``name`` in ``cwd``; background when ``prompt`` is given."""
+    ) -> str | None:
+        """Launch a new session named ``name`` in ``cwd``; background when ``prompt`` is given.
+
+        Returns the session's **native id** — the full, resumable form — or ``None`` when
+        the harness can't be made to say. Chimera never guesses one: an id it cannot
+        vouch for is worse than none, since the archive would record a session that can't
+        be resumed. How the id is obtained is the harness's own business (claude mints it
+        up front for a foreground launch, and can't for a background one); the caller
+        only learns whether it got one.
+        """
         ...
 
     @abstractmethod
@@ -151,7 +163,7 @@ class Agent(ABC):
         context: Path | None = None,
         env: Mapping[str, str] = {},
         exclusive: bool = True,
-    ) -> CompletedProcess[bytes]:
+    ) -> str | None:
         """Revive a session in ``cwd``, continuing it from wherever it left off.
 
         Never attaches to a session still running — a live one is refused up front
@@ -159,7 +171,8 @@ class Agent(ABC):
         harness-native session id to resume by, re-asserting ``name`` as the display
         label — names are mutable (a rename in the harness's own UI orphans them), so
         a caller that knows the id must pass it. Without one the name is the only
-        handle left (the pre-archive behaviour).
+        handle left (the pre-archive behaviour). Returns the revived session's native
+        id, as :meth:`start` does.
         """
         ...
 
@@ -186,6 +199,51 @@ class Agent(ABC):
         harness flag spellings appear at this level. ``name`` labels the run in logs (a
         headless run may have no session object to carry it). ``timeout`` is in seconds;
         ``None`` blocks until the run finishes.
+        """
+        ...
+
+    @abstractmethod
+    def session_id_from_env(self) -> str | None:
+        """The id of the session this very process is running inside, if any.
+
+        "Am I inside one of your sessions — which?", asked of the harness because only it
+        knows how it marks its own children. ``None`` when this isn't one of its sessions
+        (a plain shell), which is how chimera tells a human's invocation from an agent's.
+        """
+        ...
+
+    @abstractmethod
+    def identity(self, payload: Mapping[str, object]) -> str:
+        """The native id of the session a start event names.
+
+        The adapter reconciles whatever ids its payload and environment carry, and is
+        the only place that knows which to believe when they disagree — chimera never
+        sees the alternatives, only the verdict. Disagreement is logged there, loudly:
+        a harness quietly changing which id is authoritative is exactly the drift that
+        must not pass silently (see ``agent-docs/sessions.md``).
+        """
+        ...
+
+    @abstractmethod
+    def addressable(self, payload: Mapping[str, object], env: Mapping[str, str]) -> bool:
+        """Whether this start event is a *conversation* — something that may hold an address.
+
+        Harnesses fire the same session hooks for things that aren't chats (claude's
+        agent browser pre-spawns a draft; a one-shot print run is a session too). Those
+        must never receive mail or occupy a slot. Fails open by convention: an unknown
+        shape is treated as a conversation, because a real chat losing its mail is worse
+        than a draft gaining an inbox nobody writes to.
+        """
+        ...
+
+    @abstractmethod
+    def lifecycle(self, payload: Mapping[str, object]) -> str:
+        """What this start event is: ``startup``, ``resume`` or ``branched``.
+
+        ``branched`` covers a session split off another (claude's bridge to the
+        background), which matters because such a session inherits an address it was
+        never launched with. The harness's own vocabulary for this stays inside the
+        adapter.
         """
         ...
 

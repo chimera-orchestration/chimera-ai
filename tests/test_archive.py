@@ -180,7 +180,11 @@ def test_ending_a_session_stamps_when_and_how_it_finished(archive: Archive) -> N
 
 
 def test_sessions_for_a_goal_lists_every_chat_that_worked_it(archive: Archive) -> None:
-    archive.record_session(make_session('a', project='chimera', goal='logs', actor='agent'))
+    archive.record_session(
+        make_session(
+            'a', address='chimera@logs@agent', project='chimera', goal='logs', actor='agent'
+        )
+    )
     archive.record_session(make_session('b', project='chimera', goal='logs', actor='human'))
     archive.record_session(make_session('c', project='chimera', goal='docs', actor='agent'))
     on_logs = archive.sessions(project='chimera', goal='logs')
@@ -188,9 +192,17 @@ def test_sessions_for_a_goal_lists_every_chat_that_worked_it(archive: Archive) -
 
 
 def test_actors_for_a_goal_answers_which_agents_worked_on_it(archive: Archive) -> None:
-    archive.record_session(make_session('a', project='chimera', goal='logs', actor='agent'))
+    archive.record_session(
+        make_session(
+            'a', address='chimera@logs@agent', project='chimera', goal='logs', actor='agent'
+        )
+    )
     archive.record_session(make_session('b', project='chimera', goal='logs', actor='human'))
-    archive.record_session(make_session('c', project='chimera', goal='logs', actor='agent'))
+    archive.record_session(
+        make_session(
+            'c', address='chimera@logs@agent', project='chimera', goal='logs', actor='agent'
+        )
+    )
     assert archive.actors_for_goal('chimera', 'logs') == ['agent', 'human']
 
 
@@ -227,8 +239,12 @@ def test_sessions_come_back_oldest_first(archive: Archive) -> None:
 
 
 def test_live_session_for_returns_the_current_session_at_an_address(archive: Archive) -> None:
-    archive.record_session(make_session('now', project='chimera', goal='logs', actor='agent'))
-    live = archive.live_session_for('chimera', 'logs', 'agent')
+    archive.record_session(
+        make_session(
+            'now', address='chimera@logs@agent', project='chimera', goal='logs', actor='agent'
+        )
+    )
+    live = archive.live_session_for('chimera@logs@agent')
     assert live is not None
     assert live.native_id == 'now'
 
@@ -237,6 +253,7 @@ def test_live_session_for_prefers_the_newest_and_ignores_ended(archive: Archive)
     archive.record_session(
         make_session(
             'old',
+            address='chimera@logs@agent',
             project='chimera',
             goal='logs',
             actor='agent',
@@ -247,13 +264,14 @@ def test_live_session_for_prefers_the_newest_and_ignores_ended(archive: Archive)
     archive.record_session(
         make_session(
             'new',
+            address='chimera@logs@agent',
             project='chimera',
             goal='logs',
             actor='agent',
             started_at=NOON + timedelta(hours=2),
         )
     )
-    live = archive.live_session_for('chimera', 'logs', 'agent')
+    live = archive.live_session_for('chimera@logs@agent')
     assert live is not None
     assert live.native_id == 'new'
 
@@ -268,16 +286,24 @@ def test_live_session_for_is_none_when_the_address_has_no_live_session(archive: 
             ended_at=NOON + timedelta(hours=1),
         )
     )
-    assert archive.live_session_for('chimera', 'logs', 'agent') is None
+    assert archive.live_session_for('chimera@logs@agent') is None
 
 
 def test_latest_session_for_finds_the_newest_even_when_ended(archive: Archive) -> None:
     archive.record_session(
-        make_session('old', project='chimera', goal='logs', actor='agent', started_at=NOON)
+        make_session(
+            'old',
+            address='chimera@logs@agent',
+            project='chimera',
+            goal='logs',
+            actor='agent',
+            started_at=NOON,
+        )
     )
     archive.record_session(
         make_session(
             'new',
+            address='chimera@logs@agent',
             project='chimera',
             goal='logs',
             actor='agent',
@@ -308,7 +334,14 @@ def test_latest_session_for_prefers_the_last_active_over_the_last_created(
     # started_at is first-write-wins, so creation order lies about activity: thread A,
     # /clear -> thread B (abandoned), A resumed later — resume must pick A, not B
     archive.record_session(
-        make_session('a', project='chimera', goal='logs', actor='agent', started_at=NOON)
+        make_session(
+            'a',
+            address='chimera@logs@agent',
+            project='chimera',
+            goal='logs',
+            actor='agent',
+            started_at=NOON,
+        )
     )
     archive.record_session(
         make_session(

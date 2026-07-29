@@ -6,7 +6,15 @@ from testfixtures import Replacer, TempDir, compare
 from chimera.agent_env import ROLE_AGENT
 from chimera.agents.claude import Claude
 from chimera.prime import prime
-from tests.cli import Command, action_logs, capture_launches, context_sources, launched
+from tests.cli import (
+    Command,
+    action_logs,
+    capture_launches,
+    context_sources,
+    launched,
+    launching,
+    SESSION_ID,
+)
 
 
 def _myproject(tmpdir: TempDir, workspace: Path) -> Path:
@@ -68,6 +76,8 @@ def test_goal_and_actor_before_the_command(
     context = workspace_with_env / 'state' / 'context' / f'myproject@g@reviewer-{digest[:8]}.md'
     claude_cmd = [
         'claude',
+        '--session-id',
+        SESSION_ID,
         '--name',
         'myproject@g@reviewer',
         '--append-system-prompt-file',
@@ -102,6 +112,7 @@ def test_goal_and_actor_before_the_command(
                 ),
                 'message': 'context: rendered',
             },
+            launching(claude_cmd, worktree),
             launched(claude_cmd, worktree),
             {'level': 'INFO', 'command': 'agent start', 'phase': 'end'},
         ],

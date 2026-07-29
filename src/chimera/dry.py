@@ -24,10 +24,16 @@ class Dry:
 
     on: bool = False
 
-    def __call__[**P](self, mutate: Callable[P, object], *args: P.args, **kwargs: P.kwargs) -> None:
-        """Run ``mutate(*args, **kwargs)`` unless this is a dry run."""
-        if not self.on:
-            mutate(*args, **kwargs)
+    def __call__[**P, R](
+        self, mutate: Callable[P, R], *args: P.args, **kwargs: P.kwargs
+    ) -> R | None:
+        """Run ``mutate(*args, **kwargs)`` unless this is a dry run; return what it gave.
+
+        ``None`` under a dry run — nothing ran, so there is no result to report. A caller
+        that needs the value (a launch's session id) therefore handles the dry case by
+        handling ``None``, rather than by asking whether this is a dry run.
+        """
+        return None if self.on else mutate(*args, **kwargs)
 
     def verb(self, ran: str, would: str) -> str:
         """``would`` under a dry run, else ``ran`` — for reporting what did/would happen."""

@@ -19,8 +19,10 @@ from tests.cli import (
     action_logs,
     capture_env,
     capture_launches,
-    launched,
     context_sources,
+    launched,
+    launching,
+    SESSION_ID,
     sources_lines,
 )
 
@@ -75,7 +77,7 @@ class TestChat:
         # another session is live in the same cwd — chat launches anyway (not exclusive)
         calls = _stub(replace, live=[AgentSession('x', 'other', 'idle', ws, None)])
         assert chat(ws, 'pegasus') is None  # no note: nothing to report
-        compare(calls, expected=[(['claude', '--name', 'pegasus'], ws)])
+        compare(calls, expected=[(['claude', '--session-id', SESSION_ID, '--name', 'pegasus'], ws)])
 
     def test_resume_revives_by_name(self, tmpdir: TempDir, replace: Replacer) -> None:
         ws = tmpdir.makedir('lycia')
@@ -158,6 +160,8 @@ def test_chat_cli_launches_the_captain(
     sources[str(ws / 'roles' / 'captain' / '*.md')] = [str(directive)]
     claude_cmd = [
         'claude',
+        '--session-id',
+        SESSION_ID,
         '--name',
         '@@captain',
         '--model',
@@ -192,6 +196,7 @@ def test_chat_cli_launches_the_captain(
                 'sources': sources,
                 'message': 'context: rendered',
             },
+            launching(claude_cmd, ws),
             launched(claude_cmd, ws),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],
@@ -210,7 +215,15 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
     # role directives lead every chimera-launched session's context — the manager's too
     digest = sha256(MANAGER_TEXT.encode()).hexdigest()
     context = ws / 'state' / 'context' / f'proj@@manager-{digest[:8]}.md'
-    claude_cmd = ['claude', '--name', 'proj@@manager', '--append-system-prompt-file', str(context)]
+    claude_cmd = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@@manager',
+        '--append-system-prompt-file',
+        str(context),
+    ]
     command.run('chat').check(
         output=f'Launched chat proj@@manager in {project}',
         logging=[
@@ -238,6 +251,7 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
                 'sources': context_sources(ws, 'manager', pinned=project),
                 'message': 'context: rendered',
             },
+            launching(claude_cmd, project),
             launched(claude_cmd, project),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],
@@ -269,6 +283,15 @@ def test_chat_cli_manager_layers_project_role_directives(
     sources = context_sources(ws, 'manager', pinned=Path.cwd())
     sources[str(ws / 'roles' / 'manager' / '*.md')] = [str(generic)]
     sources[str(Path.cwd() / 'roles' / 'manager' / '*.md')] = [str(persona.resolve())]
+    manager_cmd = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@@manager',
+        '--append-system-prompt-file',
+        str(context),
+    ]
     command.run('chat').check(
         output=f'Launched chat proj@@manager in {Path.cwd()}',
         logging=[
@@ -296,10 +319,8 @@ def test_chat_cli_manager_layers_project_role_directives(
                 'sources': sources,
                 'message': 'context: rendered',
             },
-            launched(
-                ['claude', '--name', 'proj@@manager', '--append-system-prompt-file', str(context)],
-                Path.cwd(),
-            ),
+            launching(manager_cmd, Path.cwd()),
+            launched(manager_cmd, Path.cwd()),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],
     )
@@ -408,6 +429,7 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
                 'sources': context_sources(ws, 'captain'),
                 'message': 'context: rendered',
             },
+            launching(claude_cmd, ws),
             launched(claude_cmd, ws),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],

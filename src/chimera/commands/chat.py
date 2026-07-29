@@ -7,7 +7,7 @@ from loguru import logger
 from chimera.addresses import Manager
 from chimera.agents import Launch
 from chimera.agents.registry import AgentSpec
-from chimera.commands.agent import refuse_restricted
+from chimera.commands.agent import record_launch, refuse_restricted
 from chimera.config import UserError
 from chimera.context import Scope
 from chimera.dry import Dry
@@ -82,6 +82,7 @@ def chat(
     # cast, not an annotation: ty narrows the local back to the start|resume union at the
     # call site, and the union's ParamSpec join trips over resume's extra kw-only `id`
     launch = cast(Launch, spec.agent.resume if resume else spec.agent.start)
+    dry(record_launch, cwd, name, spec)
     dry(
         launch,
         cwd,

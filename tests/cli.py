@@ -162,7 +162,50 @@ class _LaunchedProcess:
         return 0
 
 
-def launched(argv: Sequence[str], cwd: Path) -> dict[str, object]:
+class _AnySessionId:
+    """Matches any freshly minted session id, for argv a test can't spell out.
+
+    A foreground launch chooses its own uuid, so an exact assertion is impossible — but
+    asserting *nothing* would let a malformed id through. This checks the shape, leaving
+    the rest of the argv pinned exactly; that the id claude is given is the one ``start``
+    reports back is pinned once, in ``tests/agents/test_claude.py``.
+    """
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, str) and _UUID.fullmatch(other) is not None
+
+    def __hash__(self) -> int:
+        return hash(_UUID.pattern)
+
+    def __repr__(self) -> str:
+        return '<a minted session id>'
+
+
+_UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+
+SESSION_ID = _AnySessionId()
+
+
+def launching(argv: Sequence[object], cwd: Path, platform: str = 'claude') -> dict[str, object]:
+    """The ``agent: launching`` line a launcher lands before it spawns anything.
+
+    The moment an address is established — recorded ahead of the session so the session's
+    own hook can claim it (see ``chimera.commands.agent.record_launch``). The address is
+    read out of the argv the launch would use, so a test states it once.
+    """
+    address = (
+        argv[argv.index('--name') + 1] if '--name' in argv else argv[argv.index('--resume') + 1]
+    )
+    return {
+        'level': 'INFO',
+        'message': 'agent: launching',
+        'address': address,
+        'cwd': str(cwd),
+        'platform': platform,
+    }
+
+
+def launched(argv: Sequence[object], cwd: Path) -> dict[str, object]:
     """The ``agent: launched`` line a launch lands, as the captures reduce it.
 
     Deterministic because :func:`capture_launches` reports our own process, so the pid

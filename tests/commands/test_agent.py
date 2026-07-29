@@ -42,6 +42,8 @@ from tests.cli import (
     context_sources,
     full_capture,
     launched,
+    launching,
+    SESSION_ID,
     sources_lines,
 )
 
@@ -63,7 +65,13 @@ def test_agent_runs_claude_in_the_foreground_by_default(tmpdir: TempDir, replace
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent')
-    expected = ['claude', '--name', 'proj@goal@agent']  # no bypass flag unless dangerous
+    expected = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@goal@agent',
+    ]  # no bypass flag unless dangerous
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -71,7 +79,14 @@ def test_agent_makes_bypass_reachable_when_dangerous(tmpdir: TempDir, replace: R
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent', dangerous=True)
-    expected = ['claude', '--name', 'proj@goal@agent', '--allow-dangerously-skip-permissions']
+    expected = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@goal@agent',
+        '--allow-dangerously-skip-permissions',
+    ]
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -119,7 +134,15 @@ def test_agent_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) ->
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent', extra=['--model', 'opus'])
-    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'opus']
+    expected = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@goal@agent',
+        '--model',
+        'opus',
+    ]
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -134,7 +157,14 @@ def test_agent_does_not_double_up_when_bypass_already_requested(
         extra=['--allow-dangerously-skip-permissions'],
         dangerous=True,
     )
-    expected = ['claude', '--name', 'proj@goal@agent', '--allow-dangerously-skip-permissions']
+    expected = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@goal@agent',
+        '--allow-dangerously-skip-permissions',
+    ]
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -257,7 +287,13 @@ def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'  # cwd resolves symlinks like the wrapper
-    claude_cmd = ['claude', '--name', 'myproject@g@agent']  # no bypass flag by default
+    claude_cmd = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'myproject@g@agent',
+    ]  # no bypass flag by default
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected}',
         logging=action_logs(
@@ -285,7 +321,14 @@ def test_agent_start_cli_dangerous_makes_bypass_reachable(
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
-    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--allow-dangerously-skip-permissions']
+    claude_cmd = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'myproject@g@agent',
+        '--allow-dangerously-skip-permissions',
+    ]
     command.run('agent', 'start', '-g', 'g', '--dangerous').check(
         output=f'Launched agent in {expected}',
         logging=action_logs(
@@ -338,7 +381,7 @@ def test_agent_start_cli_with_actor(tmpdir: TempDir, replace: Replacer, command:
     (project / 'worktrees' / 'g@reviewer').mkdir()
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@reviewer'
-    claude_cmd = ['claude', '--name', 'myproject@g@reviewer']
+    claude_cmd = ['claude', '--session-id', SESSION_ID, '--name', 'myproject@g@reviewer']
     command.run('agent', 'start', '-g', 'g', '-a', 'reviewer').check(
         output=f'Launched agent in {expected}',
         logging=action_logs(
@@ -367,7 +410,14 @@ def test_agent_start_cli_forwards_flags_after_dashdash(
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     # no prompt, only passthrough: the flag must not be mistaken for the prompt
-    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--dangerously-skip-permissions']
+    claude_cmd = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'myproject@g@agent',
+        '--dangerously-skip-permissions',
+    ]
     command.run('agent', 'start', '-g', 'g', '--', '--dangerously-skip-permissions').check(
         output=f'Launched agent in {expected}',
         logging=action_logs(
@@ -535,6 +585,7 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
                 'actor': 'agent',
                 'message': 'agent resume: archived session',
             },
+            {**launching(claude_cmd, expected), 'goal': 'g'},
             {**launched(claude_cmd, expected), 'goal': 'g'},
             {'level': 'INFO', 'command': 'agent resume', 'goal': 'g', 'phase': 'end'},
         ],
@@ -630,7 +681,14 @@ def test_extra_bypass_flags_pass_for_a_human(tmpdir: TempDir, replace: Replacer)
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'n', extra=['--allow-dangerously-skip-permissions'])
-    expected = ['claude', '--name', 'n', '--allow-dangerously-skip-permissions']
+    expected = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'n',
+        '--allow-dangerously-skip-permissions',
+    ]
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -924,7 +982,15 @@ def test_agent_spec_model_rides_as_model_flag(tmpdir: TempDir, replace: Replacer
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
     agent(worktree, 'proj@goal@agent', spec=AgentSpec('claude', 'opus'))
-    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'opus']
+    expected = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@goal@agent',
+        '--model',
+        'opus',
+    ]
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -934,7 +1000,15 @@ def test_agent_passthrough_model_beats_spec_model(tmpdir: TempDir, replace: Repl
     agent(
         worktree, 'proj@goal@agent', extra=['--model', 'sonnet'], spec=AgentSpec('claude', 'opus')
     )
-    expected = ['claude', '--name', 'proj@goal@agent', '--model', 'sonnet']
+    expected = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@goal@agent',
+        '--model',
+        'sonnet',
+    ]
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -952,7 +1026,15 @@ def test_agent_start_cli_with_model_flag(
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
-    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--model', 'opus']
+    claude_cmd = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'myproject@g@agent',
+        '--model',
+        'opus',
+    ]
     command.run('agent', 'start', '-g', 'g', '-m', 'opus').check(
         output=f'Launched agent in {expected}',
         logging=action_logs(
@@ -984,7 +1066,15 @@ def test_agent_start_cli_model_from_project_config(
     )
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
-    claude_cmd = ['claude', '--name', 'myproject@g@agent', '--model', 'sonnet']
+    claude_cmd = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'myproject@g@agent',
+        '--model',
+        'sonnet',
+    ]
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected}',
         logging=action_logs(
@@ -1027,6 +1117,8 @@ def test_agent_start_cli_model_from_workspace_config(
     context = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     claude_cmd = [
         'claude',
+        '--session-id',
+        SESSION_ID,
         '--name',
         'proj@g@agent',
         '--model',
@@ -1063,6 +1155,7 @@ def test_agent_start_cli_model_from_workspace_config(
                 'sources': context_sources(ws, 'agent', pinned=project.resolve()),
                 'message': 'context: rendered',
             },
+            {**launching(claude_cmd, expected), 'goal': 'g'},
             {**launched(claude_cmd, expected), 'goal': 'g'},
             {'level': 'INFO', 'command': 'agent start', 'goal': 'g', 'phase': 'end'},
         ],
@@ -1103,6 +1196,8 @@ def test_agent_context_rides_as_system_prompt_file(tmpdir: TempDir, replace: Rep
     agent(worktree, 'proj@goal@agent', context=tmpdir / 'ctx.md')
     expected = [
         'claude',
+        '--session-id',
+        SESSION_ID,
         '--name',
         'proj@goal@agent',
         '--append-system-prompt-file',
@@ -1133,7 +1228,15 @@ def test_agent_start_cli_injects_rendered_context(
     context = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
     sources = context_sources(ws, 'agent', pinned=project.resolve())
     sources[str(ws / 'principles' / '*.md')] = [str(principle)]
-    claude_cmd = ['claude', '--name', 'proj@g@agent', '--append-system-prompt-file', str(context)]
+    claude_cmd = [
+        'claude',
+        '--session-id',
+        SESSION_ID,
+        '--name',
+        'proj@g@agent',
+        '--append-system-prompt-file',
+        str(context),
+    ]
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected_wt}',
         logging=[
@@ -1163,6 +1266,7 @@ def test_agent_start_cli_injects_rendered_context(
                 'sources': sources,
                 'message': 'context: rendered',
             },
+            {**launching(claude_cmd, expected_wt), 'goal': 'g'},
             {**launched(claude_cmd, expected_wt), 'goal': 'g'},
             {'level': 'INFO', 'command': 'agent start', 'goal': 'g', 'phase': 'end'},
         ],

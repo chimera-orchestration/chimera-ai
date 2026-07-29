@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -6,7 +7,7 @@ from loguru import logger
 from chimera.agent_env import ai_session
 from chimera.agents import AgentSession
 from chimera.agents.registry import AGENTS, AgentSpec
-from chimera.archive import archive
+from chimera.archive import PendingLaunch, archive
 from chimera.config import NotInWorkspaceError, UserError
 from chimera.context import Scope, resolve_workspace
 from chimera.dry import Dry
@@ -90,6 +91,37 @@ def refuse_restricted(spec: AgentSpec, extra: Sequence[str]) -> None:
         raise UserError(f'{", ".join(hit)}: not available when chimera is driven by an AI agent')
 
 
+def record_launch(cwd: Path, address: str, spec: AgentSpec) -> None:
+    """Put the launch chimera is about to make on record, so its session can claim it.
+
+    The one place an address is *established*: written before the spawn, because neither
+    launch mode lets the launcher write a complete row afterwards (a foreground launch
+    blocks until the session exits; a background one is refused the chance to choose an
+    id). The session's start hook binds the identity to it.
+
+    Best-effort by design — a project standing outside any workspace has no archive to
+    record to, and a launch must not fail for want of bookkeeping. Such a session simply
+    starts unaddressed, exactly as a hand-launched one does.
+    """
+    try:
+        workspace = resolve_workspace(cwd)
+    except NotInWorkspaceError:
+        return
+    with archive(workspace) as store:
+        store.record_launch(
+            PendingLaunch(
+                at=datetime.now(timezone.utc),
+                platform=spec.agent.platform,
+                cwd=cwd,
+                address=address,
+                model=spec.model,
+            )
+        )
+    logger.bind(address=address, cwd=str(cwd), platform=spec.agent.platform).info(
+        'agent: launching'
+    )
+
+
 def agent(
     worktree: Path,
     name: str,
@@ -107,6 +139,7 @@ def agent(
     stamps role identity into it (see ``chimera.agent_env.role_env``).
     """
     refuse_restricted(spec, extra)
+    dry(record_launch, worktree, name, spec)
     dry(
         spec.agent.start,
         worktree,
@@ -160,6 +193,7 @@ def resume(
     one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``); ``env`` as
     on :func:`agent`."""
     refuse_restricted(spec, extra)
+    dry(record_launch, worktree, name, spec)
     dry(
         spec.agent.resume,
         worktree,
