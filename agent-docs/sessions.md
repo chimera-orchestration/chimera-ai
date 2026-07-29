@@ -153,6 +153,20 @@ stores as **`addressable`**. It fails open (both signals
 absent ⇒ treat as a conversation), because a real chat losing its mail is worse than a draft
 gaining one.
 
+### What a hook can and cannot stop
+
+`SessionStart` **cannot block** (documented): exit code 2 renders stderr to the user as a hook
+error, Claude never sees it, and the session proceeds. It offers context injection only —
+`additionalContext`, `initialUserMessage`, `watchPaths`, `sessionTitle`, `reloadSkills` — with
+no `decision`, `permissionDecision` or `continue`. So a session that shouldn't have started
+cannot be turned away at the hook; only whoever *launches* it can refuse, which is why chimera's
+launcher-side guard carries the weight and the hook can only warn.
+
+`UserPromptSubmit` **can** block ("blocks prompt processing and erases the prompt"), as can
+`PreToolUse`, `Stop`, `PostToolBatch`, `PreCompact`, `ConfigChange` and others. Since chimera
+already hooks `UserPromptSubmit` for mail, a hard stop is reachable there if a warning ever
+proves too weak — at the cost of destroying the user's typed prompt.
+
 ### Lifecycle detail
 
 - SessionEnd `reason` carries signal beyond `other`: a clean quit gives `prompt_input_exit`.
