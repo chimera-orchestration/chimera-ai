@@ -74,15 +74,21 @@ So an env var injected by a launcher (a role stamp, a tracking token) reaches a 
 session only. Tracer-verified. `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID` and friends survive
 everywhere because *claude* stamps them into every process it spawns, not the launcher.
 
-**Do not build on `$CLAUDE_ENV_FILE`.** It points a SessionStart hook at
-`~/.claude/session-env/<session-id>/sessionstart-hook-1.sh` (183 such dirs exist on a working
-machine, all empty — nothing writes them), and a hook that could inject env into the session
-it just started would be the one route to stamping bg and forked sessions. But it is
-**undocumented**, and the official hooks page states the opposite: SessionStart hooks "cannot
-directly set environment variables for the session" — their only outputs are
-`additionalContext`, `initialUserMessage`, `watchPaths`, `sessionTitle`, `reloadSkills`. An
-undocumented internal that the docs contradict can vanish in any release. Interesting to know,
-never a foundation.
+**`$CLAUDE_ENV_FILE` works, and must still not be built on.** A SessionStart hook is handed
+`~/.claude/session-env/<session-id>/sessionstart-hook-1.sh`; a line of `export FOO=bar`
+written there **does** reach the session's shell environment. Verified 2.1.220 on both a
+foreground session and its **fork**, each receiving its own fresh injection (the fork's hook
+wrote its own file — timestamps `inj-180419` vs `inj-180437` matched the two SessionStart
+firings exactly). It is set for **SessionStart only** — absent at SessionEnd, and absent
+inside the session itself.
+
+So it is the one known channel that can stamp env into bg and forked sessions, where a
+launcher's overlay cannot reach. Nevertheless: it is **undocumented**, and the official hooks
+page states the opposite — SessionStart hooks "cannot directly set environment variables for
+the session", their only outputs being `additionalContext`, `initialUserMessage`,
+`watchPaths`, `sessionTitle`, `reloadSkills`. Something undocumented *and* contradicted by the
+docs can disappear without a deprecation. Use the archive row (documented surfaces only) as
+the source of truth; this may be an optimisation on top, never the foundation under it.
 
 ### What is actually documented
 
@@ -111,7 +117,10 @@ pick a winner among them.
 ### Bridging (foreground → background)
 
 - The parent is left **alive but conversationally frozen** — a *husk*. It stays
-  registry-`busy` until its **TUI wrapper** exits. Husk windows observed: 3 min, 36 min, ~35 h.
+  registry-`busy` until its **TUI wrapper** exits. Husk windows observed: 96 s, 3 min, 36 min,
+  ~35 h. (The 96 s run corroborates the model from two independent clocks: the shell reported
+  `claude` running 1m55s, and the parent's SessionEnd landed 96 s after its fork — i.e. at
+  wrapper exit, not at the bridge.)
 - SessionEnd fires at **wrapper exit**, the same moment the registry drops the entry — so
   "archive says ended, registry says live" can never detect a husk.
 - The only reliable husk marker is a **`fork` event in the same cwd within seconds of the
