@@ -10,8 +10,10 @@ from testfixtures.loguru import LoguruSource
 from testfixtures.popen import MockPopen, shell_join
 
 from chimera.commands.doctor import checks as doctor_checks
+from chimera.archive import Archive, needs_migration
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
+    ArchiveSchemaCheck,
     WorkspaceDirsCheck,
     BgIsolationCheck,
     CaptainCheck,
@@ -36,6 +38,7 @@ from chimera.commands.doctor.checks import (
 from chimera.commands.doctor.core import Check, Exclusions, Finding
 from chimera.commands.hook import install as hook_install
 from chimera.commands.init import TEMPLATE
+from tests.test_archive import legacy_archive, legacy_row
 from chimera.worktrees import is_dirty, registered_worktrees
 
 
@@ -266,6 +269,53 @@ class TestGitignore:
         compare(
             (ws / '.gitignore').read_text(),
             expected='*.lock\nservices-running.jsonl\nstate/\n*/repo/\n*/worktrees/\n',
+        )
+
+
+class TestArchiveSchema:
+    def test_no_archive_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(ArchiveSchemaCheck(), _ws(tmpdir)), expected=[])
+
+    def test_a_current_archive_is_silent(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        Archive.open(ws / 'state' / 'archive.db').close()
+        compare(_run(ArchiveSchemaCheck(), ws), expected=[])
+
+    def test_a_legacy_archive_is_reported(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        path = ws / 'state' / 'archive.db'
+        path.parent.mkdir(parents=True)
+        legacy_archive(path)
+        compare(
+            _run(ArchiveSchemaCheck(), ws),
+            expected=[
+                Finding(
+                    'archive-schema',
+                    f'{path} predates the trimmed session schema',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        assert needs_migration(path)  # reported only — nothing touched without --fix
+
+    def test_fix_migrates_it(self, tmpdir: TempDir, full_logs: LogCapture) -> None:
+        ws = _ws(tmpdir)
+        path = ws / 'state' / 'archive.db'
+        path.parent.mkdir(parents=True)
+        legacy_archive(path, [legacy_row('a', manager='chimera', name='p@g@agent')])
+        [finding] = _run(ArchiveSchemaCheck(), ws, fix=True)
+        assert finding.resolved
+        assert not needs_migration(path)
+        with Archive.open(path) as store:
+            compare([s.address for s in store.sessions()], expected=['p@g@agent'])
+        full_logs.check_present(
+            {
+                'level': 'INFO',
+                'message': 'doctor: archive migrated',
+                'path': str(path),
+                'sessions': 1,
+            }
         )
 
 

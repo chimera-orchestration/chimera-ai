@@ -39,7 +39,7 @@ def deliver(cwd: Path, session: str) -> list[Message]:
         return []
     with archive(workspace) as store:
         recorded = store.session('claude', session)
-    if recorded is not None and recorded.name is None:
+    if recorded is not None and recorded.address is None:
         logger.bind(session=session).info('hook deliver: unaddressed session, no mail')
         return []
     return mail(workspace).deliver(address, session)

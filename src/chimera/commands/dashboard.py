@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import typer
 
 from chimera.agents import AgentSession
-from chimera.archive import Session as ArchivedSession
+from chimera.archive import ArchiveSession
 from chimera.commands.ls import Board, Mail, Row
 
 DETAIL_MAX = 80
@@ -43,8 +43,8 @@ def _live_line(indent: int, name: str, a: AgentSession) -> _Line:
     return _Line(indent, name, status, _LIVE_COLOR.get(status), _truncate(detail), None)
 
 
-def _archived_line(indent: int, name: str, s: ArchivedSession) -> _Line:
-    return _Line(indent, name, s.status, _ARCHIVED_COLOR, _truncate(s.summary or ''), None)
+def _archived_line(indent: int, name: str, s: ArchiveSession) -> _Line:
+    return _Line(indent, name, s.status, _ARCHIVED_COLOR, '', None)
 
 
 def _row_line(indent: int, row: Row) -> _Line:

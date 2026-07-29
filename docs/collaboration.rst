@@ -185,9 +185,11 @@ that speaks SQL can ask:
 
 .. code-block:: console
 
-    $ sqlite3 ~/lycia/state/archive.db "SELECT name, project, goal, actor FROM sessions"
+    $ sqlite3 ~/lycia/state/archive.db "SELECT address, project, goal, actor FROM sessions"
     demo@add-greeting@agent|demo|add-greeting|agent
 
-The ``name`` column is the session's address — the same string ``ch msg``
-routes on — so mail and history meet in the middle: the archive can tell you
-who to write to, and the mailboxes hold what they said.
+The ``address`` column is the same string ``ch msg`` routes on, so mail and
+history meet in the middle: the archive can tell you who to write to, and the
+mailboxes hold what they said. The ``project``/``goal``/``actor`` columns
+beside it are only *where* the session ran — an address is claimed on
+evidence, never inferred from a location.

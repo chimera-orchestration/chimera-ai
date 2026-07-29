@@ -6,7 +6,7 @@ from testfixtures import Replacer, TempDir
 
 from chimera import __main__ as chimera_main
 from chimera.agents import AgentSession
-from chimera.archive import Session as ArchivedSession
+from chimera.archive import ArchiveSession
 from chimera.commands.agent import agents
 from chimera.commands.dashboard import render
 from chimera.commands.ls import Board, GoalBoard, Mail, ProjectBoard, Row
@@ -70,22 +70,21 @@ class TestRender:
         assert data_lines[1][new_col : new_col + 3] == '  1'
 
     def test_an_archived_only_row_shows_its_last_known_status(self) -> None:
-        last = ArchivedSession(
+        last = ArchiveSession(
             platform='claude',
             native_id='abc123',
             status='ended',
             started_at=NOON,
-            summary='wrapped up',
         )
         row = Row('alpha@g@agent', None, last, Mail(0, 0, 0))
         b = Board('lycia', row, [], [], [], 0)
         output = _strip(render(b))
         assert 'ended' in output
-        assert 'wrapped up' in output
+        assert 'alpha@g@agent' in output
 
     def test_history_rows_render_under_a_history_header(self) -> None:
-        last = ArchivedSession(
-            platform='claude', native_id='ghost1', status='ended', started_at=NOON, name='ghost'
+        last = ArchiveSession(
+            platform='claude', native_id='ghost1', status='ended', started_at=NOON, address='ghost'
         )
         history_row = Row('ghost', None, last, Mail(0, 0, 0))
         b = Board('lycia', Row('captain', None, None, Mail(0, 0, 0)), [], [], [history_row], 0)

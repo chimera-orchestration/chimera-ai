@@ -819,10 +819,7 @@ def _row_summary(row: Row) -> str:
         fields = (row.address, row.live.short, _status(row.live), _detail(row.live))
     elif row.last is not None:
         s = row.last
-        detail = s.summary
-        if detail and len(detail) > DETAIL_MAX:
-            detail = detail[: DETAIL_MAX - 1] + '…'
-        fields = (row.address, s.native_id[:8], s.status, detail)
+        fields = (row.address, s.native_id[:8], s.status)
     else:
         fields = (row.address, '(never run)')
     base = '  '.join(part for part in fields if part)

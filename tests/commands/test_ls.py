@@ -9,7 +9,7 @@ from testfixtures import Replacer, TempDir, compare
 from chimera import __main__ as chimera_main
 from chimera.agents import AgentSession
 from chimera.archive import Archive
-from chimera.archive import Session as ArchivedSession
+from chimera.archive import ArchiveSession
 from chimera.commands.agent import agents
 from chimera.commands.ls import Board, GoalBoard, Mail, ProjectBoard, Row, board
 from chimera.comms import Comms, compose
@@ -41,29 +41,25 @@ def _record(
     ws: Path,
     native_id: str,
     *,
-    name: str | None = None,
-    manager: str = 'chimera',
+    address: str | None = None,
     project: str | None = None,
     goal: str | None = None,
     actor: str | None = None,
-    summary: str | None = None,
     started_at: datetime = NOON,
 ) -> None:
     """Seed one archived session row directly, bypassing the SessionStart hook."""
     with Archive.open(ws / 'state' / 'archive.db') as store:
         store.record_session(
-            ArchivedSession(
+            ArchiveSession(
                 platform='claude',
                 native_id=native_id,
-                manager=manager,
                 status='ended',
                 started_at=started_at,
-                name=name,
+                address=address,
                 workspace=ws.name,
                 project=project,
                 goal=goal,
                 actor=actor,
-                summary=summary,
             )
         )
 
@@ -152,29 +148,17 @@ class TestBoard:
     def test_captain_row_falls_back_to_the_archive_when_nothing_is_live(
         self, workspace: Path, store: Archive, mailbox: Comms
     ) -> None:
-        _record(workspace, 's1', name='@@captain', manager='chimera')
+        _record(workspace, 's1', address='@@captain')
         result = board(Scope(workspace, None, None), [], store, mailbox)
         assert result.captain.live is None
         assert result.captain.last is not None
         assert result.captain.last.native_id == 's1'
 
-    def test_captain_row_uses_the_archive_even_when_manager_is_none(
-        self, workspace: Path, store: Archive, mailbox: Comms
-    ) -> None:
-        # CHIMERA_ROLE (and so manager='chimera') doesn't survive a resume/reattach/
-        # background job — identity here rides the address's own name, not that stamp
-        _record(workspace, 'raw', name='@@captain', manager='none')
-        result = board(Scope(workspace, None, None), [], store, mailbox)
-        assert result.captain.live is None
-        assert result.captain.last is not None
-        assert result.captain.last.native_id == 'raw'
-        assert result.history == []
-
     def test_manager_row_falls_back_to_the_archive(
         self, tmpdir: TempDir, workspace: Path, store: Archive, mailbox: Comms
     ) -> None:
         _project(tmpdir, workspace, 'alpha')
-        _record(workspace, 's1', name='alpha@@manager', manager='chimera', project='alpha')
+        _record(workspace, 's1', address='alpha@@manager', project='alpha')
         result = board(Scope(workspace, None, None), [], store, mailbox)
         [project] = result.projects
         assert project.manager.last is not None
@@ -187,8 +171,7 @@ class TestBoard:
         _record(
             workspace,
             's1',
-            name='alpha@g@reviewer',
-            manager='none',  # unrestricted for goal actors — any session in the worktree counts
+            address='alpha@g@reviewer',  # unrestricted for goal actors — any session in the worktree counts
             project='alpha',
             goal='g',
             actor='reviewer',
@@ -225,7 +208,7 @@ class TestBoard:
     def test_history_surfaces_unclaimed_archived_sessions(
         self, workspace: Path, store: Archive, mailbox: Comms
     ) -> None:
-        _record(workspace, 'ghost', manager='none')  # no project/goal — unaddressed system run
+        _record(workspace, 'ghost')  # no project/goal — unaddressed system run
         result = board(Scope(workspace, None, None), [], store, mailbox)
         compare([row.last.native_id for row in result.history if row.last], expected=['ghost'])
 
@@ -240,7 +223,7 @@ class TestBoard:
         _record(
             workspace,
             'earlier-resume',
-            name='alpha@g@agent',
+            address='alpha@g@agent',
             project='alpha',
             goal='g',
             actor='agent',
@@ -255,7 +238,7 @@ class TestBoard:
         from chimera.commands.ls import HISTORY_LIMIT
 
         for i in range(HISTORY_LIMIT + 2):
-            _record(workspace, f's{i}', manager='none', started_at=NOON)
+            _record(workspace, f's{i}', started_at=NOON)
         result = board(Scope(workspace, None, None), [], store, mailbox)
         assert len(result.history) == HISTORY_LIMIT
         assert result.history_withheld == 1
@@ -374,7 +357,7 @@ def test_ls_cli_shows_mail_and_archive_fallback(
 ) -> None:
     _project(tmpdir, workspace_with_env, 'alpha')
     replace.in_module(agents, list, module=chimera_main)
-    _record(workspace_with_env, 's1', name='alpha@@manager', manager='chimera', project='alpha')
+    _record(workspace_with_env, 's1', address='alpha@@manager', project='alpha')
     _send(workspace_with_env, 'alpha@@manager', state='new')
     command.run('ls').check(
         output='\n'.join(
@@ -390,17 +373,18 @@ def test_ls_cli_shows_mail_and_archive_fallback(
     )
 
 
-def test_ls_cli_shows_history_and_truncates_a_long_detail(
+def test_ls_cli_shows_history(
     workspace_with_env: Path, replace: Replacer, command: Command
 ) -> None:
+    # an unaddressed archived session falls through to history, identified by its id
     replace.in_module(agents, list, module=chimera_main)
-    _record(workspace_with_env, 'ghost1', manager='none', summary='x' * 90)
+    _record(workspace_with_env, 'ghost1')
     command.run('ls').check(
         output='\n'.join(
             [
                 'lycia',
                 '  @@captain  (never run)',
-                f'  · ghost1  ghost1  ended  {"x" * 79}…',
+                '  · ghost1  ghost1  ended',
             ]
         ),
         logging=action_logs('ls', 'chimera.commands.ls.board', {'project': None, 'goal': None}),
@@ -414,7 +398,7 @@ def test_ls_cli_signposts_withheld_history(
 
     replace.in_module(agents, list, module=chimera_main)
     for i in range(HISTORY_LIMIT + 1):
-        _record(workspace_with_env, f'ghost{i}', manager='none', started_at=NOON)
+        _record(workspace_with_env, f'ghost{i}', started_at=NOON)
     result = command.run('ls')
     hint = '(+more archived sessions not shown — ch dashboard for the full view)'
     assert hint in result.output.captured

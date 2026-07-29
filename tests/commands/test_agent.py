@@ -15,7 +15,7 @@ from chimera.agents import AgentSession
 from chimera.agents.claude import Claude
 from chimera.agents.registry import AgentSpec
 from chimera.archive import Archive
-from chimera.archive import Session as ArchiveSession
+from chimera.archive import ArchiveSession
 from chimera.commands.agent import (
     agent,
     agents,
@@ -216,7 +216,7 @@ def _address_archived(
                 native_id=native_id,
                 status='other',
                 started_at=datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc),
-                name=name,
+                address=name,
                 project=project,
                 goal='g',
                 actor='agent',

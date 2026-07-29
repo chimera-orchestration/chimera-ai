@@ -7,6 +7,7 @@ from pathlib import Path
 from giterator import GitError
 from loguru import logger
 
+from chimera.archive import migrate, needs_migration
 from chimera.commands.doctor.core import (
     Check,
     Exclusions,
@@ -286,6 +287,34 @@ class RuntimeStateDirCheck:
                     state.mkdir(parents=True, exist_ok=True)
                     legacy_mail.rename(mail)
                 yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
+class ArchiveSchemaCheck:
+    """The session archive is on the current schema — migrating a pre-trim database.
+
+    The archive once carried searchable history, cost and summaries beside identity;
+    those moved out (agentsview does them better), ``name`` became ``address``, and
+    ``addressable``/``harness_version`` arrived. ``--fix`` rebuilds the database in place
+    (see :func:`chimera.archive.migrate`), keeping every session and every event.
+
+    The migration also applies the address rule retroactively: a claim survives only where
+    the old ``manager`` column proves a launcher stamped the session, or the axes name a
+    goal worktree. Claims inferred from geography alone are dropped — geography never
+    entitled a session to an address, and grandfathering them would leave rows the current
+    code would refuse to write.
+    """
+
+    name = 'archive-schema'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        path = workspace / 'state' / 'archive.db'
+        if not needs_migration(path):
+            return
+        message = f'{path} predates the trimmed session schema'
+        fixing = fix and not exclude.matches(self.name, message)
+        if fixing:
+            logger.bind(path=str(path), sessions=migrate(path)).info('doctor: archive migrated')
+        yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
 class StaleHumanWorktreeCheck:
@@ -1007,6 +1036,7 @@ CHECKS: tuple[Check, ...] = (
     OccupancyWarningCheck(),
     ProjectConfigCheck(),
     RuntimeStateDirCheck(),
+    ArchiveSchemaCheck(),
     StaleHumanWorktreeCheck(),
     InertBranchCheck(),
     LegacyWorktreeSeparatorCheck(),

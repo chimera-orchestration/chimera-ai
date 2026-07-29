@@ -23,7 +23,7 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.addresses import Actor, Captain, Manager
-from chimera.archive import Archive, Session, archive
+from chimera.archive import Archive, ArchiveSession, archive
 from chimera.config import NotInWorkspaceError, ProjectConfig, find_workspace, load_config
 from chimera.worktrees import SEP
 
@@ -67,14 +67,13 @@ def backfill(projects: Path) -> Backfilled:
             workspace, project, goal, actor = resolved
             if workspace not in archives:
                 archives[workspace] = archive(workspace)
-            session = Session(
+            session = ArchiveSession(
                 platform='claude',
                 native_id=transcript.stem,
                 status=BACKFILLED,
                 started_at=started,
                 ended_at=ended,
-                manager='chimera' if goal is not None else 'none',
-                name=_name(project, goal, actor),
+                address=_address(project, goal, actor),
                 cwd=cwd,
                 transcript=transcript,
                 workspace=workspace.name,
@@ -127,7 +126,7 @@ def _axes(cwd: Path) -> _Axes | None:
     return workspace, project.name, None, None
 
 
-def _name(project: str | None, goal: str | None, actor: str | None) -> str:
+def _address(project: str | None, goal: str | None, actor: str | None) -> str:
     """The address the session would have had — ``caller``'s cwd inference, from the axes."""
     if project is None:
         return str(Captain())

@@ -2,9 +2,9 @@ import io
 import sys
 from pathlib import Path
 
-from testfixtures import Replacer, TempDir
+from testfixtures import Replacer, TempDir, not_there
 
-from chimera.archive import Archive, Event, Session
+from chimera.archive import Archive, ArchiveSession, Event
 from chimera.commands.hook.capture import addressed, session_end, session_start
 from tests.cli import Command, action_logs
 
@@ -12,7 +12,7 @@ START = 'chimera.commands.hook.capture.session_start'
 END = 'chimera.commands.hook.capture.session_end'
 
 
-def _archived(ws: Path) -> list[Session]:
+def _archived(ws: Path) -> list[ArchiveSession]:
     with Archive.open(ws / 'state' / 'archive.db') as a:
         return a.sessions()
 
@@ -26,11 +26,10 @@ def test_session_start_records_the_session(tmpdir: TempDir, replace: Replacer) -
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    replace.in_environ('CHIMERA_ROLE', '')  # a raw session → manager none
     session_start(ws, 'uuid-1', '/t.jsonl', 'startup')
     [session] = _archived(ws)
-    assert (session.platform, session.native_id, session.manager) == ('claude', 'uuid-1', 'none')
-    assert (session.name, session.status, session.workspace) == ('@@captain', 'startup', 'ws')
+    assert (session.platform, session.native_id) == ('claude', 'uuid-1')
+    assert (session.address, session.status, session.workspace) == ('@@captain', 'startup', 'ws')
 
 
 def test_session_start_records_the_model(tmpdir: TempDir, replace: Replacer) -> None:
@@ -51,7 +50,7 @@ def test_session_start_in_a_goal_worktree_sets_the_axes(tmpdir: TempDir, replace
     session_start(worktree, 'uuid-2', '/t.jsonl', 'startup')
     [session] = _archived(tmpdir.path / 'ws')
     assert (session.project, session.goal, session.actor) == ('proj', 'g', 'agent')
-    assert session.name == 'proj@g@agent'
+    assert session.address == 'proj@g@agent'
 
 
 def test_session_start_in_a_reviewer_worktree_records_the_true_actor(
@@ -70,18 +69,28 @@ def test_session_start_in_a_reviewer_worktree_records_the_true_actor(
     session_start(worktree, 'uuid-r', '/t.jsonl', 'startup')
     [session] = _archived(tmpdir.path / 'ws')
     assert (session.project, session.goal, session.actor) == ('proj', 'g', 'reviewer')
-    assert session.name == 'proj@g@reviewer'
+    assert session.address == 'proj@g@reviewer'
 
 
-def test_session_start_marks_manager_chimera_under_a_role_stamp(
+def test_session_start_records_the_harness_version(tmpdir: TempDir, replace: Replacer) -> None:
+    # which build produced the row: a version sessions.md has never validated is the alarm
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('AI_AGENT', 'claude-code_2-1-220_agent')
+    session_start(ws, 'uuid-3', '/t.jsonl', 'startup')
+    assert _archived(ws)[0].harness_version == 'claude-code_2-1-220_agent'
+
+
+def test_session_start_without_a_harness_version_records_none(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    replace.in_environ('CHIMERA_ROLE', 'agent')
-    session_start(ws, 'uuid-3', '/t.jsonl', 'startup')
-    assert _archived(ws)[0].manager == 'chimera'
+    replace.in_environ('AI_AGENT', not_there)
+    session_start(ws, 'uuid-4', '/t.jsonl', 'startup')
+    assert _archived(ws)[0].harness_version is None
 
 
 def test_session_start_outside_a_workspace_is_a_noop(tmpdir: TempDir) -> None:
@@ -116,7 +125,7 @@ def test_a_tui_draft_session_never_acquires_a_mail_address(
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     session_start(ws, 'uuid-tui', '/t.jsonl', 'startup', agent_type='claude')
     [session] = _archived(ws)
-    assert session.name is None  # recorded, but no address for mail to route to
+    assert session.address is None  # recorded, but no address for mail to route to
     assert session.workspace == 'ws'  # the location facts survive
 
 
@@ -130,7 +139,7 @@ def test_a_one_shot_print_run_never_acquires_a_mail_address(
     replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
     session_start(worktree, 'uuid-p', '/t.jsonl', 'startup', entrypoint='sdk-cli')
     [session] = _archived(tmpdir.path / 'ws')
-    assert session.name is None
+    assert session.address is None
     assert session.actor is None  # live_session_for(project, goal, 'agent') can't match it
     assert (session.project, session.goal) == ('proj', 'g')  # where it ran is still on record
 
@@ -232,7 +241,7 @@ def test_hook_session_start_cli_fences_on_payload_and_environment(
             end,
         ],
     )
-    assert _archived(ws)[0].name is None  # both signals read: payload agent_type, env entrypoint
+    assert _archived(ws)[0].address is None  # both signals read: payload agent_type, env entrypoint
 
 
 def test_hook_session_end_cli(tmpdir: TempDir, command: Command, replace: Replacer) -> None:

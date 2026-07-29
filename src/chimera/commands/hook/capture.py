@@ -1,10 +1,10 @@
 """Session capture: Claude's SessionStart/SessionEnd hooks feed the archive.
 
 Every session on the machine is recorded — a chimera-launched agent or a raw ``claude`` you
-ran yourself — with ``manager`` marking who launched it and the chimera axes resolved from
-the session's ``cwd``. A session whose cwd is outside any workspace has nowhere to record to,
-so it is the one no-op. The hook payload's ``session_id`` is the full UUID (verified), which
-is the archive's ``native_id`` directly.
+ran yourself — with the chimera axes resolved from the session's ``cwd``. A session whose
+cwd is outside any workspace has nowhere to record to, so it is the one no-op. The hook
+payload's ``session_id`` is the full UUID (verified), which is the archive's ``native_id``
+directly.
 
 Each hook firing also appends one :class:`~chimera.archive.Event` — ``startup``/``resume``/
 ``clear`` from SessionStart's ``source``, ``end`` from SessionEnd — so the session row stays
@@ -16,6 +16,7 @@ what survives a bridge, which firings aren't conversations — and is the first 
 changing anything here.
 """
 
+import os
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,13 +24,19 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.addresses import Actor
-from chimera.agent_env import session_role
-from chimera.archive import Event, Session, archive
+from chimera.archive import ArchiveSession, Event, archive
 from chimera.config import NotInWorkspaceError
 from chimera.context import caller, resolve_scope
 from chimera.worktrees import worktree_actor
 
 _Axes = tuple[Path, str | None, str | None, str | None]
+
+HARNESS_VERSION_VAR = 'AI_AGENT'
+"""The harness's own build stamp (``claude-code_2-1-220_agent``), recorded on every
+session so "which versions have we seen?" is a query — and a session recorded under a
+version ``agent-docs/sessions.md`` has never validated is itself the alarm. Stored whole:
+it names the harness, its version and its mode together, and only the harness gets to say
+what those mean."""
 
 PRINT_ENTRYPOINT = 'sdk-cli'
 """``CLAUDE_CODE_ENTRYPOINT`` in a one-shot ``claude -p`` run (an interactive session
@@ -117,14 +124,15 @@ def session_start(
     now = datetime.now(timezone.utc)
     with archive(workspace) as store:
         store.record_session(
-            Session(
+            ArchiveSession(
                 platform='claude',
                 native_id=session_id,
                 status=source or 'running',
                 started_at=now,
-                manager='chimera' if session_role() is not None else 'none',
                 model=model,
-                name=name,
+                address=name,
+                addressable=mail,
+                harness_version=os.environ.get(HARNESS_VERSION_VAR) or None,
                 cwd=cwd,
                 transcript=Path(transcript),
                 workspace=workspace.name,

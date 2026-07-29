@@ -4,7 +4,7 @@ from pathlib import Path
 
 from testfixtures import Replacer, TempDir, compare, like
 
-from chimera.archive import Archive, Session
+from chimera.archive import Archive, ArchiveSession
 from chimera.commands.archive.backfill import Backfilled, backfill
 from chimera.commands.hook.capture import session_start
 from tests.cli import Command, action_logs
@@ -15,7 +15,7 @@ THIRD = 'aaaaaaaa-0000-4000-8000-000000000003'
 FOURTH = 'aaaaaaaa-0000-4000-8000-000000000004'
 
 
-def _archived(ws: Path) -> list[Session]:
+def _archived(ws: Path) -> list[ArchiveSession]:
     with Archive.open(ws / 'state' / 'archive.db') as a:
         return a.sessions()
 
@@ -50,14 +50,13 @@ def test_goal_worktree_cwd_resolves_all_axes_and_the_timestamp_span(tmpdir: Temp
     compare(
         _archived(tmpdir.path / 'ws'),
         expected=[
-            Session(
+            ArchiveSession(
                 platform='claude',
                 native_id=UUID,
                 status='backfilled',
                 started_at=datetime(2026, 7, 9, 6, 50, tzinfo=timezone.utc),
                 ended_at=datetime(2026, 7, 9, 7, 10, tzinfo=timezone.utc),
-                manager='chimera',
-                name='proj@g@agent',
+                address='proj@g@agent',
                 cwd=worktree,
                 transcript=transcript,
                 workspace='ws',
@@ -82,9 +81,8 @@ def test_swept_worktree_cwd_keeps_its_axes(tmpdir: TempDir) -> None:
         _archived(tmpdir.path / 'ws'),
         expected=[
             like(
-                Session,
-                name='proj@g@reviewer',
-                manager='chimera',
+                ArchiveSession,
+                address='proj@g@reviewer',
                 project='proj',
                 goal='g',
                 actor='reviewer',
@@ -102,13 +100,13 @@ def test_bare_workspace_cwd_names_the_captain(tmpdir: TempDir) -> None:
     compare(
         _archived(ws),
         expected=[
-            Session(
+            ArchiveSession(
                 platform='claude',
                 native_id=UUID,
                 status='backfilled',
                 started_at=datetime(2026, 7, 9, 6, 52, 57, 81000, tzinfo=timezone.utc),
                 ended_at=datetime(2026, 7, 9, 6, 52, 57, 81000, tzinfo=timezone.utc),
-                name='@@captain',
+                address='@@captain',
                 cwd=ws,
                 transcript=transcript,
                 workspace='ws',
@@ -127,9 +125,8 @@ def test_project_dir_cwd_names_the_manager(tmpdir: TempDir) -> None:
         _archived(tmpdir.path / 'ws'),
         expected=[
             like(
-                Session,
-                name='proj@@manager',
-                manager='none',
+                ArchiveSession,
+                address='proj@@manager',
                 project='proj',
                 goal=None,
                 actor=None,
@@ -152,7 +149,7 @@ def test_the_env_workspace_pin_never_places_a_historical_cwd(
     _write(store, UUID, _entry(tmpdir.path / 'elsewhere', '2026-07-09T06:52:57.081Z'))
     _write(store, OTHER, _entry(outside, '2026-07-09T06:52:57.081Z'))
     compare(backfill(store), expected=Backfilled(imported=1, present=0, outside=1, unplaced=0))
-    compare(_archived(tmpdir.path / 'elsewhere'), expected=[like(Session, native_id=UUID)])
+    compare(_archived(tmpdir.path / 'elsewhere'), expected=[like(ArchiveSession, native_id=UUID)])
     assert not (tmpdir.path / 'home' / 'state').exists()
 
 
@@ -175,7 +172,7 @@ def test_timestamp_offsets_normalise_to_utc(tmpdir: TempDir) -> None:
         _archived(ws),
         expected=[
             like(
-                Session,
+                ArchiveSession,
                 started_at=datetime(2026, 7, 9, 7, 0, tzinfo=timezone.utc),
                 ended_at=datetime(2026, 7, 9, 7, 0, tzinfo=timezone.utc),
             )

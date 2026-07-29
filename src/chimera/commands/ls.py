@@ -5,7 +5,7 @@ from pathlib import Path
 from chimera.addresses import Actor, Captain, Manager
 from chimera.agents import AgentSession
 from chimera.archive import Archive
-from chimera.archive import Session as ArchivedSession
+from chimera.archive import ArchiveSession
 from chimera.commands.agent import in_goal, scoped, under
 from chimera.comms import Comms
 from chimera.context import Scope, iter_projects
@@ -38,7 +38,7 @@ class Row:
 
     address: str
     live: AgentSession | None
-    last: ArchivedSession | None
+    last: ArchiveSession | None
     mail: Mail
 
 
@@ -95,12 +95,12 @@ def _named_row(
 ) -> Row:
     """The captain/manager slot at ``address``: a session chimera itself named at launch
     (``--name``, matched by the registry's own ``name``), else the archive's latest session
-    recorded under that same ``name`` — project/goal/actor alone can't pin the captain/manager
-    address (every axis-less row would match), so identity here rides ``name`` itself (see
+    recorded under that same address — project/goal/actor alone can't pin the captain/manager
+    address (every axis-less row would match), so identity here rides the address itself (see
     :meth:`Archive.latest_session_for`).
     """
     live = next((a for a in universe if a.name == address), None)
-    last = None if live is not None else archive.latest_session_for(project, name=address)
+    last = None if live is not None else archive.latest_session_for(project, address=address)
     return Row(address, live, last, mail_map.get(address, _NO_MAIL))
 
 
@@ -191,10 +191,10 @@ def board(scope: Scope, listing: list[AgentSession], archive: Archive, mail: Com
     recent = archive.recent_sessions(scope.workspace.name, exclude=claimed, limit=HISTORY_LIMIT + 1)
     history = [
         Row(
-            s.name if s.name is not None else s.native_id,
+            s.address if s.address is not None else s.native_id,
             None,
             s,
-            mail_map.get(s.name, _NO_MAIL) if s.name is not None else _NO_MAIL,
+            mail_map.get(s.address, _NO_MAIL) if s.address is not None else _NO_MAIL,
         )
         for s in recent[:HISTORY_LIMIT]
     ]

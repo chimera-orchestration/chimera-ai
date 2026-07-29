@@ -1,13 +1,13 @@
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier, Thread
 
 import pytest
-from testfixtures import TempDir
+from testfixtures import TempDir, compare
 
-from chimera.archive import Archive, Event, Session
+from chimera.archive import Archive, ArchiveSession, Event, migrate, needs_migration
 
 NOON = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 
@@ -16,38 +16,32 @@ def make_session(
     native_id: str,
     *,
     platform: str = 'claude',
-    manager: str = 'none',
     status: str = 'running',
     started_at: datetime = NOON,
     ended_at: datetime | None = None,
     model: str | None = None,
-    name: str | None = None,
+    address: str | None = None,
+    addressable: bool = True,
+    harness_version: str | None = None,
     cwd: Path | None = None,
     transcript: Path | None = None,
-    summary: str | None = None,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
-    cost_usd: float | None = None,
     workspace: str | None = None,
     project: str | None = None,
     goal: str | None = None,
     actor: str | None = None,
-) -> Session:
-    return Session(
+) -> ArchiveSession:
+    return ArchiveSession(
         native_id=native_id,
         platform=platform,
-        manager=manager,
         status=status,
         started_at=started_at,
         ended_at=ended_at,
         model=model,
-        name=name,
+        address=address,
+        addressable=addressable,
+        harness_version=harness_version,
         cwd=cwd,
         transcript=transcript,
-        summary=summary,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cost_usd=cost_usd,
         workspace=workspace,
         project=project,
         goal=goal,
@@ -91,17 +85,13 @@ def test_open_enables_wal_so_readers_and_writers_dont_block(db_path: Path) -> No
 def test_a_recorded_session_comes_back_exactly(archive: Archive) -> None:
     session = make_session(
         '00893aaf-19fa-41d2-8238-13269b9b3ca0',
-        manager='chimera',
         model='claude-opus-4-8',
-        name='chimera@logs-and-sessions@agent',
+        address='chimera@logs-and-sessions@agent',
+        harness_version='claude-code_2-1-220_agent',
         project='chimera',
         goal='logs-and-sessions',
         actor='agent',
         cwd=Path('/work/chimera/logs-and-sessions@agent'),
-        summary='building the archive',
-        input_tokens=1200,
-        output_tokens=340,
-        cost_usd=0.051,
         workspace='lycia',
     )
     archive.record_session(session)
@@ -122,11 +112,11 @@ def test_the_same_native_id_on_two_platforms_are_distinct_sessions(archive: Arch
 
 def test_recording_the_same_identity_again_updates_in_place(archive: Archive) -> None:
     archive.record_session(make_session('s1', status='running'))
-    archive.record_session(make_session('s1', status='compacting', summary='now with detail'))
+    archive.record_session(make_session('s1', status='compacting', model='haiku'))
     stored = archive.session('claude', 's1')
     assert stored is not None
     assert stored.status == 'compacting'
-    assert stored.summary == 'now with detail'
+    assert stored.model == 'haiku'
     assert archive.sessions() == [stored]  # updated, not duplicated
 
 
@@ -151,22 +141,22 @@ def test_rerecording_reopens_an_ended_session(archive: Archive) -> None:
     assert stored.status == 'resume'
 
 
-def test_rerecording_never_regresses_a_known_manager_to_none(archive: Archive) -> None:
-    archive.record_session(make_session('s1', status='startup', manager='chimera'))
+def test_rerecording_never_erases_a_known_address(archive: Archive) -> None:
+    archive.record_session(make_session('s1', status='startup', address='p@g@agent'))
     # a raw `claude --resume` or the `claude agents` browser stamps no role
-    archive.record_session(make_session('s1', status='resume', manager='none'))
+    archive.record_session(make_session('s1', status='resume', address=None))
     stored = archive.session('claude', 's1')
     assert stored is not None
-    assert stored.manager == 'chimera'  # sticky — the earlier attribution survives
+    assert stored.address == 'p@g@agent'  # sticky — a resume carries no fresh evidence
     assert stored.status == 'resume'  # everything else still takes the new value
 
 
-def test_rerecording_still_takes_a_new_non_none_manager(archive: Archive) -> None:
-    archive.record_session(make_session('s1', status='startup', manager='chimera'))
-    archive.record_session(make_session('s1', status='resume', manager='gastown'))
+def test_rerecording_still_takes_a_newly_claimed_address(archive: Archive) -> None:
+    archive.record_session(make_session('s1', status='startup', address='p@g@agent'))
+    archive.record_session(make_session('s1', status='resume', address='p@g@reviewer'))
     stored = archive.session('claude', 's1')
     assert stored is not None
-    assert stored.manager == 'gastown'  # only 'none' is refused, not a genuine change
+    assert stored.address == 'p@g@reviewer'  # only erasure is refused, not a real change
 
 
 def test_record_if_absent_never_clobbers_an_existing_row(archive: Archive) -> None:
@@ -204,12 +194,12 @@ def test_actors_for_a_goal_answers_which_agents_worked_on_it(archive: Archive) -
     assert archive.actors_for_goal('chimera', 'logs') == ['agent', 'human']
 
 
-def test_sessions_can_be_narrowed_by_platform_and_manager(archive: Archive) -> None:
-    archive.record_session(make_session('a', platform='claude', manager='chimera'))
-    archive.record_session(make_session('b', platform='claude', manager='none'))
-    archive.record_session(make_session('c', platform='codex', manager='chimera'))
-    assert [s.native_id for s in archive.sessions(manager='chimera')] == ['a', 'c']
-    assert [s.native_id for s in archive.sessions(platform='claude', manager='chimera')] == ['a']
+def test_sessions_can_be_narrowed_by_platform(archive: Archive) -> None:
+    archive.record_session(make_session('a', platform='claude'))
+    archive.record_session(make_session('b', platform='claude'))
+    archive.record_session(make_session('c', platform='codex'))
+    assert [s.native_id for s in archive.sessions(platform='claude')] == ['a', 'b']
+    assert [s.native_id for s in archive.sessions(platform='codex')] == ['c']
 
 
 def test_sessions_can_be_narrowed_by_workspace_and_actor(archive: Archive) -> None:
@@ -303,7 +293,9 @@ def test_latest_session_for_finds_the_newest_even_when_ended(archive: Archive) -
 def test_latest_session_for_survives_a_registry_rename(archive: Archive) -> None:
     # a UI rename mutates the registry name; the archive row still answers the address
     archive.record_session(
-        make_session('s1', name='free-form rename', project='chimera', goal='logs', actor='agent')
+        make_session(
+            's1', address='free-form rename', project='chimera', goal='logs', actor='agent'
+        )
     )
     latest = archive.latest_session_for('chimera', 'logs', 'agent')
     assert latest is not None
@@ -370,14 +362,12 @@ def test_latest_session_for_the_captain_address_wants_every_axis_null(archive: A
     assert latest.native_id == 'captain-row'
 
 
-def test_latest_session_for_narrows_by_name(archive: Archive) -> None:
+def test_latest_session_for_narrows_by_address(archive: Archive) -> None:
     # project/goal/actor alone can't pin the captain/manager address (every axis-less row
-    # matches); name does, and stays reliable regardless of the (unstamped-on-resume) manager
-    archive.record_session(
-        make_session('other', manager='none', started_at=NOON + timedelta(hours=1))
-    )
-    archive.record_session(make_session('pegasus', manager='none', name='pegasus', started_at=NOON))
-    latest = archive.latest_session_for(None, name='pegasus')
+    # matches); the address itself does
+    archive.record_session(make_session('other', started_at=NOON + timedelta(hours=1)))
+    archive.record_session(make_session('pegasus', address='pegasus', started_at=NOON))
+    latest = archive.latest_session_for(None, address='pegasus')
     assert latest is not None
     assert latest.native_id == 'pegasus'
 
@@ -398,9 +388,9 @@ def test_recent_sessions_scopes_to_the_workspace(archive: Archive) -> None:
 
 
 def test_recent_sessions_excludes_claimed_identities(archive: Archive) -> None:
-    archive.record_session(make_session('a', workspace='ws', name='a', started_at=NOON))
+    archive.record_session(make_session('a', workspace='ws', address='a', started_at=NOON))
     archive.record_session(
-        make_session('b', workspace='ws', name='b', started_at=NOON + timedelta(hours=1))
+        make_session('b', workspace='ws', address='b', started_at=NOON + timedelta(hours=1))
     )
     recent = archive.recent_sessions('ws', exclude=['b'], limit=10)
     assert [s.native_id for s in recent] == ['a']
@@ -410,11 +400,11 @@ def test_recent_sessions_excludes_every_row_sharing_a_claimed_name(archive: Arch
     # an old resume of a claimed slot shares its name but not its native_id — exclude by
     # name, not just the one (platform, native_id) the slot picked as its current occupant
     archive.record_session(
-        make_session('old-resume', workspace='ws', name='pegasus', started_at=NOON)
+        make_session('old-resume', workspace='ws', address='pegasus', started_at=NOON)
     )
     archive.record_session(
         make_session(
-            'current', workspace='ws', name='pegasus', started_at=NOON + timedelta(hours=1)
+            'current', workspace='ws', address='pegasus', started_at=NOON + timedelta(hours=1)
         )
     )
     assert archive.recent_sessions('ws', exclude=['pegasus'], limit=10) == []
@@ -461,27 +451,18 @@ def test_events_without_a_session_are_kept_too(archive: Archive) -> None:
     assert everything[0].native_id is None
 
 
-# --- search ------------------------------------------------------------------------
+class TestTranscriptMissing:
+    # what turns `ch agent resume` into claude's raw "No conversation found" traceback
 
+    def test_a_present_transcript_is_not_missing(self, tmpdir: TempDir) -> None:
+        assert not make_session('a', transcript=tmpdir.write('t.jsonl', '')).transcript_missing
 
-def test_search_finds_sessions_by_their_summary(archive: Archive) -> None:
-    archive.record_session(make_session('a', summary='wiring up the archive store'))
-    archive.record_session(make_session('b', summary='fixing the doctor checks'))
-    assert [s.native_id for s in archive.search('archive')] == ['a']
+    def test_a_pruned_transcript_is_missing(self, tmpdir: TempDir) -> None:
+        assert make_session('a', transcript=tmpdir.path / 'gone.jsonl').transcript_missing
 
-
-def test_search_matches_the_goal_name_too(archive: Archive) -> None:
-    archive.record_session(make_session('a', goal='logs-and-sessions'))
-    archive.record_session(make_session('b', goal='tab-completion'))
-    assert [s.native_id for s in archive.search('sessions')] == ['a']
-
-
-def test_search_keeps_up_when_a_session_is_updated(archive: Archive) -> None:
-    archive.record_session(make_session('a', summary='draft about widgets'))
-    assert archive.search('widgets')
-    archive.record_session(make_session('a', summary='rewritten about gadgets'))
-    assert not archive.search('widgets')
-    assert [s.native_id for s in archive.search('gadgets')] == ['a']
+    def test_a_session_with_no_transcript_at_all_is_not_missing(self) -> None:
+        # nothing was ever recorded to lose — distinct from a path that has vanished
+        assert not make_session('a', transcript=None).transcript_missing
 
 
 # --- concurrency: many agents writing the same archive at once ---------------------
@@ -505,3 +486,196 @@ def test_many_agents_write_the_same_archive_concurrently(db_path: Path) -> None:
 
     with Archive.open(db_path) as archive:
         assert len(archive.sessions(goal='shared')) == count  # every write landed, none lost
+
+
+# --- migration off the pre-trim schema ----------------------------------------------
+
+LEGACY_SCHEMA = """
+CREATE TABLE sessions (
+    platform      TEXT NOT NULL,
+    native_id     TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    started_at    TEXT NOT NULL,
+    manager       TEXT NOT NULL DEFAULT 'none',
+    model         TEXT,
+    name          TEXT,
+    ended_at      TEXT,
+    cwd           TEXT,
+    transcript    TEXT,
+    summary       TEXT,
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    cost_usd      REAL,
+    workspace     TEXT,
+    project       TEXT,
+    goal          TEXT,
+    actor         TEXT,
+    PRIMARY KEY (platform, native_id)
+);
+CREATE INDEX sessions_by_manager ON sessions(manager);
+CREATE TABLE events (
+    at          TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    detail      TEXT,
+    platform    TEXT,
+    native_id   TEXT,
+    -- the cascade the rebuild must not trip: verbatim from a real pre-trim archive
+    FOREIGN KEY (platform, native_id) REFERENCES sessions(platform, native_id) ON DELETE CASCADE
+);
+CREATE VIRTUAL TABLE sessions_fts USING fts5(
+    name, goal, project, summary, content='sessions', content_rowid='rowid'
+);
+CREATE TRIGGER sessions_ai AFTER INSERT ON sessions BEGIN
+    INSERT INTO sessions_fts(rowid, name, goal, project, summary)
+    VALUES (new.rowid, new.name, new.goal, new.project, new.summary);
+END;
+CREATE TRIGGER sessions_ad AFTER DELETE ON sessions BEGIN
+    INSERT INTO sessions_fts(sessions_fts, rowid, name, goal, project, summary)
+    VALUES ('delete', old.rowid, old.name, old.goal, old.project, old.summary);
+END;
+CREATE TRIGGER sessions_au AFTER UPDATE ON sessions BEGIN
+    INSERT INTO sessions_fts(sessions_fts, rowid, name, goal, project, summary)
+    VALUES ('delete', old.rowid, old.name, old.goal, old.project, old.summary);
+    INSERT INTO sessions_fts(rowid, name, goal, project, summary)
+    VALUES (new.rowid, new.name, new.goal, new.project, new.summary);
+END;
+"""
+
+_LEGACY_ROW = (
+    'INSERT INTO sessions (platform, native_id, status, started_at, manager, name, '
+    'summary, cwd, workspace, project, goal, actor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+)
+
+
+def legacy_archive(path: Path, rows: Sequence[tuple[object, ...]] = ()) -> None:
+    """A database on the pre-trim schema, carrying ``rows`` of legacy sessions."""
+    connection = sqlite3.connect(path)
+    connection.execute('PRAGMA foreign_keys=ON')
+    connection.executescript(LEGACY_SCHEMA)
+    for row in rows:
+        connection.execute(_LEGACY_ROW, row)
+    connection.commit()
+    connection.close()
+
+
+def legacy_row(
+    native_id: str,
+    *,
+    manager: str = 'none',
+    name: str | None = None,
+    project: str | None = None,
+    goal: str | None = None,
+    actor: str | None = None,
+) -> tuple[object, ...]:
+    return (
+        'claude',
+        native_id,
+        'running',
+        NOON.isoformat(),
+        manager,
+        name,
+        'a summary',
+        '/work',
+        'lycia',
+        project,
+        goal,
+        actor,
+    )
+
+
+class TestMigration:
+    def test_a_missing_database_needs_nothing(self, db_path: Path) -> None:
+        assert not needs_migration(db_path)
+
+    def test_a_current_database_needs_nothing(self, db_path: Path) -> None:
+        Archive.open(db_path).close()
+        assert not needs_migration(db_path)
+
+    def test_a_legacy_database_is_recognised(self, db_path: Path) -> None:
+        legacy_archive(db_path)
+        assert needs_migration(db_path)
+
+    def test_migrating_is_idempotent(self, db_path: Path) -> None:
+        legacy_archive(db_path, [legacy_row('a', manager='chimera', name='p@g@agent')])
+        compare(migrate(db_path), expected=1)
+        assert not needs_migration(db_path)
+        compare(migrate(db_path), expected=0)  # nothing left to do
+
+    def test_the_sessions_survive_with_their_axes(self, db_path: Path) -> None:
+        legacy_archive(
+            db_path,
+            [
+                legacy_row(
+                    'a', manager='chimera', name='p@g@agent', project='p', goal='g', actor='agent'
+                )
+            ],
+        )
+        migrate(db_path)
+        with Archive.open(db_path) as store:
+            [session] = store.sessions()
+        compare(
+            session,
+            expected=ArchiveSession(
+                platform='claude',
+                native_id='a',
+                status='running',
+                started_at=NOON,
+                address='p@g@agent',
+                cwd=Path('/work'),
+                workspace='lycia',
+                project='p',
+                goal='g',
+                actor='agent',
+            ),
+        )
+
+    def test_a_launcher_stamped_claim_survives(self, db_path: Path) -> None:
+        # manager='chimera' is the old record of "a launcher stamped this" — the very
+        # evidence the address rule now demands
+        legacy_archive(db_path, [legacy_row('a', manager='chimera', name='@@captain')])
+        migrate(db_path)
+        with Archive.open(db_path) as store:
+            [session] = store.sessions()
+        compare(session.address, expected='@@captain')
+
+    def test_a_goal_worktree_claim_survives(self, db_path: Path) -> None:
+        # the axes name an actor, so the address followed the worktree, not a guess
+        legacy_archive(
+            db_path, [legacy_row('a', name='p@g@agent', project='p', goal='g', actor='agent')]
+        )
+        migrate(db_path)
+        with Archive.open(db_path) as store:
+            [session] = store.sessions()
+        compare(session.address, expected='p@g@agent')
+
+    def test_a_geography_only_claim_is_dropped(self, db_path: Path) -> None:
+        # a raw session in a project dir was archived as that project's manager purely
+        # because of where it sat — the claim the address rule exists to refuse
+        legacy_archive(db_path, [legacy_row('a', name='p@@manager', project='p')])
+        migrate(db_path)
+        with Archive.open(db_path) as store:
+            [session] = store.sessions()
+        assert session.address is None
+
+    def test_the_events_are_untouched(self, db_path: Path) -> None:
+        legacy_archive(db_path, [legacy_row('a')])
+        connection = sqlite3.connect(db_path)
+        connection.execute(
+            'INSERT INTO events (at, kind, platform, native_id) VALUES (?, ?, ?, ?)',
+            (NOON.isoformat(), 'startup', 'claude', 'a'),
+        )
+        connection.commit()
+        connection.close()
+        migrate(db_path)
+        with Archive.open(db_path) as store:
+            compare([e.kind for e in store.events()], expected=['startup'])
+
+    def test_the_search_machinery_is_gone(self, db_path: Path) -> None:
+        legacy_archive(db_path)
+        migrate(db_path)
+        connection = sqlite3.connect(db_path)
+        try:
+            names = {row[0] for row in connection.execute('SELECT name FROM sqlite_master')}
+        finally:
+            connection.close()
+        assert not {n for n in names if n.startswith('sessions_fts') or n.startswith('sessions_a')}

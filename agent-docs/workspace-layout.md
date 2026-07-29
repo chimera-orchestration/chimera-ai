@@ -325,6 +325,15 @@ add/retire via the `CHECKS` tuple). Current checks:
   lives under one gitignored `state/`; `--fix` migrates the legacy layout, renaming `logs/` →
   `state/` (its `chimera.jsonl` → `state/log.jsonl`) and `comms/` → `state/mail/`. Clean-only: a
   collision (the target already exists) is reported for a human to merge, never clobbered
+- **archive-schema** — `state/archive.db` is on the current session schema. The archive once
+  carried searchable history, cost and summaries beside identity (agentsview does those better,
+  and the conflation is what let identity go quietly wrong); `name` became `address`, and
+  `addressable`/`harness_version` arrived. `--fix` rebuilds the database in place — a rebuild,
+  not `ALTER … DROP COLUMN`, because the old FTS triggers reference the very columns being
+  dropped — keeping every session and every event. It also applies the address rule
+  retroactively: a claim survives only where the dying `manager` column proves a launcher
+  stamped the session, or the axes name a goal worktree. Claims inferred from geography alone
+  are dropped, since geography never entitled a session to an address
 - **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **inert-branches** — delete a known goal's non-agent actor branch (`{goal}/human`, `reviewer`, `pr`,

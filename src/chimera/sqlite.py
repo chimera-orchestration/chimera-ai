@@ -57,6 +57,16 @@ class Database:
         logger.bind(db=str(self._path)).debug(op)
         return self._connection.execute(sql, params)
 
+    def executescript(self, op: str, sql: str) -> None:
+        """Run a multi-statement script, traced like :meth:`execute`.
+
+        For schema work — a migration's drop/create/copy/rename sequence — where the
+        statements only make sense together. Takes no parameters by design: ``sqlite3``
+        can't bind them across a script, and a migration has nothing to bind anyway.
+        """
+        logger.bind(db=str(self._path)).debug(op)
+        self._connection.executescript(sql)
+
     def close(self) -> None:
         self._connection.close()
 
