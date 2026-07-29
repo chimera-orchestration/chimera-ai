@@ -29,7 +29,7 @@ from chimera.agent_env import (
     role_scope_for,
     session_role,
 )
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.agents.context import Source, assemble, materialize
 from chimera.agents.registry import AgentSpec, resolve_spec
 from chimera.archive import archive
@@ -777,12 +777,12 @@ def dashboard_cmd(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt 
 DETAIL_MAX = 80
 
 
-def _name(a: Session) -> str:
+def _name(a: AgentSession) -> str:
     """The session's name, blanked when it merely echoes the id column."""
     return '' if a.name == a.id else a.name
 
 
-def _detail(a: Session) -> str:
+def _detail(a: AgentSession) -> str:
     """The session's one-line detail, trimmed to ``DETAIL_MAX`` with an ellipsis.
 
     A stale row's detail is its reason — the mark is what the row is showing.
@@ -791,12 +791,12 @@ def _detail(a: Session) -> str:
     return detail if len(detail) <= DETAIL_MAX else detail[: DETAIL_MAX - 1] + '…'
 
 
-def _status(a: Session) -> str:
+def _status(a: AgentSession) -> str:
     """The status column: ``stale`` displaces the registry's claim on a marked row."""
     return 'stale' if a.stale is not None else a.status
 
 
-def _summary(a: Session) -> str:
+def _summary(a: AgentSession) -> str:
     """``id  name  status  detail`` for a live session, dropping the name when blank."""
     return '  '.join(part for part in (a.short, _name(a), a.status, _detail(a)) if part)
 
@@ -2016,7 +2016,7 @@ def _report_removed(removed: list[Path], goal: str, dry: Dry = Dry()) -> None:
         typer.echo(f'Nothing to remove for {goal}')
 
 
-def _report_stopped(stopped: Sequence[Session], dry: Dry = Dry()) -> None:
+def _report_stopped(stopped: Sequence[AgentSession], dry: Dry = Dry()) -> None:
     verb = dry.verb('Stopped', 'Would stop')
     for session in stopped:
         typer.echo(f'{verb} {session.name} (pid {session.pid})')

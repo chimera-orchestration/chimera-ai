@@ -5,7 +5,7 @@ from pathlib import Path
 from testfixtures import Replacer, TempDir
 
 from chimera import __main__ as chimera_main
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.archive import Session as ArchivedSession
 from chimera.commands.agent import agents
 from chimera.commands.dashboard import render
@@ -43,7 +43,7 @@ class TestRender:
         assert _strip(text) != text  # …and it's not visible in the stripped form
 
     def test_mail_columns_align_for_single_and_multi_digit_counts(self) -> None:
-        live = Session('id', 'alpha@g@agent', 'busy', Path('/x'), 'working')
+        live = AgentSession('id', 'alpha@g@agent', 'busy', Path('/x'), 'working')
         wide = Row('alpha@g@agent', live, None, Mail(10, 0, 0))
         narrow_row = Row('alpha@h@agent', live, None, Mail(1, 0, 0))
         b = Board(
@@ -101,7 +101,7 @@ def test_dashboard_cli_renders_the_tree(
     worktree = workspace_with_env / 'alpha' / 'worktrees' / 'g@agent'
     replace.in_module(
         agents,
-        lambda: [Session('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug')],
+        lambda: [AgentSession('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug')],
         module=chimera_main,
     )
     command.run('dashboard').check(

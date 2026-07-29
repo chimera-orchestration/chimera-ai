@@ -7,7 +7,7 @@ import pytest
 from testfixtures import Replacer, TempDir, compare
 
 from chimera import __main__ as chimera_main
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.archive import Archive
 from chimera.archive import Session as ArchivedSession
 from chimera.commands.agent import agents
@@ -33,8 +33,8 @@ def _project(tmpdir: TempDir, ws: Path, name: str, *goals: str) -> Path:
 
 def _agent(
     cwd: Path, name: str, status: str = 'idle', summary: str | None = None, id: str = 'id'
-) -> Session:
-    return Session(id, name, status, cwd, summary)
+) -> AgentSession:
+    return AgentSession(id, name, status, cwd, summary)
 
 
 def _record(
@@ -269,9 +269,9 @@ def test_ls_cli_renders_the_tree(
     replace.in_module(
         agents,
         lambda: [
-            Session('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug'),
+            AgentSession('012a9550', 'alpha@g@agent', 'busy', worktree, 'fix the bug'),
             # a stale-marked corpse never lands on the dashboard — agent ls -v is its surface
-            Session('deadbeef', 'ghost', 'idle', worktree, None, stale='claimed pid 9 dead'),
+            AgentSession('deadbeef', 'ghost', 'idle', worktree, None, stale='claimed pid 9 dead'),
         ],
         module=chimera_main,
     )
@@ -298,10 +298,10 @@ def test_ls_cli_renders_loose_agents(
     replace.in_module(
         agents,
         lambda: [
-            Session(
+            AgentSession(
                 '012a9550', 'repo-sess', 'busy', workspace_with_env / 'alpha' / 'repo', 'building'
             ),
-            Session('39d68dfa', 'stray', 'idle', stray, None),
+            AgentSession('39d68dfa', 'stray', 'idle', stray, None),
         ],
         module=chimera_main,
     )

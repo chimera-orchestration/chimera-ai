@@ -4,7 +4,7 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.agent_env import ai_session
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.agents.registry import AGENTS, AgentSpec
 from chimera.archive import archive
 from chimera.config import NotInWorkspaceError, UserError
@@ -13,16 +13,16 @@ from chimera.dry import Dry
 from chimera.worktrees import SEP
 
 
-def agents() -> list[Session]:
+def agents() -> list[AgentSession]:
     """Every checked agent session across all harnesses, enriched for listing.
 
-    Stale entries ride along marked (``Session.stale``), never dropped, so a lister
+    Stale entries ride along marked (``AgentSession.stale``), never dropped, so a lister
     can surface them; a view wanting only the live decides through :func:`shown`.
     """
     return [session for harness in AGENTS.values() for session in harness.sessions()]
 
 
-def shown(listing: list[Session], verbose: bool) -> tuple[list[Session], int]:
+def shown(listing: list[AgentSession], verbose: bool) -> tuple[list[AgentSession], int]:
     """The rows a listing shows, and how many stale sessions it withheld.
 
     The default view keeps today's row set — live sessions only — counting the stale
@@ -35,7 +35,7 @@ def shown(listing: list[Session], verbose: bool) -> tuple[list[Session], int]:
     return rows, len(listing) - len(rows)
 
 
-def live(worktree: Path) -> list[Session]:
+def live(worktree: Path) -> list[AgentSession]:
     """Verified-live sessions in the worktree across every harness.
 
     The cleanup/refusal question is "is *any* agent live here", never "is a claude
@@ -45,7 +45,7 @@ def live(worktree: Path) -> list[Session]:
     return [session for harness in AGENTS.values() for session in harness.live(worktree)]
 
 
-def stop(worktree: Path, dry: Dry = Dry(), timeout: float = 10.0) -> list[Session]:
+def stop(worktree: Path, dry: Dry = Dry(), timeout: float = 10.0) -> list[AgentSession]:
     """Stop every live agent session in the worktree, through its own harness.
 
     The polite kill for work that's over — a session's committed work is already on its
@@ -191,7 +191,9 @@ def scope_line(scope: Scope) -> str:
     return f'scope: {target}'
 
 
-def scoped(listing: list[Session], scope: Scope, *, otherwise: Path | None) -> list[Session]:
+def scoped(
+    listing: list[AgentSession], scope: Scope, *, otherwise: Path | None
+) -> list[AgentSession]:
     """The sessions in scope: under the goal's worktrees, the project, else ``otherwise``.
 
     With no project pinned the fallback ``otherwise`` decides reach: ``None`` keeps every

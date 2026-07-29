@@ -7,7 +7,7 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.commands.agent import live
 from chimera.commands.goal.rename import RenameResult, rename
 from chimera.commands.worktree import rm as worktree_rm
@@ -269,7 +269,7 @@ class TestRefusals:
         worktrees = _goal(tmpdir, git_repo)
         replace.in_module(
             live,
-            lambda worktree: [Session('x', 'x', 'idle', worktree, None, pid=4242)],
+            lambda worktree: [AgentSession('x', 'x', 'idle', worktree, None, pid=4242)],
             module=worktree_rm,
         )
         with ShouldRaise(

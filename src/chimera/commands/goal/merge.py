@@ -5,7 +5,7 @@ from giterator import GitError
 from loguru import logger
 
 from chimera.agent_env import ai_session
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.commands.agent import live, stop
 from chimera.commands.worktree.rm import remove
 from chimera.config import UserError
@@ -37,7 +37,7 @@ class MergeResult:
     sha: str  # the landed tip (short) — base's own sha once the merge is real
     fastforwarded: bool  # False when base already contained the work
     landed: tuple[Checkout, ...] = ()  # plain checkouts moved off goal branches onto base
-    stopped: tuple[Session, ...] = ()  # agent sessions stopped before the sweep
+    stopped: tuple[AgentSession, ...] = ()  # agent sessions stopped before the sweep
     removed: tuple[Path, ...] = ()  # worktrees swept
 
 

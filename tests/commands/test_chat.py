@@ -1,5 +1,4 @@
 import os
-import subprocess
 from hashlib import sha256
 from collections.abc import Iterable
 from pathlib import Path
@@ -8,14 +7,22 @@ from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.addresses import Captain, Manager
 from chimera.agent_env import ROLE_CAPTAIN, ROLE_MANAGER
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.agents.claude import Claude
 from chimera.commands.chat import ChatAlreadyLiveError, GoalHasAgentError, chat, chat_target
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
 from chimera.dry import Dry
 from chimera.prime import prime
-from tests.cli import Command, action_logs, capture_env, context_sources, sources_lines
+from tests.cli import (
+    Command,
+    action_logs,
+    capture_env,
+    capture_launches,
+    launched,
+    context_sources,
+    sources_lines,
+)
 
 # the role's prime is the identity block of every chat launch context
 CAPTAIN_TEXT = f'# Role: captain\n\n{prime(ROLE_CAPTAIN, persona="pegasus", workspace="lycia")}'
@@ -26,19 +33,9 @@ def _project_obj(directory: Path) -> Project:
     return Project(directory, ProjectConfig(kind='project', repo=Path('/r')))
 
 
-def _stub(replace: Replacer, live: Iterable[Session] = ()) -> list[object]:
-    calls: list[object] = []
-    real_run = subprocess.run
-
-    def fake_run(cmd, *args, cwd=None, check=False, **kw):  # noqa: ANN001, ANN002, ANN003
-        # scope resolution legitimately shells out to git — only claude launches are ours
-        if cmd and cmd[0] == 'claude':
-            return calls.append((cmd, cwd, check))
-        return real_run(cmd, *args, cwd=cwd, check=check, **kw)
-
+def _stub(replace: Replacer, live: Iterable[AgentSession] = ()) -> list[object]:
     replace.on_class(Claude.live, lambda self, cwd=None: list(live))
-    replace.in_module(subprocess.run, fake_run)
-    return calls
+    return capture_launches(replace)
 
 
 class TestChatTarget:
@@ -76,19 +73,19 @@ class TestChat:
     def test_launches_alongside_live_sessions(self, tmpdir: TempDir, replace: Replacer) -> None:
         ws = tmpdir.makedir('lycia')
         # another session is live in the same cwd — chat launches anyway (not exclusive)
-        calls = _stub(replace, live=[Session('x', 'other', 'idle', ws, None)])
+        calls = _stub(replace, live=[AgentSession('x', 'other', 'idle', ws, None)])
         assert chat(ws, 'pegasus') is None  # no note: nothing to report
-        compare(calls, expected=[(['claude', '--name', 'pegasus'], ws, True)])
+        compare(calls, expected=[(['claude', '--name', 'pegasus'], ws)])
 
     def test_resume_revives_by_name(self, tmpdir: TempDir, replace: Replacer) -> None:
         ws = tmpdir.makedir('lycia')
         calls = _stub(replace)
         chat(ws, 'pegasus', resume=True)
-        compare(calls, expected=[(['claude', '--resume', 'pegasus'], ws, True)])
+        compare(calls, expected=[(['claude', '--resume', 'pegasus'], ws)])
 
     def test_refuses_when_the_chat_itself_is_live(self, tmpdir: TempDir, replace: Replacer) -> None:
         ws = tmpdir.makedir('lycia')
-        calls = _stub(replace, live=[Session('x', 'pegasus', 'idle', ws, None)])
+        calls = _stub(replace, live=[AgentSession('x', 'pegasus', 'idle', ws, None)])
         with ShouldRaise(ChatAlreadyLiveError('pegasus')):
             chat(ws, 'pegasus')
         with ShouldRaise(ChatAlreadyLiveError('pegasus')):  # resume can't attach either
@@ -99,7 +96,7 @@ class TestChat:
         self, tmpdir: TempDir, replace: Replacer
     ) -> None:
         ws = tmpdir.makedir('lycia')
-        calls = _stub(replace, live=[Session('x', 'pegasus', 'idle', ws, None)])
+        calls = _stub(replace, live=[AgentSession('x', 'pegasus', 'idle', ws, None)])
         note = "note: chat 'pegasus' is already live — a real launch would refuse"
         compare(chat(ws, 'pegasus', dry=Dry(True)), expected=note)
         compare(chat(ws, 'pegasus', resume=True, dry=Dry(True)), expected=note)
@@ -133,7 +130,7 @@ class TestChat:
             str(ws / 'ctx.md'),
             'plan the week',
         ]
-        compare(calls, expected=[(expected, ws, True)])
+        compare(calls, expected=[(expected, ws)])
 
 
 def _workspace(tmpdir: TempDir, replace: Replacer, config: dict[str, object]) -> Path:
@@ -159,6 +156,15 @@ def test_chat_cli_launches_the_captain(
     compare(context.read_text(), expected=text)
     sources = context_sources(ws, 'captain')
     sources[str(ws / 'roles' / 'captain' / '*.md')] = [str(directive)]
+    claude_cmd = [
+        'claude',
+        '--name',
+        '@@captain',
+        '--model',
+        'opus',
+        '--append-system-prompt-file',
+        str(context),
+    ]
     run.check(
         output=f'Launched chat @@captain in {ws}',
         logging=[
@@ -186,19 +192,11 @@ def test_chat_cli_launches_the_captain(
                 'sources': sources,
                 'message': 'context: rendered',
             },
+            launched(claude_cmd, ws),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],
     )
-    claude_cmd = [
-        'claude',
-        '--name',
-        '@@captain',
-        '--model',
-        'opus',
-        '--append-system-prompt-file',
-        str(context),
-    ]
-    compare(calls, expected=[(claude_cmd, ws, True)])
+    compare(calls, expected=[(claude_cmd, ws)])
 
 
 def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -212,6 +210,7 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
     # role directives lead every chimera-launched session's context — the manager's too
     digest = sha256(MANAGER_TEXT.encode()).hexdigest()
     context = ws / 'state' / 'context' / f'proj@@manager-{digest[:8]}.md'
+    claude_cmd = ['claude', '--name', 'proj@@manager', '--append-system-prompt-file', str(context)]
     command.run('chat').check(
         output=f'Launched chat proj@@manager in {project}',
         logging=[
@@ -239,12 +238,12 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
                 'sources': context_sources(ws, 'manager', pinned=project),
                 'message': 'context: rendered',
             },
+            launched(claude_cmd, project),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],
     )
     compare(context.read_text(), expected=MANAGER_TEXT)
-    claude_cmd = ['claude', '--name', 'proj@@manager', '--append-system-prompt-file', str(context)]
-    compare(calls, expected=[(claude_cmd, project, True)])
+    compare(calls, expected=[(claude_cmd, project)])
 
 
 def test_chat_cli_manager_layers_project_role_directives(
@@ -297,6 +296,10 @@ def test_chat_cli_manager_layers_project_role_directives(
                 'sources': sources,
                 'message': 'context: rendered',
             },
+            launched(
+                ['claude', '--name', 'proj@@manager', '--append-system-prompt-file', str(context)],
+                Path.cwd(),
+            ),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],
     )
@@ -377,6 +380,7 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'state' / 'context' / f'@@captain-{digest[:8]}.md'
     compare(context.read_text(), expected=text)
+    claude_cmd = ['claude', '--resume', '@@captain', '--append-system-prompt-file', str(context)]
     run.check(
         output=f'Resumed chat @@captain in {ws}',
         logging=[
@@ -404,11 +408,11 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
                 'sources': context_sources(ws, 'captain'),
                 'message': 'context: rendered',
             },
+            launched(claude_cmd, ws),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],
     )
-    claude_cmd = ['claude', '--resume', '@@captain', '--append-system-prompt-file', str(context)]
-    compare(calls, expected=[(claude_cmd, ws, True)])
+    compare(calls, expected=[(claude_cmd, ws)])
 
 
 def test_chat_cli_dry_previews_without_launching(
@@ -467,7 +471,7 @@ def test_chat_cli_dry_previews_beside_the_live_chat(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
     ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
-    calls = _stub(replace, live=[Session('x', str(Captain()), 'idle', ws, None)])
+    calls = _stub(replace, live=[AgentSession('x', str(Captain()), 'idle', ws, None)])
     text = CAPTAIN_TEXT
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'state' / 'context' / f'@@captain-{digest[:8]}.md'

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from chimera.agent_env import ai_session
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.commands.agent import live, stop
 from chimera.config import UserError
 from chimera.dry import Dry
@@ -26,7 +26,7 @@ class RemoveResult:
     """What the sweep did: sessions stopped first (``force`` only), then worktrees removed."""
 
     removed: tuple[Path, ...] = ()  # worktrees swept
-    stopped: tuple[Session, ...] = ()  # live sessions stopped before the sweep (force only)
+    stopped: tuple[AgentSession, ...] = ()  # live sessions stopped before the sweep (force only)
 
 
 def remove(
@@ -64,7 +64,7 @@ def remove(
         for actor in sorted(goal_actors(git, worktrees_root, goal))
     }
     present = [wt for wt in worktrees.values() if wt.resolve() in registered]
-    stopped: tuple[Session, ...] = ()
+    stopped: tuple[AgentSession, ...] = ()
     if force:
         stopped = tuple(session for worktree in present for session in stop(worktree, dry))
     else:
@@ -123,11 +123,11 @@ def refuse_if_agents_running(worktrees: Iterable[Path]) -> None:
         raise UserError('\n'.join(problems) + '\nfind its terminal or kill the pid, then re-run')
 
 
-def _describe(session: Session) -> str:
+def _describe(session: AgentSession) -> str:
     fields = [f'pid {session.pid if session.pid is not None else "?"}']
     if session.kind:
         fields.append(session.kind)
-    if session.status != '?':  # '?' is Session's absent-status fallback, not information
+    if session.status != '?':  # '?' is AgentSession's absent-status fallback, not information
         fields.append(session.status)
     if session.started is not None:
         fields.append(f'since {session.started:%a %H:%M}')

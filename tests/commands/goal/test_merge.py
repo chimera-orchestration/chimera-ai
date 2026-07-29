@@ -8,7 +8,7 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.agents.claude import Claude
 from chimera.commands.agent import live, stop
 from chimera.commands.goal import merge as merge_mod
@@ -307,7 +307,7 @@ def test_refuses_work_written_while_the_agents_stopped(
     agent_worktree = worktrees / 'g@agent'
     Repo(agent_worktree).commit_content('work')
 
-    def dirty_stop(worktree: Path, dry: Dry = Dry()) -> list[Session]:
+    def dirty_stop(worktree: Path, dry: Dry = Dry()) -> list[AgentSession]:
         (worktree / 'death-rattle.txt').write_text('written between the check and the SIGTERM')
         return []
 
@@ -330,7 +330,7 @@ def test_refuses_a_pidless_session_before_anything_moves(
     worktrees = _goal(tmpdir, git_repo.path)
     agent_worktree = worktrees / 'g@agent'
     Repo(agent_worktree).commit_content('work')
-    session = Session('x', 'p@g@agent', 'idle', agent_worktree, None)  # no pid to signal
+    session = AgentSession('x', 'p@g@agent', 'idle', agent_worktree, None)  # no pid to signal
     replace.in_module(live, lambda worktree: [session], module=merge_mod)
     main_before = _full(git_repo.path, 'main')
     with ShouldRaise(
@@ -365,7 +365,7 @@ def test_dry_previews_the_whole_landing(tmpdir: TempDir, git_repo: Repo, replace
     worktrees = _goal(tmpdir, git_repo.path)
     agent_worktree = worktrees / 'g@agent'
     Repo(agent_worktree).commit_content('work')
-    session = Session('x', 'p@g@agent', 'idle', agent_worktree, None, pid=4242)
+    session = AgentSession('x', 'p@g@agent', 'idle', agent_worktree, None, pid=4242)
     replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     main_before = _full(git_repo.path, 'main')
     tip = _short(git_repo.path, 'g/agent')
@@ -388,10 +388,15 @@ def test_stops_the_live_agent_before_the_sweep(
     agent_worktree = worktrees / 'g@agent'
     Repo(agent_worktree).commit_content('work')
     out = subprocess.run(  # not our child, so no zombie confuses the exit polling
-        ['bash', '-c', 'sleep 60 & echo $!'], capture_output=True, text=True, check=True
+        # the sleep's stdout must be redirected, or capture_output's pipe stays open
+        # until it exits and this blocks for the full 60s, returning a dead pid
+        ['bash', '-c', 'sleep 60 >/dev/null 2>&1 & echo $!'],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     pid = int(out.stdout)
-    session = Session('x', 'p@g@agent', 'idle', agent_worktree, None, pid=pid)
+    session = AgentSession('x', 'p@g@agent', 'idle', agent_worktree, None, pid=pid)
     replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     try:
         result = merge(git_repo.path, worktrees, 'g')
@@ -536,7 +541,7 @@ def test_goal_merge_cli_dry_previews(
     worktrees = Path.cwd() / 'worktrees'  # the CLI resolves paths from cwd
     agent_worktree = worktrees / 'g@agent'
     Repo(agent_worktree).commit_content('work')
-    session = Session('x', 'myproject@g@agent', 'idle', agent_worktree, None, pid=4242)
+    session = AgentSession('x', 'myproject@g@agent', 'idle', agent_worktree, None, pid=4242)
     replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     tip_short = _short(git_repo.path, 'g/agent')
     old_main = _full(git_repo.path, 'main')

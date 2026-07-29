@@ -13,10 +13,12 @@ the *annotation*: a bare ``command: testfixtures.Command`` resolves to the stock
 makes the dict-typed ``check`` the one ty sees — with no per-test annotation churn.
 """
 
+import os
 import re
+import subprocess
 from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from testfixtures import Command as _Command
 from testfixtures import LogCapture, Replacer
@@ -30,6 +32,7 @@ from typer.core import TyperGroup
 
 from chimera.agents.claude import Claude
 from chimera.logging import configure
+from chimera.processes import process_create_time
 
 # ch dashboard forces color (color=True) so it survives watch's non-tty pipe; strip it
 # before comparing captured output, same as TestRender's own _strip in test_dashboard.py.
@@ -59,12 +62,20 @@ def _general_entry(record: 'Record') -> dict[str, object]:
 
 
 def action_logs(
-    command: str, function: str, params: dict[str, object], *, error: str | None = None
+    command: str,
+    function: str,
+    params: dict[str, object],
+    *,
+    error: str | None = None,
+    middle: Sequence[dict[str, object]] = (),
 ) -> list[dict[str, object]]:
     """The start/end log pair a CLI action emits, as the general capture reduces it — for
     smoke assertions. Pass ``error`` for a UserError end line (ERROR + message); a crash's
     error/traceback ride the exception, not extra, so they don't appear here. A goal in
-    ``params`` rides both frames, as ``LoggingCommand`` contextualizes it."""
+    ``params`` rides both frames, as ``LoggingCommand`` contextualizes it. ``middle`` is
+    whatever the action logged between its frames (a launch, a ref mutation) — the goal
+    rides those too, contextualized over the whole invoke, so it's merged in here rather
+    than repeated at each call site."""
     goal = {'goal': params['goal']} if params.get('goal') else {}
     end: dict[str, object] = {'level': 'INFO', 'command': command, 'phase': 'end', **goal}
     if error is not None:
@@ -79,6 +90,7 @@ def action_logs(
             'params': params,
             **goal,
         },
+        *({**entry, **goal} for entry in middle),
         end,
     ]
 
@@ -117,6 +129,53 @@ def leaves(command: ClickCommand, path: str = '') -> Iterator[tuple[str, ClickCo
             yield from leaves(sub, f'{path}{name} ')
     else:
         yield path.strip(), command
+
+
+def capture_launches(replace: Replacer) -> list[object]:
+    """Record every ``claude`` launch as ``(argv, cwd)``, letting other commands run.
+
+    Launches go through :class:`subprocess.Popen` (see ``Claude._launch``), which git
+    also uses, so only argv starting ``claude`` is intercepted — anything else runs for
+    real. The stand-in answers the two things a launch asks of the process: a pid (our
+    own, so its creation time reads back) and a zero exit.
+    """
+    calls: list[object] = []
+    real_popen = subprocess.Popen
+
+    def fake_popen(cmd: Any, *args: Any, cwd: Any = None, **kw: Any) -> Any:
+        if cmd and cmd[0] == 'claude':
+            calls.append((list(cmd), cwd))
+            return _LaunchedProcess()
+        return real_popen(cmd, *args, cwd=cwd, **kw)
+
+    replace.in_module(subprocess.Popen, fake_popen)
+    return calls
+
+
+class _LaunchedProcess:
+    """The minimal process :func:`capture_launches` hands back: a pid and a clean exit."""
+
+    def __init__(self) -> None:
+        self.pid = os.getpid()
+
+    def wait(self) -> int:
+        return 0
+
+
+def launched(argv: Sequence[str], cwd: Path) -> dict[str, object]:
+    """The ``agent: launched`` line a launch lands, as the captures reduce it.
+
+    Deterministic because :func:`capture_launches` reports our own process, so the pid
+    and its creation time are ours to compute — the same pair a real launch records of
+    the harness process it spawned."""
+    return {
+        'level': 'INFO',
+        'message': 'agent: launched',
+        'pid': os.getpid(),
+        'create_time': process_create_time(os.getpid()),
+        'cwd': str(cwd),
+        'argv': list(argv),
+    }
 
 
 def capture_env(replace: Replacer) -> list[object]:

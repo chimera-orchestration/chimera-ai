@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import typer
 
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.archive import Session as ArchivedSession
 from chimera.commands.ls import Board, Mail, Row
 
@@ -37,7 +37,7 @@ def _truncate(text: str) -> str:
     return text if len(text) <= DETAIL_MAX else text[: DETAIL_MAX - 1] + '…'
 
 
-def _live_line(indent: int, name: str, a: Session) -> _Line:
+def _live_line(indent: int, name: str, a: AgentSession) -> _Line:
     status = 'stale' if a.stale is not None else a.status
     detail = a.stale if a.stale is not None else a.detail
     return _Line(indent, name, status, _LIVE_COLOR.get(status), _truncate(detail), None)

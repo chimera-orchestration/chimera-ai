@@ -12,8 +12,9 @@ from pathlib import Path
 
 from loguru import logger
 
-from chimera.agents import Agent, Session
+from chimera.agents import Agent, AgentSession
 from chimera.config import UserError
+from chimera.processes import process_create_time
 
 # claude only makes bypass-permissions mode reachable via shift-tab when launched with this;
 # availability is fixed at launch, so it must ride on the very command that starts the session.
@@ -170,7 +171,7 @@ class Claude(Agent):
         ).info('errand: run')
         return text
 
-    def sessions(self) -> list[Session]:
+    def sessions(self) -> list[AgentSession]:
         """Every checked claude session, enriched with a one-line summary.
 
         Checked, not merely live: stale entries ride along marked, never dropped.
@@ -179,7 +180,7 @@ class Claude(Agent):
         """
         return [self._enriched(session) for session in self.checked()]
 
-    def reported(self, cwd: Path | None = None) -> list[Session]:
+    def reported(self, cwd: Path | None = None) -> list[AgentSession]:
         """What claude's own registry (``claude agents --json``) claims is live.
 
         One piece of claude-registry knowledge applies here rather than in the shared
@@ -203,7 +204,7 @@ class Claude(Agent):
         except FileNotFoundError:
             _warn_missing_binary()
             return []
-        claims: list[Session] = []
+        claims: list[AgentSession] = []
         for raw in json.loads(result.stdout):
             session = _parse(raw)
             if session.pid is None:
@@ -212,7 +213,7 @@ class Claude(Agent):
             claims.append(session)
         return claims
 
-    def stop(self, session: Session, timeout: float = 10.0) -> None:
+    def stop(self, session: AgentSession, timeout: float = 10.0) -> None:
         """Stop ``session`` for good.
 
         A background (``--bg``) session runs under claude's own supervisor, which
@@ -224,7 +225,7 @@ class Claude(Agent):
         under a new pid within ~5s, while ``claude stop <id>`` cleanly kills both the
         worker and its supervisor and marks the job ``stopped`` (resumable later via
         ``claude attach``). So a background session is stopped through claude's own
-        ``stop`` subcommand — keyed by :attr:`Session.short`, the job id ``claude
+        ``stop`` subcommand — keyed by :attr:`AgentSession.short`, the job id ``claude
         stop`` expects (the full ``sessionId`` UUID is *not* accepted). An interactive
         session has no such supervisor and stops cleanly on a plain SIGTERM, so it
         keeps the base behaviour.
@@ -240,7 +241,7 @@ class Claude(Agent):
             )
         logger.bind(session=session.name, id=session.short).info('agent stop')
 
-    def _enriched(self, session: Session) -> Session:
+    def _enriched(self, session: AgentSession) -> AgentSession:
         if session.cwd == Path('.'):  # registry entry had no cwd — no transcript folder to read
             return session
         summary = session_summary(str(session.cwd), session.name, self.projects)
@@ -254,15 +255,31 @@ class Claude(Agent):
         ``env`` is overlaid on the parent environment, the overlay winning — a captain
         session launching ``ch goal start`` carries ``CHIMERA_ROLE=captain`` itself, and
         the child must get ``agent``.
+
+        Spawned through :class:`~subprocess.Popen` rather than ``subprocess.run`` so
+        the launch is on record *while the session runs*, not once it exits: a
+        foreground session blocks here for as long as the human keeps talking to it,
+        which is exactly the window someone debugging it needs the ``agent: launched``
+        line for. Stdio is inherited either way, and the wait-and-check that follows
+        reproduces ``run(check=True)`` exactly.
         """
         if not cwd.is_dir():
             raise FileNotFoundError(cwd)
         if exclusive and (running := self.live(cwd)):
             ids = ', '.join(f'{s.id} ({s.status})' for s in running)
             raise RuntimeError(f'an agent is already live in {cwd}: {ids} — attach or stop it')
-        return subprocess.run(
-            ['claude', *args], cwd=cwd, check=True, env={**os.environ, **env} if env else None
-        )
+        argv = ['claude', *args]
+        process = subprocess.Popen(argv, cwd=cwd, env={**os.environ, **env} if env else None)
+        logger.bind(
+            pid=process.pid,
+            create_time=process_create_time(process.pid),
+            cwd=str(cwd),
+            argv=argv,
+        ).info('agent: launched')
+        returncode = process.wait()
+        if returncode:
+            raise subprocess.CalledProcessError(returncode, argv)
+        return subprocess.CompletedProcess(argv, returncode)
 
 
 @cache
@@ -284,14 +301,14 @@ def _tail(stderr: str | None, limit: int = 4000) -> str:
     return (stderr or '').strip()[-limit:]
 
 
-def _parse(raw: dict[str, object]) -> Session:
-    """A registry record as a :class:`Session` (summary left for listing enrichment)."""
+def _parse(raw: dict[str, object]) -> AgentSession:
+    """A registry record as a :class:`AgentSession` (summary left for listing enrichment)."""
     # Prefer the full sessionId (the transcript-filename UUID) over `id`, claude's
     # short handle — the short form is that UUID's own leading block anyway.
     id = str(raw.get('sessionId') or raw.get('id') or '?')
     name = str(raw.get('name') or id)
     started = raw.get('startedAt')
-    return Session(
+    return AgentSession(
         id=id,
         name=name,
         status=str(raw.get('status') or raw.get('state') or '?'),

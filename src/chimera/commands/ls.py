@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from chimera.addresses import Actor, Captain, Manager
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.archive import Archive
 from chimera.archive import Session as ArchivedSession
 from chimera.commands.agent import in_goal, scoped, under
@@ -37,7 +37,7 @@ class Row:
     """
 
     address: str
-    live: Session | None
+    live: AgentSession | None
     last: ArchivedSession | None
     mail: Mail
 
@@ -57,7 +57,7 @@ class ProjectBoard:
     name: str
     manager: Row
     goals: list[GoalBoard]
-    loose: list[Session]
+    loose: list[AgentSession]
 
 
 @dataclass(frozen=True)
@@ -72,7 +72,7 @@ class Board:
     workspace: str
     captain: Row
     projects: list[ProjectBoard]
-    loose: list[Session]
+    loose: list[AgentSession]
     history: list[Row]
     history_withheld: int
 
@@ -87,7 +87,7 @@ def _mail_map(mail: Comms) -> dict[str, Mail]:
 
 def _named_row(
     address: str,
-    universe: list[Session],
+    universe: list[AgentSession],
     archive: Archive,
     mail_map: dict[str, Mail],
     *,
@@ -108,7 +108,7 @@ def _actor_row(
     project: str,
     goal: str,
     actor: str,
-    live_in_goal: list[Session],
+    live_in_goal: list[AgentSession],
     worktrees: Path,
     archive: Archive,
     mail_map: dict[str, Mail],
@@ -123,7 +123,7 @@ def _actor_row(
     return Row(address, live, last, mail_map.get(address, _NO_MAIL))
 
 
-def board(scope: Scope, listing: list[Session], archive: Archive, mail: Comms) -> Board:
+def board(scope: Scope, listing: list[AgentSession], archive: Archive, mail: Comms) -> Board:
     """Partition in-scope sessions into captain → projects → manager/goals, surfacing strays
     as ``loose`` and archive-only history as ``history``.
 
@@ -151,7 +151,7 @@ def board(scope: Scope, listing: list[Session], archive: Archive, mail: Comms) -
 
     projects = [scope.project] if scope.project is not None else iter_projects(scope.workspace)
     boards: list[ProjectBoard] = []
-    placed: set[Session] = set()
+    placed: set[AgentSession] = set()
     for p in projects:
         manager = _named_row(
             str(Manager(project=p.name)), universe, archive, mail_map, project=p.name
@@ -162,7 +162,7 @@ def board(scope: Scope, listing: list[Session], archive: Archive, mail: Comms) -
         if scope.goal is not None:
             names = [g for g in names if g == scope.goal]
         goal_boards: list[GoalBoard] = []
-        in_goal_sessions: set[Session] = set()
+        in_goal_sessions: set[AgentSession] = set()
         for g in names:
             live_in_goal = [a for a in universe if in_goal(a.cwd, p.worktrees, g)]
             in_goal_sessions.update(live_in_goal)

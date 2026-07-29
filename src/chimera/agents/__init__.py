@@ -22,17 +22,26 @@ from typing import ClassVar, Protocol
 from loguru import logger
 
 from chimera.config import UserError
+from chimera.processes import process_create_time, same_process
 
 
 @dataclass(frozen=True)
-class Session:
+class AgentSession:
     """A live agent session: its native id, name, status, working directory and summary.
+
+    The *registry* view of a session — what a harness claims is running right now —
+    as opposed to :class:`chimera.archive.Session`, the durable record of one. The
+    two are deliberately separate types: this one is rebuilt from scratch on every
+    liveness check and holds only what a harness will vouch for.
 
     ``id`` is the fullest form the harness reports (claude's full session UUID when
     present) — session identity must stay ``(platform, native_id)``-shaped for the
     archive, and a short handle isn't safe to recover from. Display uses :attr:`short`.
     ``pid``/``kind``/``started`` ride along when the harness reports them (a
     server-backed harness may have no pid to claim); ``summary`` is listing enrichment.
+    ``create_time`` is the pid's other half (see :func:`~chimera.processes.
+    process_create_time`): filled in by :meth:`Agent.checked`, and — when a caller
+    supplies one it captured earlier — the thing that catches a reused pid.
     ``stale`` is ``None`` while there is no reason to doubt the session is live;
     otherwise it names why the entry is a corpse (a registry remnant, a dead pid) —
     marked rather than hidden, so staleness can be surfaced, not just logged.
@@ -46,6 +55,7 @@ class Session:
     pid: int | None = None
     kind: str | None = None
     started: datetime | None = None
+    create_time: float | None = None
     stale: str | None = None
 
     @property
@@ -180,26 +190,26 @@ class Agent(ABC):
         ...
 
     @abstractmethod
-    def sessions(self) -> list[Session]:
+    def sessions(self) -> list[AgentSession]:
         """Every :meth:`checked` session this harness reports, enriched for listing.
 
-        Checked, not merely live: stale entries ride along marked (``Session.stale``),
+        Checked, not merely live: stale entries ride along marked (``AgentSession.stale``),
         never dropped, so the listing surface decides whether to show them.
         """
         ...
 
     @abstractmethod
-    def reported(self, cwd: Path | None = None) -> list[Session]:
+    def reported(self, cwd: Path | None = None) -> list[AgentSession]:
         """Every session the harness's *registry* claims is live in ``cwd`` (``None`` = anywhere).
 
         Claims, not facts — registries lie (see :meth:`live`). An adapter parses its
-        native records into :class:`Session`, marking (never dropping) the corpses only
+        native records into :class:`AgentSession`, marking (never dropping) the corpses only
         it can recognise (e.g. claude's degraded pid-less remnants — see
         ``Claude.reported``) with a ``stale`` reason.
         """
         ...
 
-    def checked(self, cwd: Path | None = None) -> list[Session]:
+    def checked(self, cwd: Path | None = None) -> list[AgentSession]:
         """:meth:`reported` with the generic distrust applied: every claim, corpses marked.
 
         The verification is generic — a *claimed* pid must name a running process —
@@ -210,11 +220,11 @@ class Agent(ABC):
         """
         return [_distrusted(session) for session in self.reported(cwd)]
 
-    def live(self, cwd: Path | None = None) -> list[Session]:
+    def live(self, cwd: Path | None = None) -> list[AgentSession]:
         """The sessions actually live in ``cwd``: :meth:`checked`, minus the stale."""
         return [session for session in self.checked(cwd) if session.stale is None]
 
-    def stop(self, session: Session, timeout: float = 10.0) -> None:
+    def stop(self, session: AgentSession, timeout: float = 10.0) -> None:
         """Stop ``session`` for good: SIGTERM its pid, then wait for it to exit.
 
         The harness-agnostic default — a plain process dies cleanly on SIGTERM, with
@@ -223,9 +233,20 @@ class Agent(ABC):
         treat a bare SIGTERM as a crash and respawn the session under it). SIGKILL is
         never sent — a session that won't die is the caller's to inspect. The caller
         has already established ``session.pid`` is not ``None``.
+
+        The pid is **re-verified against ``create_time`` immediately before the
+        signal**: however fresh the caller's liveness check was, the session may have
+        exited since and the kernel handed its pid to something else. Signalling is
+        the one place where acting on a stale answer is unrecoverable, so a session
+        whose pair no longer matches is refused rather than killed.
         """
         assert session.pid is not None
         pid = session.pid
+        if not same_process(session.create_time, process_create_time(pid)):
+            raise UserError(
+                f'{session.name} (pid {pid}) is no longer the process it named — '
+                f'the pid has been reused; re-check what is live, then re-run'
+            )
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
@@ -253,13 +274,21 @@ class Agent(ABC):
         )
 
 
-def _distrusted(session: Session) -> Session:
-    """The session, marked stale if its claimed pid names no running process.
+def _distrusted(session: AgentSession) -> AgentSession:
+    """The session, marked stale unless its claimed pid still names the same process.
 
-    ``os.kill(pid, 0)`` sends no signal, only probes. A dead pid marks the entry stale
-    (logged, with the session, for anyone debugging a liveness check that looked
-    wrong); a pid owned by another user still proves the process exists. An entry the
-    adapter already marked stale is passed through unprobed.
+    Two questions, in order. **Does the pid exist?** ``os.kill(pid, 0)`` sends no
+    signal, only probes; a dead pid marks the entry stale (logged, with the session,
+    for anyone debugging a liveness check that looked wrong), while a pid owned by
+    another user still proves the process exists. **Is it the same process?** A pid is
+    a slot the kernel reuses, so a session carrying a creation time captured earlier
+    is only live while that pair still matches (:func:`~chimera.processes.
+    same_process`); a mismatch is a reused pid wearing a live session's name, which is
+    what would otherwise get an innocent process SIGTERMed.
+
+    Sessions arriving without a creation time — every registry claim today — are
+    given the one read here, so whoever captures them can pair-match later. An entry
+    the adapter already marked stale is passed through unprobed.
     """
     if session.stale is not None or session.pid is None:
         return session
@@ -270,4 +299,10 @@ def _distrusted(session: Session) -> Session:
         return replace(session, stale=f'claimed pid {session.pid} is not running')
     except PermissionError:
         logger.bind(session=str(session)).info('agent: session pid owned by another user')
-    return session
+    current = process_create_time(session.pid)
+    if not same_process(session.create_time, current):
+        logger.bind(session=str(session), create_time=current).warning(
+            'agent: session pid was reused by another process, treating as stale'
+        )
+        return replace(session, stale=f'claimed pid {session.pid} was reused by another process')
+    return replace(session, create_time=current if current is not None else session.create_time)

@@ -10,7 +10,7 @@ from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.agent_env import ai_session
-from chimera.agents import Session
+from chimera.agents import AgentSession
 from chimera.agents.claude import Claude
 from chimera.commands.worktree import rm as worktree_rm
 from chimera.commands.worktree.add import add
@@ -50,7 +50,7 @@ def test_remove_aborts_when_an_agent_is_running(
     replace.on_class(
         Claude.live,
         lambda self, cwd=None: [
-            Session(
+            AgentSession(
                 id='x',
                 name='sybil@g@agent',
                 status='idle',
@@ -82,10 +82,15 @@ def test_remove_force_stops_the_live_agent(
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
     out = subprocess.run(  # not our child, so no zombie confuses the exit polling
-        ['bash', '-c', 'sleep 60 & echo $!'], capture_output=True, text=True, check=True
+        # the sleep's stdout must be redirected, or capture_output's pipe stays open
+        # until it exits and this blocks for the full 60s, returning a dead pid
+        ['bash', '-c', 'sleep 60 >/dev/null 2>&1 & echo $!'],
+        capture_output=True,
+        text=True,
+        check=True,
     )
     pid = int(out.stdout)
-    session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None, pid=pid)
+    session = AgentSession('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None, pid=pid)
     replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     try:
         result = remove(git_repo.path, worktrees, 'g', force=True)
@@ -105,7 +110,9 @@ def test_remove_force_refuses_a_session_it_cannot_stop(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
-    session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None)  # no pid to signal
+    session = AgentSession(
+        'x', 'p@g@agent', 'idle', worktrees / 'g@agent', None
+    )  # no pid to signal
     replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     with ShouldRaise(
         UserError('p@g@agent reports no pid — stop it from its own harness, then re-run')
@@ -119,7 +126,7 @@ def test_remove_dry_force_previews_the_stop(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
-    session = Session('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None, pid=4242)
+    session = AgentSession('x', 'p@g@agent', 'idle', worktrees / 'g@agent', None, pid=4242)
     replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     compare(
         remove(git_repo.path, worktrees, 'g', force=True, dry=Dry(on=True)),
@@ -251,7 +258,7 @@ def test_remove_aborts_on_an_agent_live_in_a_stray_worktree(
     scout = worktrees / 'g@scout'
     replace.on_class(
         Claude.live,
-        lambda self, cwd=None: [Session('x', 'x', '?', scout, None)] if cwd == scout else [],
+        lambda self, cwd=None: [AgentSession('x', 'x', '?', scout, None)] if cwd == scout else [],
         name='live',
     )
     with ShouldRaise(
@@ -273,7 +280,7 @@ def test_remove_reports_every_problem_in_one_refusal(
     (agent_worktree / 'scratch.txt').write_text('wip')  # uncommitted
     replace.on_class(
         Claude.live,
-        lambda self, cwd=None: [Session('x', 'x', '?', agent_worktree, None, pid=4242)],
+        lambda self, cwd=None: [AgentSession('x', 'x', '?', agent_worktree, None, pid=4242)],
         name='live',
     )
     with ShouldRaise(
@@ -459,7 +466,7 @@ def test_worktree_rm_cli_force_dry_previews_the_stop(
     project = _project(tmpdir, git_repo)
     command.run('worktree', 'add', '--goal', 'g')
     worktree = (project / 'worktrees' / 'g@agent').resolve()
-    session = Session('x', 'p@g@agent', 'idle', worktree, None, pid=4242)
+    session = AgentSession('x', 'p@g@agent', 'idle', worktree, None, pid=4242)
     replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
     command.run('worktree', 'rm', 'g', '--force', '--dry').check(
         output=f'Would stop p@g@agent (pid 4242)\nWould remove {worktree}',

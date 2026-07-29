@@ -9,8 +9,9 @@ import pytest
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.popen import MockPopen
 
+from chimera import agents
 from chimera.agent_env import ROLE_CAPTAIN, role_env
-from chimera.agents import Agent, Session
+from chimera.agents import Agent, AgentSession
 from chimera.agents.claude import (
     READONLY_TOOLS,
     Claude,
@@ -20,6 +21,7 @@ from chimera.agents.claude import (
     session_summary,
 )
 from chimera.config import UserError
+from chimera.processes import process_create_time
 
 
 def _registry(replace: Replacer, payload: str) -> MockPopen:
@@ -35,7 +37,9 @@ def test_reported_queries_claude_by_cwd(tmpdir: TempDir, replace: Replacer) -> N
     Popen = _registry(replace, '[{"sessionId": "x", "status": "idle", "pid": 4242}]')
     compare(
         Claude().reported(worktree),
-        expected=[Session(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=4242)],
+        expected=[
+            AgentSession(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=4242)
+        ],
     )
     compare(
         Popen.all_calls[0].args[0],
@@ -47,7 +51,9 @@ def test_reported_unscoped_queries_everywhere(replace: Replacer) -> None:
     Popen = _registry(replace, '[{"sessionId": "x", "status": "idle", "pid": 4242}]')
     compare(
         Claude().reported(),
-        expected=[Session(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=4242)],
+        expected=[
+            AgentSession(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=4242)
+        ],
     )
     # no --cwd → every project
     compare(Popen.all_calls[0].args[0], expected=['claude', 'agents', '--json'])
@@ -64,7 +70,7 @@ def test_reported_parses_the_full_registry_record(replace: Replacer) -> None:
     compare(
         Claude().reported(),
         expected=[
-            Session(
+            AgentSession(
                 # the full sessionId (the transcript UUID) beats claude's short handle
                 id=full,
                 name='proj@g@agent',
@@ -86,7 +92,7 @@ def test_reported_tolerates_missing_fields(replace: Replacer) -> None:
     compare(
         Claude().reported(),
         expected=[
-            Session(
+            AgentSession(
                 id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None, pid=4242
             )
         ],
@@ -100,7 +106,7 @@ def test_reported_marks_the_degraded_pidless_remnant_stale(replace: Replacer) ->
     compare(
         Claude().reported(),
         expected=[
-            Session(
+            AgentSession(
                 id='?',
                 name='x',
                 status='?',
@@ -188,7 +194,7 @@ def test_live_filters_out_an_entry_whose_pid_has_died(tmpdir: TempDir, replace: 
     compare(  # checked() keeps the corpse, marked, for surfacing
         Claude().checked(worktree),
         expected=[
-            Session(
+            AgentSession(
                 id='x',
                 name='x',
                 status='idle',
@@ -207,9 +213,14 @@ def test_live_keeps_an_entry_whose_pid_belongs_to_another_user(
     worktree = tmpdir.makedir('wt')
     _registry(replace, '[{"sessionId": "x", "status": "idle", "pid": 1}]')
     replace.in_module(os.kill, _foreign, module=os)
+    # a foreign process is opaque both ways: signalling it is denied and its creation
+    # time is unreadable, so there is no pair to check and the claim stands
+    replace.in_module(process_create_time, lambda pid: None, module=agents)
     compare(
         Claude().live(worktree),
-        expected=[Session(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=1)],
+        expected=[
+            AgentSession(id='x', name='x', status='idle', cwd=Path('.'), summary=None, pid=1)
+        ],
     )
 
 
@@ -250,6 +261,31 @@ def test_launch_without_overlay_inherits_the_environment(
     Popen = _launched(replace)
     Claude().resume(tmpdir.makedir('wt'), 'n', exclusive=False)
     assert Popen.all_calls[0].kwargs['env'] is None  # inherits the parent environment wholesale
+
+
+def test_launch_is_on_record_before_the_session_ends(
+    tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+) -> None:
+    # the line lands while the session runs, not once it exits — a foreground session
+    # blocks in _launch for as long as the human keeps talking to it
+    worktree = tmpdir.makedir('wt')
+    _launched(replace)
+    Claude().start(worktree, 'proj@g@agent', exclusive=False)
+    [entry] = full_logs.actual()
+    compare(entry['message'], expected='agent: launched')
+    compare(entry['argv'], expected=['claude', '--name', 'proj@g@agent'])
+    compare(entry['cwd'], expected=str(worktree))
+    assert entry['pid']
+
+
+def test_launch_that_exits_nonzero_raises(tmpdir: TempDir, replace: Replacer) -> None:
+    # a failed launch must not read as a successful one
+    Popen = MockPopen()
+    replace.in_module(subprocess.Popen, Popen)
+    Popen.set_default(returncode=2)
+    argv = ['claude', '--name', 'n']
+    with ShouldRaise(subprocess.CalledProcessError(2, argv)):
+        Claude().start(tmpdir.makedir('wt'), 'n', exclusive=False)
 
 
 _ENVELOPE = (
@@ -417,8 +453,8 @@ class TestRun:
         )
 
 
-def _bg_session(kind: str | None = 'background', pid: int = 4242) -> Session:
-    return Session(
+def _bg_session(kind: str | None = 'background', pid: int = 4242) -> AgentSession:
+    return AgentSession(
         id='1ff2c8e3-54c6-4afe-9b24-f1c40d360770',
         name='proj@g@agent',
         status='busy',
@@ -464,7 +500,7 @@ class TestStop:
             Claude().stop(_bg_session())
 
     def test_interactive_session_falls_back_to_the_base_sigterm(self, replace: Replacer) -> None:
-        calls: list[tuple[Session, float]] = []
+        calls: list[tuple[AgentSession, float]] = []
         replace.on_class(
             Agent.stop, lambda self, session, timeout=10.0: calls.append((session, timeout))
         )
@@ -474,7 +510,7 @@ class TestStop:
 
     def test_session_with_no_kind_also_falls_back(self, replace: Replacer) -> None:
         # a plain foreground launch reports no `kind` at all, not just 'interactive'
-        calls: list[Session] = []
+        calls: list[AgentSession] = []
         replace.on_class(Agent.stop, lambda self, session, timeout=10.0: calls.append(session))
         session = _bg_session(kind=None)
         Claude().stop(session)
@@ -605,11 +641,11 @@ def test_sessions_enriches_checked_sessions_with_a_summary(
         projects / '-work-proj', 'a.jsonl', '{"type": "last-prompt", "lastPrompt": "do it"}\n', 1000
     )
     checked = [
-        Session(
+        AgentSession(
             id='a', name='proj@goal@agent', status='busy', cwd=Path('/work/proj'), summary=None
         ),
-        Session(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
-        Session(  # a marked corpse rides through enrichment, mark intact — never dropped
+        AgentSession(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
+        AgentSession(  # a marked corpse rides through enrichment, mark intact — never dropped
             id='ghost', name='ghost', status='?', cwd=Path('/gone'), summary=None, stale='dead pid'
         ),
     ]
@@ -617,15 +653,17 @@ def test_sessions_enriches_checked_sessions_with_a_summary(
     compare(
         Claude(projects).sessions(),
         expected=[
-            Session(
+            AgentSession(
                 id='a',
                 name='proj@goal@agent',
                 status='busy',
                 cwd=Path('/work/proj'),
                 summary='do it',  # from the transcript; 'bare' has none to find
             ),
-            Session(id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None),
-            Session(
+            AgentSession(
+                id='bare', name='bare', status='idle', cwd=Path('/elsewhere'), summary=None
+            ),
+            AgentSession(
                 id='ghost',
                 name='ghost',
                 status='?',
@@ -639,6 +677,6 @@ def test_sessions_enriches_checked_sessions_with_a_summary(
 
 def test_sessions_skips_enrichment_when_the_registry_had_no_cwd(replace: Replacer) -> None:
     # a cwd-less record parses to Path('.') — there is no transcript folder to read
-    lonely = Session(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
+    lonely = AgentSession(id='lonely', name='lonely', status='working', cwd=Path('.'), summary=None)
     replace.on_class(Claude.checked, lambda self, cwd=None: [lonely])
     compare(Claude().sessions(), expected=[lonely])
