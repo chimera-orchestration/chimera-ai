@@ -163,9 +163,8 @@ cannot be turned away at the hook; only whoever *launches* it can refuse, which 
 launcher-side guard carries the weight and the hook can only warn.
 
 `UserPromptSubmit` **can** block ("blocks prompt processing and erases the prompt"), as can
-`PreToolUse`, `Stop`, `PostToolBatch`, `PreCompact`, `ConfigChange` and others. Since chimera
-already hooks `UserPromptSubmit` for mail, a hard stop is reachable there if a warning ever
-proves too weak — at the cost of destroying the user's typed prompt.
+`PreToolUse`, `Stop`, `PostToolBatch`, `PreCompact` and `ConfigChange` — recorded so the
+asymmetry is on file, not as a suggestion.
 
 ### Lifecycle detail
 
