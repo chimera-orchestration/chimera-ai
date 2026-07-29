@@ -26,7 +26,7 @@ isn't built yet — the vocabulary stands regardless; what's implemented is the 
 - **Manager** — the role of a project's chat session (`<project>@@manager`), directing that project's goals; fenced to its project — cross-project work goes through the captain
 - **Address** — what names a session: its `--name`, its mailbox, its `caller` in the log. Three `@`-joined segments, empty where a role has none — `@@captain`, `<project>@@manager`, `<project>@<goal>@<actor>` — so parsing is total and an incomplete one is refused, never silently misrouted. The captain's *persona* (`captain: pegasus`) is cosmetic, never its address. More in @agent-docs/workspace-layout.md.
 - **Message** — inter-agent mail (`ch msg`): one immutable file per message in a per-address Maildir under `state/`, drained into a session then acked or deferred
-- **Archive** — the queryable index over every LLM session on the machine, chimera-launched or not: one SQLite store (`state/archive.db`) tying sessions to harnesses, goals, actors and a timeline; fed by session hooks (doctor's claude-hooks check installs them)
+- **Archive** — the queryable index over every LLM session on the machine, chimera-launched or not: one SQLite store (`state/archive.db`) tying sessions to harnesses, goals, actors and a timeline; fed by session hooks (doctor's claude-hooks check installs them). How harnesses really behave — identity, bridging, liveness — is in @agent-docs/sessions.md
 
 ## Principles
 
@@ -35,6 +35,7 @@ When implementing chimera, the following principles must be adhered to:
 - **Everything must be a CLI** – Every action is a CLI command thinly wrapping a pure, importable function. Compose from pure functions; put logic tests at the function layer and still cover the CLI itself. More in @agent-docs/commands.md.
 - **Every CLI action must be logged** – Every action must be logged to the log file, with enough of what it examined, decided and changed that the log alone can debug the run — outcomes only, never spew; mutating a git ref must log its before/after shas first. More in @agent-docs/logging.md.
 - **No tokens for admin** – observation, liveness and delivery must never cost a model turn. If a design can only be satisfied by waking an agent just to check something, the design is wrong, not the workaround.
+- **A session is reached by its address, never by its location** – an address is *claimed* on evidence (chimera launched it, or it inherited one), never inferred from where a session happens to sit. Location may restrict a session; only evidence may entitle one. More in @agent-docs/sessions.md.
 - **Every CLI action must be self-documenting** – every command carries a terse, agent-optimised `help=` summary; `--help` works on group and leaf alike, and `ch help` derives the whole tree from that same single source. More in @agent-docs/commands.md.
 - **Terse defaults signpost their depth** – any view that hides detail behind `--verbose` must, when it actually hid something and `-v` wasn't given, end with a one-line hint naming the `-v` command to reveal it. No silent dead ends. More in @agent-docs/commands.md.
 - **Document everything** - Read @agent-docs/documentation.md when you need to.
@@ -80,6 +81,7 @@ Topics docs live in agent-docs/{topic}.md, if you are working on/with {topic}, r
 - @agent-docs/documentation.md
 - @agent-docs/git-commits.md
 - @agent-docs/logging.md
+- @agent-docs/sessions.md — read before touching session identity, liveness, the archive, hooks, occupancy, `agent start`/`resume`/`stop`, or adding a harness
 - @agent-docs/workspace-layout.md
 
 If you are working on a topic and learn something new, add to the topic.

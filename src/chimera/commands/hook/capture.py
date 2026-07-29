@@ -10,6 +10,10 @@ Each hook firing also appends one :class:`~chimera.archive.Event` — ``startup`
 ``clear`` from SessionStart's ``source``, ``end`` from SessionEnd — so the session row stays
 the cheap summary (one row per identity, however many lives it has) while ``events`` carries
 the append-only lifecycle history.
+
+``agent-docs/sessions.md`` records what harnesses actually do — which ids can be trusted,
+what survives a bridge, which firings aren't conversations — and is the first read before
+changing anything here.
 """
 
 from collections.abc import Mapping
@@ -31,7 +35,8 @@ PRINT_ENTRYPOINT = 'sdk-cli'
 """``CLAUDE_CODE_ENTRYPOINT`` in a one-shot ``claude -p`` run (an interactive session
 gets ``cli``). Undocumented but field-verified: claude stamps it into its own process
 per-mode, so a ``-p`` spawned from inside a session never inherits the parent's value.
-See ``knowledge/claude-session-type-signals.md`` for the full signal matrix."""
+See ``agent-docs/sessions.md`` for the full signal matrix — the ``claude agents`` browser
+self-identifies several other ways too."""
 
 KNOWN_START_KEYS = frozenset(
     {'cwd', 'session_id', 'transcript_path', 'source', 'agent_type', 'model', 'hook_event_name'}
