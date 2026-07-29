@@ -16,7 +16,7 @@ from chimera.commands import review as review_mod
 from chimera.agents.registry import AgentSpec
 from chimera.dry import Dry
 from chimera.commands.agent import agent
-from chimera.commands.prompt import PACKAGED
+from chimera.commands.prompt import PACKAGED, REVIEW_STEP
 from chimera.commands.review import (
     GUARDRAIL,
     _PR_FIELDS,
@@ -164,6 +164,7 @@ def test_review_builds_the_goal_tracking_the_pr_and_launches(
         BASE='main',
         GOAL='pr-1',
         PROJECT='proj',
+        REVIEW=REVIEW_STEP,
     )
     compare(
         calls,
@@ -207,6 +208,7 @@ def test_review_keys_the_context_by_the_resolved_session_name(
         BASE='main',
         GOAL='pr-1',
         PROJECT='proj',
+        REVIEW=REVIEW_STEP,
     )
     compare(
         calls,
@@ -290,7 +292,8 @@ def test_review_without_launch_stops_after_the_checkout(tmpdir: TempDir, replace
 
 def test_review_without_launch_refuses_agent_flags(tmpdir: TempDir) -> None:
     refused = UserError(
-        '--no-agent launches no agent, so --dangerous and "-- …" have nothing to apply to.'
+        '--no-agent launches no agent, so --dangerous, --review and "-- …" have '
+        'nothing to apply to.'
     )
     with ShouldRaise(refused):
         review(tmpdir / 'r', tmpdir / 'wt', 'proj', tmpdir / 'p', '1', launch=False, dangerous=True)
@@ -334,8 +337,75 @@ def test_prompt_uses_the_packaged_default_without_an_override(tmpdir: TempDir) -
             BASE='main',
             GOAL='pr-1',
             PROJECT='proj',
+            REVIEW=REVIEW_STEP,
         ),
     )
+
+
+class TestReviewStep:
+    def test_it_fills_the_hole_the_default_step_would(self, tmpdir: TempDir) -> None:
+        meta = _meta('deadbeef')
+        compare(
+            _prompt(tmpdir / 'absent', meta, 'pr-1', 'proj', 'Run `/security-review`.'),
+            expected=GUARDRAIL
+            + Template(_packaged()).safe_substitute(
+                PR=1,
+                PR_URL=meta['url'],
+                PR_TITLE=meta['title'],
+                BASE='main',
+                GOAL='pr-1',
+                PROJECT='proj',
+                REVIEW='Run `/security-review`.',
+            ),
+        )
+
+    def test_a_project_template_can_take_it_too(self, tmpdir: TempDir) -> None:
+        (tmpdir.makedir('prompts') / 'review.md').write_text('#$PR: $REVIEW\n')
+        compare(
+            _prompt(tmpdir / 'prompts', _meta('deadbeef'), 'pr-1', 'proj', 'Read it twice.'),
+            expected=GUARDRAIL + '#1: Read it twice.\n',
+        )
+
+    def test_a_template_without_the_hole_refuses_rather_than_drop_it(self, tmpdir: TempDir) -> None:
+        override = tmpdir.makedir('prompts') / 'review.md'
+        override.write_text('Review #$PR, however you like.\n')
+        with ShouldRaise(
+            UserError(
+                f'{override} has no $REVIEW hole for --review to fill — '
+                f'ch prompt show review prints it, ch prompt init review copies the default'
+            )
+        ):
+            _prompt(tmpdir / 'prompts', _meta('deadbeef'), 'pr-1', 'proj', 'Read it twice.')
+
+    def test_such_a_template_still_renders_without_the_flag(self, tmpdir: TempDir) -> None:
+        (tmpdir.makedir('prompts') / 'review.md').write_text('Review #$PR, however you like.\n')
+        compare(
+            _prompt(tmpdir / 'prompts', _meta('deadbeef'), 'pr-1', 'proj'),
+            expected=GUARDRAIL + 'Review #1, however you like.\n',
+        )
+
+    def test_review_launches_the_agent_on_it(self, tmpdir: TempDir, replace: Replacer) -> None:
+        repo, head = _cloned(tmpdir)
+        meta = _meta(head)
+        _stub_meta(replace, meta)
+        calls = _stub_agent(replace)
+        worktrees = tmpdir / 'wt'
+        review(repo, worktrees, 'proj', tmpdir / 'prompts', '1', review_step='Skim it.')
+        compare(
+            calls,
+            expected=[
+                (
+                    worktrees / 'pr-1@agent',
+                    'proj@pr-1@agent',
+                    _prompt(tmpdir / 'prompts', meta, 'pr-1', 'proj', 'Skim it.'),
+                    (),
+                    False,
+                    AgentSpec(),
+                    None,
+                    {},
+                )
+            ],
+        )
 
 
 def test_pr_metadata_parses_gh_json(tmpdir: TempDir, replace: Replacer) -> None:
@@ -743,6 +813,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         dangerous: bool = False,
         into: Path | None = None,
         launch: bool = True,
+        review_step: str | None = None,
         spec: AgentSpec = AgentSpec(),
         context: Callable[[str], Path | None] | None = None,
         env: Callable[[str], Mapping[str, str]] | None = None,
@@ -763,6 +834,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
             {
                 'pr': '1',
                 'dangerous': False,
+                'review_step': None,
                 'no_agent': False,
                 'harness': None,
                 'model': None,
@@ -798,6 +870,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
             {
                 'pr': '1',
                 'dangerous': False,
+                'review_step': None,
                 'no_agent': True,
                 'harness': None,
                 'model': None,
@@ -838,6 +911,7 @@ def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         dangerous: bool = False,
         into: Path | None = None,
         launch: bool = True,
+        review_step: str | None = None,
         spec: AgentSpec = AgentSpec(),
         context: Callable[[str], Path | None] | None = None,
         env: Callable[[str], Mapping[str, str]] | None = None,
@@ -893,6 +967,7 @@ def test_review_cli_dry_with_packaged_template(
             {
                 'pr': '1',
                 'dangerous': False,
+                'review_step': None,
                 'no_agent': False,
                 'harness': None,
                 'model': None,
@@ -928,6 +1003,7 @@ def test_review_cli_dry_names_the_project_template(
             {
                 'pr': '1',
                 'dangerous': False,
+                'review_step': None,
                 'no_agent': False,
                 'harness': None,
                 'model': None,

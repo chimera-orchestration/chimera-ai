@@ -6,6 +6,6 @@ out on the PR's head commit and its branch tracks the PR, so `gh pr view $PR` an
 
 Do a careful pre-human code review:
 
-1. Run `/review` to gather the PR's diff and produce findings.
+1. $REVIEW
 2. Weigh correctness first, then clarity, maintainability, and test coverage.
 3. Write the findings up for the human reviewer to act on before they merge.

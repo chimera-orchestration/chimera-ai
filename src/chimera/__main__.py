@@ -866,6 +866,12 @@ def review(
         ),
     ],
     dangerous: DangerousOpt = False,
+    review_step: Annotated[
+        str | None,
+        typer.Option(
+            '--review', help='What to do to gather the diff — fills $REVIEW in the template'
+        ),
+    ] = None,
     no_agent: Annotated[
         bool,
         typer.Option('--no-agent', help='Branch, fetch and check out the PR, but launch no agent'),
@@ -909,6 +915,7 @@ def review(
         dangerous,
         Path.cwd(),
         launch=not no_agent,
+        review_step=review_step,
         spec=spec,
         context=_render_context,
         env=_role_stamp,
@@ -925,9 +932,10 @@ def review(
         typer.echo(f'{dry_run.verb("Reviewing", "Would review")} {pr} in {worktree}')
         if dry:
             template = _source(_prompt_resolve(p.prompts, 'review'))
+            filled = f' + --review {review_step!r}' if review_step is not None else ''
             _dry_preview(
                 spec,
-                f'review template ({template}) + guardrail',
+                f'review template ({template}) + guardrail{filled}',
                 _passthrough(ctx),
                 context,
                 env,

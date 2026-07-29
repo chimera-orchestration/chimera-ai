@@ -6,9 +6,10 @@ text is the starting point (``ch prompt init``) rather than a base to extend.
 
 The set of names is derived from the packaged directory itself, so a template added
 there is listed, completed and copyable without a second list to keep in step. What each
-template's ``$`` holes fill with is declared here too (:data:`HOLES`), so ``ch prompt
-show`` can print them. A test pins each declaration against the identifiers the packaged
-template actually uses, so the two can't drift.
+template's ``$`` holes fill with is declared here too (:data:`HOLES`) — the one place a
+default like :data:`REVIEW_STEP` is written down, so ``ch prompt show`` can print it
+instead of leaving it buried in the renderer. A test pins each declaration against the
+identifiers the packaged template actually uses, so the two can't drift.
 """
 
 from dataclasses import dataclass
@@ -19,6 +20,11 @@ from chimera.config import UserError
 # The packaged templates live beside the code (chimera/prompts/), as ch init's workspace
 # template does — a real directory, so `prompt init` can copy one out.
 PACKAGED = Path(__file__).parents[2] / 'prompts'
+
+# What `$REVIEW` renders as unless `ch review --review` says otherwise: the one step whose
+# *how* is a per-PR judgement call (which review command, or none at all), while the
+# template keeps the surrounding orientation and write-up instructions.
+REVIEW_STEP = "Run `/review` to gather the PR's diff and produce findings."
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,7 @@ HOLES: dict[str, tuple[Hole, ...]] = {
         Hole('BASE', 'the branch the PR targets'),
         Hole('GOAL', 'the goal the review runs as'),
         Hole('PROJECT', 'the project name'),
+        Hole('REVIEW', 'how to gather the diff', default=REVIEW_STEP, flag='--review'),
     ),
 }
 

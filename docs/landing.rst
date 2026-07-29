@@ -118,6 +118,23 @@ agent's review. ``--no-agent`` does the checkout plumbing and stops there.
 Any review tool's URL that embeds the repository and PR number works, not
 just GitHub's own.
 
+One step of that prompt is a per-PR judgement call — *how* the diff gets
+gathered and read — so it has its own knob. ``--review`` replaces that step,
+leaving the rest of the template (the orientation, the write-up instructions)
+alone:
+
+.. illustrative — not run by the doc tests: it needs a real pull request on a
+   real remote, and it launches an interactive agent.
+.. skip: next
+
+.. code-block:: console
+
+    $ ch review 7 --review 'Run `/security-review`, then read the migration by hand.'
+
+Unpassed, that step reads ``Run /review to gather the PR's diff and produce
+findings.`` Everything else in the prompt comes from the template — which you
+can take over.
+
 Tuning the templates: ``ch prompt``
 -----------------------------------
 
@@ -143,7 +160,7 @@ read rather than something buried in the code:
     substitutions:
       $PR = <the pull request number>
     ...
-      $PROJECT = <the project name>
+      $REVIEW = Run `/review` to gather the PR's diff and produce findings.  (--review)
 
 To make one yours, copy it into the project and edit it. ``ch prompt init``
 never overwrites an existing copy; ``ch prompt edit`` does the same thing and
@@ -159,7 +176,8 @@ then opens your ``$VISUAL``/``$EDITOR``:
 
 An override wins whole — nothing is merged — which is why copying beats
 writing one from scratch. Drop a hole you don't want and it simply stops
-being substituted.
+being substituted; drop ``$REVIEW`` and ``ch review --review`` refuses rather
+than silently doing nothing.
 
 Renaming and finishing
 ----------------------

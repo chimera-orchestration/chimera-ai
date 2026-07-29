@@ -62,6 +62,13 @@ class TestResolve:
 
 
 class TestHole:
+    def test_a_default_renders_as_itself(self) -> None:
+        (review,) = (hole for hole in HOLES['review'] if hole.name == 'REVIEW')
+        compare(
+            review.value, expected="Run `/review` to gather the PR's diff and produce findings."
+        )
+        compare(review.flag, expected='--review')
+
     def test_a_launch_filled_hole_renders_as_a_placeholder(self) -> None:
         (pr,) = (hole for hole in HOLES['review'] if hole.name == 'PR')
         compare(pr.value, expected='<the pull request number>')
@@ -71,11 +78,11 @@ def test_prompt_show_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> N
     project_dir(tmpdir, git_repo)
     prompts = Path.cwd() / 'prompts'  # cwd, so the expectation matches the resolved project
     prompts.mkdir()
-    (prompts / 'review.md').write_text('Review #$PR, please\n')
+    (prompts / 'review.md').write_text('Review #$PR with $REVIEW\n')
     command.run('prompt', 'show', 'review').check(
         output=f'source: {prompts / "review.md"}\n'
         f'\n'
-        f'Review #$PR, please\n'
+        f'Review #$PR with $REVIEW\n'
         f'\n'
         f'substitutions:\n'
         f'  $PR = <the pull request number>\n'
@@ -83,7 +90,8 @@ def test_prompt_show_cli(tmpdir: TempDir, git_repo: Repo, command: Command) -> N
         f"  $PR_TITLE = <the pull request's title>\n"
         f'  $BASE = <the branch the PR targets>\n'
         f'  $GOAL = <the goal the review runs as>\n'
-        f'  $PROJECT = <the project name>',
+        f'  $PROJECT = <the project name>\n'
+        f"  $REVIEW = Run `/review` to gather the PR's diff and produce findings.  (--review)",
         logging=action_logs(
             'prompt show', 'chimera.commands.prompt.resolve', {'name': 'review', 'project': None}
         ),

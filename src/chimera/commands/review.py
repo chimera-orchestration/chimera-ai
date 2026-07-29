@@ -10,7 +10,7 @@ from loguru import logger
 
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import agent
-from chimera.commands.prompt import resolve
+from chimera.commands.prompt import REVIEW_STEP, resolve
 from chimera.commands.worktree.add import add
 from chimera.config import UserError
 from chimera.dry import Dry
@@ -54,6 +54,7 @@ def review(
     dangerous: bool = False,
     into: Path | None = None,
     launch: bool = True,
+    review_step: str | None = None,
     spec: AgentSpec = AgentSpec(),
     context: Callable[[str], Path | None] | None = None,
     env: Callable[[str], Mapping[str, str]] | None = None,
@@ -68,6 +69,10 @@ def review(
     ref as upstream, and launches the agent on a review prompt — the project's
     ``prompts/review.md`` if present, else the packaged default, both behind a no-publish
     guardrail. ``into`` optionally lands the human branch in place (see ``checkout_here``).
+
+    ``review_step`` fills the template's ``$REVIEW`` hole (default: :data:`REVIEW_STEP`) —
+    the per-run knob for *how* the diff gets reviewed, leaving the surrounding template
+    alone. A template with no such hole refuses it rather than dropping it silently.
 
     ``context`` is a factory keyed by session name, called with the *resolved*
     ``<project>@pr-<N>@agent`` — the number is only known here, once ``gh`` has resolved
@@ -86,9 +91,10 @@ def review(
     quiet when nothing changed, so a re-run or ``dry`` lands no ref line.
     Returns the agent worktree.
     """
-    if not launch and (dangerous or extra):
+    if not launch and (dangerous or extra or review_step is not None):
         raise UserError(
-            '--no-agent launches no agent, so --dangerous and "-- …" have nothing to apply to.'
+            '--no-agent launches no agent, so --dangerous, --review and "-- …" have '
+            'nothing to apply to.'
         )
     git = Git(repo)
     if 'origin' not in git('remote').split():
@@ -114,7 +120,7 @@ def review(
         dry(checkout_here, git, branch(goal, HUMAN), into, 'review')
     if launch:
         name = session_name(project, goal, AGENT)
-        prompt = _prompt(prompts_dir, meta, goal, project)
+        prompt = _prompt(prompts_dir, meta, goal, project, review_step)
         agent(
             agent_worktree,
             name,
@@ -389,19 +395,37 @@ def _ensure_goal(
             git('branch', f'--set-upstream-to={tracking}', branch(goal, actor))
 
 
-def _prompt(prompts_dir: Path, meta: dict[str, object], goal: str, project: str) -> str:
+def _prompt(
+    prompts_dir: Path,
+    meta: dict[str, object],
+    goal: str,
+    project: str,
+    review_step: str | None = None,
+) -> str:
     """The review prompt: the no-publish guardrail plus a rendered template.
 
     Uses the project's ``prompts/review.md`` when present, else the packaged default (see
     :func:`chimera.commands.prompt.resolve`). Rendered with :class:`string.Template` (``$VAR``;
     unknown ``$`` left intact), so a template is plain text with a handful of holes — never a
     logic language.
+
+    An explicit ``review_step`` against a template with no ``$REVIEW`` hole is refused rather
+    than dropped: a flag that silently does nothing is the dead end the ``--dry`` preview and
+    this refusal both exist to prevent. A template predating the hole is untouched otherwise.
     """
-    return GUARDRAIL + Template(resolve(prompts_dir, 'review').text).safe_substitute(
+    template = resolve(prompts_dir, 'review')
+    text = template.text
+    if review_step is not None and 'REVIEW' not in Template(text).get_identifiers():
+        raise UserError(
+            f'{template.source} has no $REVIEW hole for --review to fill — '
+            f'ch prompt show review prints it, ch prompt init review copies the default'
+        )
+    return GUARDRAIL + Template(text).safe_substitute(
         PR=meta['number'],
         PR_URL=meta['url'],
         PR_TITLE=meta['title'],
         BASE=meta['baseRefName'],
         GOAL=goal,
         PROJECT=project,
+        REVIEW=review_step if review_step is not None else REVIEW_STEP,
     )
