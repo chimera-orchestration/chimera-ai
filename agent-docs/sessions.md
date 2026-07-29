@@ -8,6 +8,25 @@ Findings are **version-stamped**. A defence built on one is removed only when th
 needing it is gone — never because a later version stopped exhibiting the symptom. Absence
 of a bug in one run is not evidence of a fix.
 
+## Noticing when the harness changes under us
+
+Most of what follows is *observed*, not promised (see *What is actually documented*), so it
+will drift. Detection must be free and automatic — no one will remember to re-run probes:
+
+- **Record the harness version on every session** (`AI_AGENT` carries it:
+  `claude-code_2-1-220_agent`). "Which versions have we seen?" then becomes a query, and a
+  session recorded under a version this doc has never validated is itself the alarm.
+- **Assert the invariants passively.** A doctor check re-validates recorded sessions against
+  the claims here — transcript stem matches `native_id`, payload id matches env id, a `fork`
+  event has a plausible parent. Costs a SQL read, no model turn, and fires the moment any
+  session behaves differently.
+- **Surface unmodeled payload keys** (already live — `capture.unmodeled`): if claude starts
+  sending a parent id, a bridge id, or anything else new, it lands in the log without a code
+  change.
+- **Cheap capability probes**: `claude --help` still offering `--session-id` is a free grep;
+  behaviours needing a real session (does `--bg` still refuse it?) are re-run by hand and the
+  result stamped here with its version.
+
 ## Claude Code (observed 2.1.212–2.1.220)
 
 ### The five ways a session starts
@@ -55,11 +74,28 @@ So an env var injected by a launcher (a role stamp, a tracking token) reaches a 
 session only. Tracer-verified. `CLAUDECODE`, `CLAUDE_CODE_SESSION_ID` and friends survive
 everywhere because *claude* stamps them into every process it spawns, not the launcher.
 
-**Lead, unverified**: `$CLAUDE_ENV_FILE` points a SessionStart hook at
-`~/.claude/session-env/<session-id>/sessionstart-hook-1.sh`. If claude sources it, a hook
-could inject env into the session it just started — the one known route to stamping bg and
-forked sessions. 183 such dirs exist on a working machine, all empty (nothing writes them).
-Undocumented in `--help`. Verify before relying on it.
+**Do not build on `$CLAUDE_ENV_FILE`.** It points a SessionStart hook at
+`~/.claude/session-env/<session-id>/sessionstart-hook-1.sh` (183 such dirs exist on a working
+machine, all empty — nothing writes them), and a hook that could inject env into the session
+it just started would be the one route to stamping bg and forked sessions. But it is
+**undocumented**, and the official hooks page states the opposite: SessionStart hooks "cannot
+directly set environment variables for the session" — their only outputs are
+`additionalContext`, `initialUserMessage`, `watchPaths`, `sessionTitle`, `reloadSkills`. An
+undocumented internal that the docs contradict can vanish in any release. Interesting to know,
+never a foundation.
+
+### What is actually documented
+
+The hooks page guarantees only these env vars to hook commands: `CLAUDE_PROJECT_DIR`,
+`CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_EFFORT`, `CLAUDE_CODE_REMOTE`,
+`CLAUDE_CODE_BRIDGE_SESSION_ID` (Remote Control, 2.1.199+), `CLAUDE_PLUGIN_OPTION_<KEY>`.
+
+**`CLAUDE_CODE_SESSION_ID` is not among them** — it is observed-reliable but unpromised, while
+the *documented* identity channel (the payload's `session_id`) is the one that misbehaved in
+#41. So: anchor on the payload's **`transcript_path` stem** — documented, and definitionally
+the resumable id since claude locates a session by its transcript file — then cross-check
+payload id, transcript stem and env id, and log loudly on any disagreement. Never silently
+pick a winner among them.
 
 ### Processes
 
