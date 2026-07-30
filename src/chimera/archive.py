@@ -38,6 +38,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict
 
+from loguru import logger
+
 from chimera.sqlite import Database
 
 
@@ -97,6 +99,10 @@ class ArchiveSession(BaseModel):
         """
         return self.transcript is not None and not self.transcript.exists()
 
+
+ACTIVE = 'active'
+"""The event kind a working session lands each turn (:meth:`Archive.touch`) — the
+heartbeat that keeps activity ordering honest between a start and an end."""
 
 LAUNCH_WINDOW = timedelta(minutes=2)
 """How long a :class:`PendingLaunch` stays claimable. A session's start hook fires within
@@ -349,6 +355,7 @@ class Archive:
         *,
         platform: str | None = None,
         address: str | None = None,
+        resumable: bool = False,
     ) -> ArchiveSession | None:
         """The most recently *active* session at an address, else ``None``.
 
@@ -367,6 +374,12 @@ class Archive:
         to the exact one in that case. Unlike :meth:`sessions`, ``None`` here means "must
         be unset" (``IS NULL``), not "unconstrained", for ``project``/``goal``/``actor`` —
         a board slot needs the exact address, not a widened match.
+
+        ``resumable`` skips sessions whose transcript has been pruned, returning the
+        newest one that can actually be revived. Without it, ``ch agent resume`` hands
+        claude an id it no longer knows and the user sees a raw "No conversation found"
+        traceback — the failure that started all of this. Off by default: a *listing*
+        wants the truth about what ran most recently, pruned or not.
         """
         clauses = 'sessions.project IS ? AND sessions.goal IS ? AND sessions.actor IS ?'
         params: list[str | None] = [project, goal, actor]
@@ -376,7 +389,7 @@ class Archive:
         if address is not None:
             clauses += ' AND sessions.address=?'
             params.append(address)
-        row = self._db.execute(
+        rows = self._db.execute(
             'latest_session_for',
             f"""
             SELECT sessions.*, COALESCE(MAX(events.at), sessions.started_at) AS last_active
@@ -384,11 +397,20 @@ class Archive:
                 ON events.platform = sessions.platform AND events.native_id = sessions.native_id
             WHERE {clauses}
             GROUP BY sessions.platform, sessions.native_id
-            ORDER BY last_active DESC, sessions.platform, sessions.native_id LIMIT 1
+            ORDER BY last_active DESC, sessions.platform, sessions.native_id
             """,
             params,
-        ).fetchone()
-        return _row_to_session(row) if row is not None else None
+        ).fetchall()
+        sessions = [_row_to_session(row) for row in rows]
+        if not resumable:
+            return sessions[0] if sessions else None
+        for session in sessions:
+            if not session.transcript_missing:
+                return session
+            logger.bind(native_id=session.native_id, transcript=str(session.transcript)).info(
+                'archive: skipping a session whose transcript is gone'
+            )
+        return None
 
     def latest_open_session(
         self, platform: str, cwd: Path, *, excluding: str
@@ -443,6 +465,18 @@ class Archive:
             (*params, limit),
         ).fetchall()
         return [_row_to_session(row) for row in rows]
+
+    def touch(self, platform: str, native_id: str, at: datetime) -> None:
+        """Record that a session is still working, as of ``at``.
+
+        Activity ordering — which session a resume should revive, which rows are the
+        recent ones — comes from ``MAX(events.at)``, and lifecycle events only fire when
+        a session starts or ends. A session running for thirty-five hours therefore looks
+        frozen at its start, so a corpse started an hour ago outranks it. This is the
+        heartbeat that stops that: one row per turn, appended by the hook that already
+        runs per turn to deliver mail. No new hook, no polling, no model turn.
+        """
+        self.record_event(Event(at=at, kind=ACTIVE, platform=platform, native_id=native_id))
 
     def record_launch(self, launch: PendingLaunch) -> None:
         """Put a launch on record before it is made (see :class:`PendingLaunch`)."""

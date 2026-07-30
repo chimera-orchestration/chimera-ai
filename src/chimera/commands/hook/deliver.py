@@ -15,6 +15,7 @@ agent's mail. A session the archive holds no address for therefore receives noth
 there is no inbox that is rightfully its.
 """
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -39,6 +40,11 @@ def deliver(cwd: Path, session: str) -> list[Message]:
         return []
     with archive(workspace) as store:
         recorded = store.session('claude', session)
+        if recorded is not None:
+            # this hook is the one thing that runs every turn, so it doubles as the
+            # session's heartbeat — otherwise a long-lived session looks frozen at its
+            # start and a fresher corpse outranks it (see Archive.touch)
+            store.touch('claude', session, datetime.now(timezone.utc))
     if recorded is None or recorded.address is None:
         logger.bind(session=session).info('hook deliver: unaddressed session, no mail')
         return []

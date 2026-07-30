@@ -160,15 +160,19 @@ def resume_target(cwd: Path, platform: str, project: str, goal: str, actor: str)
     to its newest session — live or dead, resuming is how a dead one is revived — and
     that session's immutable native id is the resume target; the registry name is
     display-only (a rename in the harness's UI must not orphan the session). ``None`` —
-    no workspace to hold an archive, or an address it has never seen — falls back to
-    resuming by name.
+    no workspace to hold an archive, an address it has never seen, or nothing left whose
+    transcript still exists — falls back to resuming by name.
+
+    Sessions whose transcript the harness has pruned are skipped: handing claude an id it
+    no longer knows produced a raw "No conversation found" traceback, which is the failure
+    this whole design started from.
     """
     try:
         workspace = resolve_workspace(cwd)
     except NotInWorkspaceError:
         return None
     with archive(workspace) as store:
-        session = store.latest_session_for(project, goal, actor, platform=platform)
+        session = store.latest_session_for(project, goal, actor, platform=platform, resumable=True)
     if session is None:
         return None
     logger.bind(

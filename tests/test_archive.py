@@ -712,3 +712,63 @@ class TestMigration:
         finally:
             connection.close()
         assert not {n for n in names if n.startswith('sessions_fts') or n.startswith('sessions_a')}
+
+
+class TestResumableSessions:
+    # the failure this whole design started from: resume handed claude an id it no longer
+    # knew, and the user got a raw "No conversation found" traceback
+
+    def _at(self, archive: Archive, native_id: str, transcript: Path, hours: int) -> None:
+        archive.record_session(
+            make_session(
+                native_id,
+                address='p@g@agent',
+                project='p',
+                goal='g',
+                actor='agent',
+                transcript=transcript,
+                started_at=NOON + timedelta(hours=hours),
+            )
+        )
+
+    def test_a_pruned_tip_is_skipped_for_the_newest_resolvable_one(
+        self, archive: Archive, tmpdir: TempDir
+    ) -> None:
+        kept = tmpdir.write('kept.jsonl', '')
+        self._at(archive, 'older', kept, 0)
+        self._at(archive, 'newest', tmpdir.path / 'pruned.jsonl', 1)
+        newest = archive.latest_session_for('p', 'g', 'agent')
+        assert newest is not None
+        compare(newest.native_id, expected='newest')  # a listing wants the truth…
+        resumable = archive.latest_session_for('p', 'g', 'agent', resumable=True)
+        assert resumable is not None
+        compare(resumable.native_id, expected='older')  # …a resume wants what still works
+
+    def test_nothing_resumable_is_none_rather_than_a_doomed_id(
+        self, archive: Archive, tmpdir: TempDir
+    ) -> None:
+        self._at(archive, 'gone', tmpdir.path / 'pruned.jsonl', 0)
+        assert archive.latest_session_for('p', 'g', 'agent', resumable=True) is None
+
+
+def test_touch_keeps_a_long_running_session_ahead_of_a_fresher_corpse(
+    archive: Archive, tmpdir: TempDir
+) -> None:
+    # lifecycle events only fire at start and end, so without a heartbeat a session
+    # working for hours looks frozen at its start
+    transcript = tmpdir.write('t.jsonl', '')
+    archive.record_session(
+        make_session('working', address='a', transcript=transcript, started_at=NOON)
+    )
+    archive.record_session(
+        make_session(
+            'corpse', address='a', transcript=transcript, started_at=NOON + timedelta(hours=5)
+        )
+    )
+    latest = archive.latest_session_for(None, address='a')
+    assert latest is not None
+    compare(latest.native_id, expected='corpse')
+    archive.touch('claude', 'working', NOON + timedelta(hours=6))
+    latest = archive.latest_session_for(None, address='a')
+    assert latest is not None
+    compare(latest.native_id, expected='working')
