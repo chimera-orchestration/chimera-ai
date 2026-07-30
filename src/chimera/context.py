@@ -186,19 +186,22 @@ def resolve_scope(
     return Scope(workspace, resolved, pinned_goal)
 
 
-def caller(cwd: Path) -> str:
-    """The address of whoever is running ``ch`` here — one identity shared by mail (the
-    sender/inbox default) and the action log (each line's ``session``).
+def seat(cwd: Path) -> str:
+    """The address this *location* speaks for — mail's sender and inbox default.
 
-    ``CHIMERA_SESSION`` if the launcher stamped it, else inferred from cwd like the
-    listers, rendered via :meth:`~chimera.addresses.Address.from_scope`: the bare
-    workspace → ``@@captain``, a project dir → ``<project>@@manager``, a goal worktree
-    → ``<project>@<goal>@agent``. A non-agent actor on a goal (a reviewer, a human)
-    names itself with ``--from`` instead — ``AGENT`` is only ever this function's own
-    default, never a claim about who's actually there.
+    Inferred from cwd like the listers and rendered via
+    :meth:`~chimera.addresses.Address.from_scope`: the bare workspace → ``@@captain``, a
+    project dir → ``<project>@@manager``, a goal worktree → ``<project>@<goal>@agent``. A
+    non-agent actor on a goal (a reviewer, a human) names itself with ``--from`` instead
+    — ``AGENT`` is only ever this function's own default, never a claim about who's
+    actually there.
+
+    Deliberately *not* an identity claim, and not what the log attributes a command to
+    (that's :func:`chimera.identity.executor`). A seat is a place at the table: standing
+    at the workspace root is how a human reads the captain's mail, which is intended —
+    but it never makes them the captain. Nothing about a seat entitles a *session* to an
+    address; see ``agent-docs/sessions.md``.
     """
-    if stamped := os.environ.get('CHIMERA_SESSION'):
-        return stamped
     return str(Address.from_scope(resolve_scope(cwd), AGENT))
 
 

@@ -1,6 +1,7 @@
 import io
 import json
 import sys
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from chimera.commands.hook.capture import session_start
 from chimera.commands.hook.deliver import deliver
 from chimera.commands.msg.dispose import dispose
 from chimera.commands.msg.drain import drain
+from chimera.archive import Archive, ArchiveSession
 from chimera.commands.msg.store import mail
 from chimera.comms import Message
 from tests.cli import Command, Run, action_logs
@@ -34,11 +36,27 @@ def _seed(ws: Path, id: str, subject: str = 'ping') -> None:
     )
 
 
-def _ws(tmpdir: TempDir, replace: Replacer) -> Path:
+def _ws(tmpdir: TempDir, replace: Replacer, *, addressed: Sequence[str] = ()) -> Path:
+    """A workspace where each of ``addressed`` holds ADDRESS — the only way mail reaches one.
+
+    Several sessions can hold one address over its life (each relaunch is a new session),
+    which is exactly what the per-session ``seen/`` ledger is for.
+    """
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    replace.in_environ('CHIMERA_SESSION', ADDRESS)  # the launcher's address stamp
+    with Archive.open(ws / 'state' / 'archive.db') as store:
+        for native_id in addressed or ('uuid-1',):
+            store.record_session(
+                ArchiveSession(
+                    platform='claude',
+                    native_id=native_id,
+                    status='startup',
+                    started_at=NOON,
+                    address=ADDRESS,
+                    cwd=ws,
+                )
+            )
     return ws
 
 
@@ -59,7 +77,7 @@ def test_deliver_surfaces_mail_a_third_party_drained(tmpdir: TempDir, replace: R
 def test_deliver_does_not_respam_a_session_but_stops_only_at_ack(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
-    ws = _ws(tmpdir, replace)
+    ws = _ws(tmpdir, replace, addressed=('uuid-1', 'uuid-2', 'uuid-3'))
     _seed(ws, 'm1')
     deliver(ws, 'uuid-1')
     assert deliver(ws, 'uuid-1') == []  # this session already saw it
@@ -73,7 +91,7 @@ def test_deliver_skips_a_session_archived_without_an_address(
 ) -> None:
     # a one-shot -p run shares its cwd with real conversations, so the gate is the
     # archive's own record that this session holds no address
-    ws = _ws(tmpdir, replace)
+    ws = _ws(tmpdir, replace, addressed=('uuid-chat',))
     session_start(
         Claude(),
         {
@@ -135,7 +153,7 @@ def test_hook_deliver_cli_injects_a_block(
 def test_hook_deliver_cli_is_silent_once_seen(
     tmpdir: TempDir, command: Command, replace: Replacer
 ) -> None:
-    ws = _ws(tmpdir, replace)
+    ws = _ws(tmpdir, replace, addressed=('uuid-1', 'uuid-2', 'uuid-3'))
     _seed(ws, 'm1')
     deliver(ws, 'uuid-1')
     _run_hook(command, replace, ws, 'uuid-1').check(

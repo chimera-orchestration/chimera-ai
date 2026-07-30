@@ -12,7 +12,7 @@ from chimera.context import (
     Project,
     Scope,
     UnknownProjectError,
-    caller,
+    seat,
     goal_from_worktree,
     iter_projects,
     resolve_goal,
@@ -286,23 +286,19 @@ class TestResolveScope:
             resolve_scope(workspace_with_env, project='ghost', infer=False)
 
 
-class TestCaller:
-    def test_uses_the_chimera_session_stamp(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_SESSION', 'chimera@fix@agent')
-        assert caller(Path('/wherever')) == 'chimera@fix@agent'
-
+class TestSeat:
     def test_at_the_bare_workspace_is_the_captain(self, tmpdir: TempDir, replace: Replacer) -> None:
-        # the captain's persona (config's captain: key) is cosmetic only — caller()
+        # the captain's persona (config's captain: key) is cosmetic only — seat()
         # returns its technical address regardless of what persona is configured
         tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
         replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-        assert caller(tmpdir.path / 'ws') == '@@captain'
+        assert seat(tmpdir.path / 'ws') == '@@captain'
 
     def test_in_a_project_dir_is_the_manager(self, tmpdir: TempDir, replace: Replacer) -> None:
         tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
         tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
         replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-        assert caller(tmpdir.path / 'ws' / 'proj') == 'proj@@manager'
+        assert seat(tmpdir.path / 'ws' / 'proj') == 'proj@@manager'
 
     def test_in_a_goal_worktree_is_the_agent(self, tmpdir: TempDir, replace: Replacer) -> None:
         tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
@@ -310,4 +306,4 @@ class TestCaller:
         worktree = tmpdir.path / 'ws' / 'proj' / 'worktrees' / 'g@agent'
         worktree.mkdir(parents=True)
         replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'ws'))
-        assert caller(worktree) == 'proj@g@agent'
+        assert seat(worktree) == 'proj@g@agent'

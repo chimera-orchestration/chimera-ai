@@ -2,6 +2,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,10 @@ from testfixtures import LogCapture, OutputCapture, Replacer, TempDir, compare
 from testfixtures.mock import Mock
 
 import chimera.logging
+from chimera.archive import Archive, ArchiveSession
 from chimera.commands.init import init
-from chimera.context import caller
+from chimera.context import seat
+from chimera.identity import executor
 from chimera.git import Git
 from chimera.logging import (
     configure,
@@ -118,6 +121,9 @@ class TestGeneralCapture:
         )
 
 
+NOON = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+
+
 class TestFileSink:
     def test_writes_a_flat_start_end_pair(self, sink: Path, frozen_clock: None) -> None:
         configure()
@@ -131,7 +137,8 @@ class TestFileSink:
                     'pid': os.getpid(),
                     'command': 'init',
                     'level': 'INFO',
-                    'caller': '@@captain',  # cwd is neither a project nor a repo → captain
+                    'caller': 'human',  # no session ran this…
+                    'seat': '@@captain',  # …and cwd is neither a project nor a repo
                     'phase': 'start',
                     'function': FUNC,
                     'params': {'path': '/ws'},
@@ -141,7 +148,8 @@ class TestFileSink:
                     'pid': os.getpid(),
                     'command': 'init',
                     'level': 'INFO',
-                    'caller': '@@captain',
+                    'caller': 'human',
+                    'seat': '@@captain',
                     'phase': 'end',
                     'duration_ms': 0.0,
                 },
@@ -190,28 +198,69 @@ class TestFileSink:
         log_finish('init', log_start('init', FUNC, {}))
         compare(len(log_path(sink).read_text().splitlines()), expected=2)
 
-    def test_a_stamped_session_attributes_every_line(self, sink: Path, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_SESSION', 'proj@g@agent')
+    def test_a_session_attributes_every_line_to_itself(self, sink: Path, replace: Replacer) -> None:
+        # the executor is proven, not assumed: the harness names the session, the archive
+        # names its address, and only then does a line claim to be that agent's doing
+        replace.in_environ('CLAUDE_CODE_SESSION_ID', 'uuid-1')
+        with Archive.open(sink / 'state' / 'archive.db') as store:
+            store.record_session(
+                ArchiveSession(
+                    platform='claude',
+                    native_id='uuid-1',
+                    status='startup',
+                    started_at=NOON,
+                    address='proj@g@agent',
+                )
+            )
         configure()
         logger.info('hello')
-        compare(
-            json.loads(log_path(sink).read_text())['caller'],
-            expected='proj@g@agent',
-        )
+        line = json.loads(log_path(sink).read_text())
+        compare(line['caller'], expected='proj@g@agent')
+        compare(line['seat'], expected='@@captain')  # …while the seat is still the location
+
+    def test_a_session_with_no_address_is_named_by_its_id(
+        self, sink: Path, replace: Replacer
+    ) -> None:
+        # a hand-launched claude: something ran this and here is which conversation,
+        # without implying a claim it doesn't hold
+        replace.in_environ('CLAUDE_CODE_SESSION_ID', 'e4d0a1b2-0000-0000-0000-000000000000')
+        with Archive.open(sink / 'state' / 'archive.db') as store:
+            store.record_session(
+                ArchiveSession(
+                    platform='claude',
+                    native_id='e4d0a1b2-0000-0000-0000-000000000000',
+                    status='startup',
+                    started_at=NOON,
+                )
+            )
+        configure()
+        logger.info('hello')
+        compare(json.loads(log_path(sink).read_text())['caller'], expected='e4d0a1b2')
+
+    def test_a_human_is_not_the_captain(self, sink: Path) -> None:
+        # standing at the workspace root is how a human reads the captain's mail; it has
+        # never been evidence of *being* the captain, and the log now says so
+        configure()
+        logger.info('hello')
+        line = json.loads(log_path(sink).read_text())
+        compare(line['caller'], expected='human')
+        compare(line['seat'], expected='@@captain')
 
     def test_a_line_about_a_session_never_displaces_the_caller(self, sink: Path) -> None:
         configure()
         logger.bind(session='proj@g@agent').info('agent stop')  # the session acted *on*
         line = json.loads(log_path(sink).read_text())
-        compare(line['caller'], expected='@@captain')
+        compare(line['caller'], expected='human')
         compare(line['session'], expected='proj@g@agent')
 
     def test_unresolvable_identity_still_logs(self, sink: Path, replace: Replacer) -> None:
-        replace.in_module(caller, Mock(side_effect=RuntimeError('boom')), module=chimera.logging)
+        replace.in_module(executor, Mock(side_effect=RuntimeError('boom')), module=chimera.logging)
+        replace.in_module(seat, Mock(side_effect=RuntimeError('boom')), module=chimera.logging)
         configure()
         logger.info('hello')
         line = json.loads(log_path(sink).read_text())
         assert 'caller' not in line
+        assert 'seat' not in line
         compare(line['message'], expected='hello')
 
     def test_a_git_trace_line_lands_at_debug(self, sink: Path) -> None:
@@ -224,7 +273,8 @@ class TestFileSink:
             expected={
                 'pid': os.getpid(),
                 'level': 'DEBUG',
-                'caller': '@@captain',  # even the trace says who ran the command
+                'caller': 'human',  # even the trace says who ran the command
+                'seat': '@@captain',
                 'message': 'git rev-parse --git-dir',
                 'git_cwd': str(sink),
             },

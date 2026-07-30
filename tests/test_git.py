@@ -80,7 +80,7 @@ class TestEnv:
             expected='1',
         )
 
-    def test_caller_env_merges_last(self) -> None:
+    def test_seat_env_merges_last(self) -> None:
         compare(
             _env({'A': 'base'}, {'A': 'caller', 'B': 'new'}),
             expected={

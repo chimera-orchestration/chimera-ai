@@ -7,11 +7,12 @@ process drained — the delivery trap. :meth:`chimera.comms.Comms.deliver` holds
 invariant instead: until acked, a message reaches every session of its recipient, each
 exactly once (the per-session ``seen/`` ledger); only ``ch msg ack``/``defer`` end it.
 
-Whether the session *has* an address is the archive's fact, not re-inferred here: a
-session its SessionStart recorded without one (a one-shot ``claude -p`` — see
-``capture.addressed``) shares a cwd with real conversations, so ``caller(cwd)`` would
-happily hand it their mail. A session the archive has no row for still gets its mail —
-a real chat must not go silent because a hook misfired.
+**Mail goes to the session's own address, never to its seat.** The hook fires for every
+session on the machine, including ones chimera never launched, and several of them share
+a worktree — a one-shot print run, a browser draft, a ``claude`` you opened yourself.
+Delivering to whatever address the *directory* speaks for would hand any of them an
+agent's mail. A session the archive holds no address for therefore receives nothing:
+there is no inbox that is rightfully its.
 """
 
 from pathlib import Path
@@ -22,24 +23,23 @@ from chimera.archive import archive
 from chimera.commands.msg.store import mail
 from chimera.comms import Message
 from chimera.config import NotInWorkspaceError
-from chimera.context import caller, resolve_workspace
+from chimera.context import resolve_workspace
 
 
 def deliver(cwd: Path, session: str) -> list[Message]:
-    """The unacked messages for ``cwd``'s address not yet seen by ``session``, claiming them.
+    """The unacked messages for ``session``'s own address, not yet seen by it, claiming them.
 
     The hook fires for every session on the machine; outside any workspace there is no
-    mailbox to read, and a session archived without a mail address gets none — those are
+    mailbox to read, and a session with no address of its own gets nothing — those are
     the no-ops.
     """
     try:
         workspace = resolve_workspace(cwd)
-        address = caller(cwd)
     except NotInWorkspaceError:
         return []
     with archive(workspace) as store:
         recorded = store.session('claude', session)
-    if recorded is not None and recorded.address is None:
+    if recorded is None or recorded.address is None:
         logger.bind(session=session).info('hook deliver: unaddressed session, no mail')
         return []
-    return mail(workspace).deliver(address, session)
+    return mail(workspace).deliver(recorded.address, session)

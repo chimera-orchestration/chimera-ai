@@ -5,8 +5,9 @@ object ``{time, pid, command?, level, message?, **extra}`` — everything bound 
 included (only the ``line`` scratch is dropped), so any ``logger.bind(...)`` anywhere in the
 codebase surfaces without touching this format.
 
-Every line also carries ``caller`` — the address of whoever is running ``ch``
-(:func:`chimera.context.caller`: the captain's persona, ``<project>@manager``,
+Every line also carries ``caller`` — the session proven to be running ``ch``
+(:func:`chimera.identity.executor`, else ``human``) — and ``seat``, the address
+the directory speaks for (:func:`chimera.context.seat`: ``@@captain``, ``<project>@@manager``,
 ``<project>@<goal>@agent``), bound as loguru's default extra by :func:`configure` so frames,
 domain events and the git trace are all attributed without any call site knowing. It is
 deliberately not named ``session``: plenty of lines bind that for the session they *act on*
@@ -36,7 +37,8 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from chimera.config import NotInWorkspaceError
-from chimera.context import caller, resolve_workspace
+from chimera.context import resolve_workspace, seat
+from chimera.identity import executor
 
 if TYPE_CHECKING:
     from loguru import Record
@@ -97,16 +99,28 @@ def configure() -> None:
 
 
 def _identity(cwd: Path) -> dict[str, str]:
-    """The ``caller`` every line carries: the address of whoever is running ``ch`` here.
+    """What every line carries about who ran the command: ``caller``, and ``seat``.
+
+    Two facts, kept apart because they answer different questions. ``caller`` is the
+    *proven* executor (:func:`chimera.identity.executor`) — the session running this, by
+    its address if it holds one, else ``human``. ``seat`` is the address the *directory*
+    speaks for (:func:`chimera.context.seat`), which is what mail defaults to.
+
+    They differ exactly when it matters: a human at the workspace root reading the
+    captain's mail logs as ``caller=human seat=@@captain``, and a line that once read as
+    the captain's own doing now says who really did it.
 
     Best-effort — identity must never take logging (and with it the command) down: in a
-    workspace broken enough that the caller can't be resolved (a malformed config is
-    doctor's to report, and doctor must still run there) lines just go unattributed.
+    workspace broken enough that neither resolves (a malformed config is doctor's to
+    report, and doctor must still run there) lines just go unattributed.
     """
-    try:
-        return {'caller': caller(cwd)}
-    except Exception:
-        return {}
+    identity: dict[str, str] = {}
+    for key, resolve in (('caller', executor), ('seat', seat)):
+        try:
+            identity[key] = resolve(cwd)
+        except Exception:
+            pass
+    return identity
 
 
 def log_start(command: str, function: str, params: dict[str, object]) -> float:
