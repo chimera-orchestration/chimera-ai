@@ -56,6 +56,8 @@ from chimera.commands.goal.start import start as _goal_start
 from chimera.commands.goal.sync import Outcome, SyncResult
 from chimera.commands.goal.sync import sync as _goal_sync
 from chimera.commands.hook.capture import KNOWN_END_KEYS
+from chimera.commands.session.show import show as _session_show
+from chimera.commands.session.whoami import whoami as _session_whoami
 from chimera.commands.hook.capture import session_end as _hook_session_end
 from chimera.commands.hook.capture import session_start as _hook_session_start
 from chimera.commands.hook.deliver import deliver as _hook_deliver
@@ -1958,6 +1960,30 @@ def archive_backfill(
         f'Imported {result.imported} (already archived: {result.present}, '
         f'outside any workspace: {result.outside}, unplaceable: {result.unplaced})'
     )
+
+
+session_app = typer.Typer(help='Inspect sessions: who this one is, and what ran.')
+app.add_typer(session_app, name='session')
+
+
+@session_app.command(
+    'whoami',
+    cls=LoggingCommand,
+    help='What this session is: its address, or that it holds none.',
+)
+@logs(_session_whoami)
+def session_whoami() -> None:
+    typer.echo(_session_whoami(Path.cwd()))
+
+
+@session_app.command(
+    'show', cls=LoggingCommand, help="One session's record and timeline, by id or its start."
+)
+@logs(_session_show)
+def session_show(
+    session: Annotated[str, typer.Argument(help='A native session id, or its leading block')],
+) -> None:
+    typer.echo(_session_show(Path.cwd(), session))
 
 
 hook_app = typer.Typer(help='Hooks chimera installs into the harness (invoked by it, not you).')

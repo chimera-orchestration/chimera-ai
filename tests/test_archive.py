@@ -5,9 +5,10 @@ from pathlib import Path
 from threading import Barrier, Thread
 
 import pytest
-from testfixtures import TempDir, compare
+from testfixtures import ShouldRaise, TempDir, compare
 
 from chimera.archive import Archive, ArchiveSession, Event, migrate, needs_migration
+from chimera.config import UserError
 
 NOON = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 
@@ -772,3 +773,15 @@ def test_touch_keeps_a_long_running_session_ahead_of_a_fresher_corpse(
     latest = archive.latest_session_for(None, address='a')
     assert latest is not None
     compare(latest.native_id, expected='working')
+
+
+def test_opening_a_legacy_archive_refuses_with_the_fix(db_path: Path) -> None:
+    # applying the schema would part-succeed and then die on an index over a column that
+    # isn't there, so every command would report raw SQL instead of what to do
+    legacy_archive(db_path)
+    with ShouldRaise(
+        UserError(
+            f'{db_path} predates the current session schema — run `ch doctor --fix -c archive-schema`'
+        )
+    ):
+        Archive.open(db_path)

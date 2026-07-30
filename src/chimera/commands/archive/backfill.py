@@ -7,9 +7,7 @@ everything earlier exists solely as a ``<uuid>.jsonl`` transcript under
 and per-entry timestamps, so a historical session is reconstructed: axes from the cwd's
 *path* (see :func:`_axes` for why the hook's live resolver would misplace it),
 ``started_at``/``ended_at`` from the earliest/latest entry timestamps, and status
-``backfilled`` marking the row as reconstructed rather than hook-recorded. ``manager``
-is ``chimera`` for a goal-worktree session (only chimera launches those) and ``none``
-elsewhere — a historical chat's launcher is unknowable from its transcript. A session
+``backfilled`` marking the row as reconstructed rather than hook-recorded. A session
 the archive already knows is left untouched — the insert itself skips a known identity,
 so a re-run (or a hook racing the scan) never clobbers hook-recorded or previously
 backfilled rows. Undoing a backfill is deleting the ``backfilled`` rows.
@@ -22,7 +20,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from chimera.addresses import Actor, Captain, Manager
+from chimera.addresses import Actor
 from chimera.archive import Archive, ArchiveSession, archive
 from chimera.config import NotInWorkspaceError, ProjectConfig, find_workspace, load_config
 from chimera.worktrees import SEP
@@ -126,12 +124,22 @@ def _axes(cwd: Path) -> _Axes | None:
     return workspace, project.name, None, None
 
 
-def _address(project: str | None, goal: str | None, actor: str | None) -> str:
-    """The address the session would have had — ``caller``'s cwd inference, from the axes."""
-    if project is None:
-        return str(Captain())
-    if goal is None or actor is None:
-        return str(Manager(project=project))
+def _address(project: str | None, goal: str | None, actor: str | None) -> str | None:
+    """The address a reconstructed session may claim — a goal actor's, or none at all.
+
+    A transcript records where a session ran, never who launched it, so there is no
+    launch to claim (:func:`chimera.commands.agent.record_launch`) and geography alone
+    never entitles a session to an address. One exception, the same one the schema
+    migration makes: a ``<goal>@<actor>`` worktree is chimera's own creation and only
+    chimera launches agents into it, so the axes there name an actor rather than guess
+    at one.
+
+    A bare workspace or project dir gets nothing. Those are exactly the historical rows
+    that used to be archived as the captain or a manager on no evidence — a raw
+    ``claude`` opened in a project directory reading as that project's manager.
+    """
+    if project is None or goal is None or actor is None:
+        return None
     return str(Actor(project, goal, actor))
 
 

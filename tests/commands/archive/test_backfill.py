@@ -92,7 +92,7 @@ def test_swept_worktree_cwd_keeps_its_axes(tmpdir: TempDir) -> None:
     )
 
 
-def test_bare_workspace_cwd_names_the_captain(tmpdir: TempDir) -> None:
+def test_a_bare_workspace_session_claims_nothing(tmpdir: TempDir) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
     ws = tmpdir.path / 'ws'
     store = tmpdir.path / 'claude'
@@ -107,7 +107,6 @@ def test_bare_workspace_cwd_names_the_captain(tmpdir: TempDir) -> None:
                 status='backfilled',
                 started_at=datetime(2026, 7, 9, 6, 52, 57, 81000, tzinfo=timezone.utc),
                 ended_at=datetime(2026, 7, 9, 6, 52, 57, 81000, tzinfo=timezone.utc),
-                address='@@captain',
                 cwd=ws,
                 transcript=transcript,
                 workspace='ws',
@@ -116,7 +115,7 @@ def test_bare_workspace_cwd_names_the_captain(tmpdir: TempDir) -> None:
     )
 
 
-def test_project_dir_cwd_names_the_manager(tmpdir: TempDir) -> None:
+def test_a_project_dir_session_claims_nothing(tmpdir: TempDir) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     tmpdir.dump('ws/proj/config.yaml', {'kind': 'project', 'repo': '/r'})
     store = tmpdir.path / 'claude'
@@ -127,7 +126,6 @@ def test_project_dir_cwd_names_the_manager(tmpdir: TempDir) -> None:
         expected=[
             like(
                 ArchiveSession,
-                address='proj@@manager',
                 project='proj',
                 goal=None,
                 actor=None,

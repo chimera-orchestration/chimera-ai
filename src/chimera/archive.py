@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict
 
 from loguru import logger
 
+from chimera.config import UserError
 from chimera.sqlite import Database
 
 
@@ -209,7 +210,20 @@ class Archive:
 
     @classmethod
     def open(cls, path: Path) -> Self:
-        """Open (creating if absent) the archive at ``path``, tuned for concurrent access."""
+        """Open (creating if absent) the archive at ``path``, tuned for concurrent access.
+
+        Refuses a database still on the pre-trim schema, naming the fix. Applying the
+        schema to one would part-succeed — the ``CREATE TABLE`` is a no-op against the
+        old table, then an index over a column that isn't there fails — so every command
+        touching the archive would die on a raw SQL error instead of saying what to do.
+        Migrating here instead was tempting and wrong: a schema rewrite is doctor's, done
+        once and deliberately, not something a listing does to you by surprise.
+        """
+        if needs_migration(path):
+            raise UserError(
+                f'{path} predates the current session schema — '
+                'run `ch doctor --fix -c archive-schema`'
+            )
         return cls(Database.open(path, SCHEMA))
 
     def close(self) -> None:
