@@ -23,6 +23,7 @@ read :doc:`concepts`. Day to day, the guides below cover each workflow, and
    :maxdepth: 1
    :caption: Getting started
 
+   install
    tutorial
 
 .. toctree::

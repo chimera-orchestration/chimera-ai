@@ -1,26 +1,12 @@
 Tutorial: your first goal
 =========================
 
-This walks the whole loop once: install ``ch``, create a workspace, add a
-project, set an agent working on a goal, and land its work on ``main``.
-It takes about ten minutes. Every command shown here works as typed.
+This walks the whole loop once: create a workspace, add a project, set an
+agent working on a goal, and land its work on ``main``. It takes about ten
+minutes. Every command shown here works as typed.
 
-You will need `uv <https://docs.astral.sh/uv/>`_ (or another way to install a
-Python package as a tool), git, and the ``claude`` CLI — Claude Code is the
-agent harness Chimera launches by default.
-
-Install
--------
-
-.. installs from PyPI — not run by the doc tests, which use the checkout itself.
-.. skip: next
-
-.. code-block:: console
-
-    $ uv tool install chimera-ai
-
-This installs two identical entry points, ``ch`` and ``chimera``. Everything
-below uses the short one.
+It assumes you have ``ch`` on your PATH and the ``claude`` CLI installed — if
+not, start with :doc:`install`.
 
 Create a workspace
 ------------------
