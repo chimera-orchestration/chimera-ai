@@ -21,6 +21,7 @@ import shlex
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from subprocess import STDOUT, CalledProcessError, check_output
 from urllib.parse import urlsplit
 
 from giterator import Git as GiteratorGit
@@ -131,11 +132,33 @@ class Git(GiteratorGit):
     def __call__(
         self, *command: str, env: dict[str, str] | None = None, cwd: Path | None = None
     ) -> str:
-        if not completing():
-            logger.bind(git_cwd=str(cwd or self.path)).debug(shlex.join(('git', *command)))
+        self._trace(command, cwd or self.path)
         return super().__call__(*command, env=_env(os.environ, env), cwd=cwd or self.path)
 
     git = __call__
+
+    def _trace(self, command: tuple[str, ...], cwd: Path) -> None:
+        if not completing():
+            logger.bind(git_cwd=str(cwd)).debug(shlex.join(('git', *command)))
+
+    def raw(self, *command: str, cwd: Path | None = None) -> bytes:
+        """Run a git command, returning its output as raw bytes.
+
+        For output that splices blob content in (``log -p``, ``diff``) or ``-z`` file names:
+        git never transcodes, so none of that is guaranteed UTF-8 — decoding it crashes on
+        the first latin-1 file in someone's history.
+        """
+        where = cwd or self.path
+        self._trace(command, where)
+        try:
+            return check_output(
+                ('git', *command), cwd=where, stderr=STDOUT, env=_env(os.environ, None)
+            )
+        except CalledProcessError as e:
+            raise GitError(
+                f'{" ".join(e.cmd)!r} gave return code {e.returncode}:\n\n'
+                f'{e.output.decode(errors="replace")}\n\n'
+            ) from None
 
     def ref_exists(self, ref: str) -> bool:
         try:

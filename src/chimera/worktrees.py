@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from subprocess import DEVNULL, PIPE, run
@@ -230,12 +231,15 @@ def checkout_here(git: Git, branch_name: str, into: Path, log_as: str) -> Checko
     return Checkout(done=True, where=top, branch=branch_name, was=landed)
 
 
-def _patch_ids(diffs: str) -> set[str]:
-    """The set of patch-ids in a (possibly multi-commit) diff, one per commit it contains."""
+def _patch_ids(diffs: bytes) -> set[str]:
+    """The set of patch-ids in a (possibly multi-commit) diff, one per commit it contains.
+
+    Bytes in: diff text splices in blob content, which is never guaranteed UTF-8.
+    """
     if not diffs.strip():
         return set()
-    out = run(('git', 'patch-id', '--stable'), input=diffs, stdout=PIPE, text=True).stdout
-    return {line.split()[0] for line in out.splitlines() if line.strip()}
+    out = run(('git', 'patch-id', '--stable'), input=diffs, stdout=PIPE).stdout
+    return {line.split()[0].decode() for line in out.splitlines() if line.strip()}
 
 
 def is_merged(git: Git, ref: str, base: str) -> bool:
@@ -244,20 +248,38 @@ def is_merged(git: Git, ref: str, base: str) -> bool:
     Ancestry alone misses squash- and rebase-merges (the original commits never land on base),
     so we fall back to patch equivalence: ref is merged when ref is reachable from base (a
     fast-forward or a real merge commit), or every commit unique to ref has an equivalent patch
-    already on base (rebase-merge, or a single squashed commit), or ref's whole combined diff
-    matches one commit on base (a squash-merge of several commits).
+    already on base (rebase-merge, or a single squashed commit — ``git cherry``, which computes
+    the patch-ids inside git, so base's whole history never streams through this process), or
+    ref's combined diff matches one commit on base (a squash-merge of several commits) — sought
+    only among the base commits touching ref's own paths, so a busy base replays a sliver of
+    its history, not every diff anyone landed. What diff text we do handle stays bytes
+    throughout (:meth:`Git.raw`): blob content is never guaranteed UTF-8.
     """
     try:
         git('merge-base', '--is-ancestor', ref, base)
         return True
     except GitError:
         pass
-    mb = git('merge-base', base, ref).strip()
-    base_ids = _patch_ids(git('log', '-p', '--no-color', f'{mb}..{base}'))
-    ref_ids = _patch_ids(git('log', '-p', '--no-color', f'{mb}..{ref}'))
-    if ref_ids and ref_ids <= base_ids:
+    # '-' marks a commit whose patch base already carries; '+' one it doesn't — or an empty
+    # commit, which has no patch to match, so '+'es are harmless when their patches are empty
+    cherry = [line.split() for line in git('cherry', base, ref).splitlines()]
+    unmatched = (sha for mark, sha in cherry if mark == '+')
+    if any(mark == '-' for mark, _ in cherry) and not any(
+        git.raw('diff-tree', '--no-commit-id', '-p', sha).strip() for sha in unmatched
+    ):
         return True
-    return next(iter(_patch_ids(git('diff', mb, ref))), '') in base_ids
+    mb = git('merge-base', base, ref).strip()
+    paths = [
+        os.fsdecode(p)
+        for p in git.raw('diff', '--name-only', '--no-renames', '-z', mb, ref).split(b'\0')
+        if p
+    ]
+    if not paths:
+        return False  # ref's tree is mb's own — no diff to seek on base
+    base_ids = _patch_ids(
+        git.raw('log', '-p', '--no-color', '--full-history', f'{mb}..{base}', '--', *paths)
+    )
+    return next(iter(_patch_ids(git.raw('diff', mb, ref))), '') in base_ids
 
 
 def is_dirty(worktree: Path) -> bool:

@@ -222,6 +222,49 @@ class TestIsMerged:
         git('cherry-pick', *git('rev-list', '--reverse', 'main..feature').split())
         assert is_merged(git, 'feature', 'main')
 
+    def test_rebase_merge_with_empty_commit_left_on_feature(self, tmpdir: TempDir) -> None:
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        git = Git(repo.path)
+        git('cherry-pick', *git('rev-list', '--reverse', 'main..feature').split())
+        repo('checkout', '-q', 'feature')
+        repo('commit', '-q', '--allow-empty', '-m', 'marker')
+        repo('checkout', '-q', 'main')
+        assert is_merged(git, 'feature', 'main')
+
+    def test_only_empty_commits_is_unmerged(self, tmpdir: TempDir) -> None:
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        repo('commit', '-q', '--allow-empty', '-m', 'marker')
+        repo('checkout', '-q', 'main')
+        repo.commit_content('other-work')
+        assert not is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_squash_merge_when_base_history_carries_non_utf8(self, tmpdir: TempDir) -> None:
+        # unrelated latin-1 content landing on main must never crash the containment check
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        (repo.path / 'legacy.csv').write_bytes(b'M\xf6tley Cr\xfce\n')
+        repo('add', 'legacy.csv')
+        repo('commit', '-qm', 'latin-1 export')
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_squash_merge_of_non_utf8_content(self, tmpdir: TempDir) -> None:
+        # the branch's own diff is latin-1, so the patch text itself can't be decoded
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        (repo.path / 'legacy.csv').write_bytes(b'M\xf6tley Cr\xfce\n')
+        repo('add', 'legacy.csv')
+        repo('commit', '-qm', 'latin-1 export')
+        repo.commit_content('more')
+        repo('checkout', '-q', 'main')
+        repo.commit_content('other-work')
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
 
 def test_is_dirty(git_repo: Repo) -> None:
     assert not is_dirty(git_repo.path)
