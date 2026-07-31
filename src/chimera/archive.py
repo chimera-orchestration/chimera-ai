@@ -101,6 +101,11 @@ class ArchiveSession(BaseModel):
         return self.transcript is not None and not self.transcript.exists()
 
 
+RECONCILED = 'reconciled'
+"""The closing status of a session no harness still reports: it ended without its end
+hook firing (killed, crashed, the machine rebooted), and the registry's silence is what
+says so. Distinct from a clean exit's own reason, so the two are never confused."""
+
 ACTIVE = 'active'
 """The event kind a working session lands each turn (:meth:`Archive.touch`) — the
 heartbeat that keeps activity ordering honest between a start and an end."""

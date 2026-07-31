@@ -29,7 +29,7 @@ from chimera.agents import AgentSession
 from chimera.agents.context import Source, assemble, materialize
 from chimera.agents.registry import AGENTS, AgentSpec, resolve_spec
 from chimera.archive import archive
-from chimera.commands.agent import agents, resume_target, scope_line, scoped, shown
+from chimera.commands.agent import agents, reconcile, resume_target, scope_line, scoped, shown
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
 from chimera.commands.agent import stop as _agent_stop
@@ -753,6 +753,7 @@ def dump(
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
     rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
+    reconcile(scope.workspace, rows)  # …and sessions that died unheard stop looking open
     with archive(scope.workspace) as store:
         _render_board(board(scope, rows, store, mail(scope.workspace)))
 
@@ -766,6 +767,7 @@ def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> 
 def dashboard_cmd(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
     rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
+    reconcile(scope.workspace, rows)
     with archive(scope.workspace) as store:
         # color=True: this command exists to run under `watch`, which pipes our stdout
         # (no tty) — Click would otherwise auto-strip the ANSI codes before watch sees them.
@@ -1731,7 +1733,9 @@ def agent_ls(
 ) -> None:
     scope = _scope(ctx, project, goal)
     typer.echo(scope_line(scope))
-    rows, withheld = shown(scoped(agents(), scope, otherwise=None), verbose)
+    listing = agents()
+    reconcile(scope.workspace, listing)
+    rows, withheld = shown(scoped(listing, scope, otherwise=None), verbose)
     if not rows:
         typer.echo('No agents running')
     else:

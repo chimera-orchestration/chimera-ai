@@ -55,6 +55,7 @@ def _record(
                 native_id=native_id,
                 status='ended',
                 started_at=started_at,
+                ended_at=started_at,  # coherent: a session that ended has an ended_at
                 address=address,
                 workspace=ws.name,
                 project=project,

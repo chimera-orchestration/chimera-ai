@@ -8,7 +8,7 @@ from dataclasses import replace as replace_field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from testfixtures import Replacer, ShouldRaise, TempDir, compare
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 
 from chimera import __main__ as chimera_main
 from chimera.agents import AgentSession
@@ -21,6 +21,7 @@ from chimera.commands.agent import (
     agents,
     in_goal,
     live,
+    reconcile,
     resume,
     resume_target,
     scope_line,
@@ -1568,3 +1569,64 @@ def test_agent_stop_cli_refuses_a_missing_worktree(
         ),
         return_code=1,
     )
+
+
+class TestReconcile:
+    # a session that dies without its end hook firing — killed, crashed, rebooted —
+    # stays open forever, and an open row outranks the closed ones a resume picks between
+
+    def _archived(self, ws: Path, native_id: str, ended: bool = False) -> None:
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            store.record_session(
+                ArchiveSession(
+                    platform='claude',
+                    native_id=native_id,
+                    status='startup',
+                    started_at=datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc),
+                    ended_at=datetime(2026, 6, 15, 13, 0, tzinfo=timezone.utc) if ended else None,
+                )
+            )
+
+    def _rows(self, ws: Path) -> dict[str, str]:
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            return {s.native_id: s.status for s in store.sessions()}
+
+    def test_closes_a_session_no_harness_reports(self, tmpdir: TempDir) -> None:
+        ws = tmpdir.makedir('ws')
+        self._archived(ws, 'gone')
+        closed = reconcile(ws, [])
+        compare([s.native_id for s in closed], expected=['gone'])
+        compare(self._rows(ws), expected={'gone': 'reconciled'})
+
+    def test_leaves_a_session_still_reported_live(self, tmpdir: TempDir) -> None:
+        ws = tmpdir.makedir('ws')
+        self._archived(ws, 'running')
+        compare(reconcile(ws, [_agent_at(ws, 'running')]), expected=[])
+        compare(self._rows(ws), expected={'running': 'startup'})
+
+    def test_leaves_a_session_already_closed(self, tmpdir: TempDir) -> None:
+        # its own end hook fired; the reason it recorded must not be overwritten
+        ws = tmpdir.makedir('ws')
+        self._archived(ws, 'done', ended=True)
+        compare(reconcile(ws, []), expected=[])
+        compare(self._rows(ws), expected={'done': 'startup'})
+
+    def test_records_an_end_event_so_the_timeline_says_how(self, tmpdir: TempDir) -> None:
+        ws = tmpdir.makedir('ws')
+        self._archived(ws, 'gone')
+        reconcile(ws, [])
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            [event] = [e for e in store.events(native_id='gone') if e.kind == 'end']
+        compare(event.detail, expected='reconciled')
+
+    def test_says_what_it_closed(self, tmpdir: TempDir, full_logs: LogCapture) -> None:
+        ws = tmpdir.makedir('ws')
+        self._archived(ws, 'gone')
+        reconcile(ws, [])
+        full_logs.check_present(
+            {
+                'level': 'INFO',
+                'message': 'agent: closed sessions no harness still reports',
+                'sessions': ['gone'],
+            }
+        )

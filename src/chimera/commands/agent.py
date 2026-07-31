@@ -7,7 +7,7 @@ from loguru import logger
 from chimera.agent_env import ai_session
 from chimera.agents import AgentSession
 from chimera.agents.registry import AGENTS, AgentSpec
-from chimera.archive import PendingLaunch, archive
+from chimera.archive import RECONCILED, ArchiveSession, Event, PendingLaunch, archive
 from chimera.config import NotInWorkspaceError, UserError
 from chimera.context import Scope, resolve_workspace
 from chimera.dry import Dry
@@ -89,6 +89,41 @@ def refuse_restricted(cwd: Path, spec: AgentSpec, extra: Sequence[str]) -> None:
     """
     if ai_session(cwd) and (hit := sorted(spec.agent.restricted.intersection(extra))):
         raise UserError(f'{", ".join(hit)}: not available when chimera is driven by an AI agent')
+
+
+def reconcile(workspace: Path, listing: list[AgentSession]) -> list[ArchiveSession]:
+    """Close archived sessions no harness reports live any more; return the ones closed.
+
+    A session that dies without its end hook firing — killed, crashed, its machine
+    rebooted — stays open in the archive forever, and an open row outranks the closed
+    ones a resume should be choosing between. The registry is the authority on what is
+    running, so anything it no longer claims is over.
+
+    Called by the listers, because that is when the answer is about to be read and a
+    correction costs nothing: pure SQL, a registry query and a pid check, no model turn
+    (see AGENTS.md's *No tokens for admin*). ``listing`` is the live sessions the caller
+    already gathered, so the reconciliation adds no work of its own.
+    """
+    live = {(session.id) for session in listing}
+    at = datetime.now(timezone.utc)
+    with archive(workspace) as store:
+        closed = [row for row in store.sessions(active=True) if row.native_id not in live]
+        for row in closed:
+            store.end_session(row.platform, row.native_id, at=at, status=RECONCILED)
+            store.record_event(
+                Event(
+                    at=at,
+                    kind='end',
+                    detail=RECONCILED,
+                    platform=row.platform,
+                    native_id=row.native_id,
+                )
+            )
+    if closed:
+        logger.bind(sessions=[row.native_id for row in closed]).info(
+            'agent: closed sessions no harness still reports'
+        )
+    return closed
 
 
 def record_launch(cwd: Path, address: str, spec: AgentSpec) -> None:
