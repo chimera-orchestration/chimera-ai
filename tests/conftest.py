@@ -5,11 +5,13 @@ from typing import Any
 
 import pytest
 from giterator import Git
+from loguru import logger
 from giterator.testing import DEFAULT_USER, Repo
 from testfixtures import LogCapture, Replacer, TempDir, not_there
 
 from chimera.__main__ import app
 from chimera.agents.registry import AGENTS
+from chimera.archive import Archive
 from chimera.commands.init import init
 from tests.cli import Command, Run, full_capture
 
@@ -52,6 +54,53 @@ def _no_real_harness(replace: Replacer) -> None:
     # would otherwise be sent looking for tests.conftest.guarded
     guarded.__module__, guarded.__name__ = real.__module__, real.__name__
     replace.in_module(subprocess.Popen, guarded)
+
+
+@pytest.fixture(autouse=True)
+def _clear_bound_identity() -> Iterator[None]:
+    """Reset loguru's default extra, so one test's identity can't attribute the next's lines.
+
+    ``chimera.logging.configure`` binds ``caller``/``seat`` with ``logger.configure(extra=…)``,
+    which sets *process-global* state on loguru's core. ``LogCapture`` doesn't restore it —
+    its loguru source saves and restores the handlers and the minimum level, which is a
+    different thing — so without this a test that never configures logging inherits whoever
+    ran last. Harmless in production (one process, one command); in a suite it makes log
+    assertions depend on test order.
+    """
+    logger.configure(extra={})
+    yield
+    logger.configure(extra={})
+
+
+@pytest.fixture(autouse=True)
+def _no_live_archive(tmpdir: TempDir, replace: Replacer) -> None:
+    """Make it impossible for a test to open an archive outside its own directory.
+
+    Clearing ``$CHIMERA_WORKSPACE`` is not enough: workspace resolution *walks up from
+    cwd*, and the suite itself runs inside a chimera worktree, so a test that stayed
+    there resolved the user's live workspace. Identity resolution reads the archive on
+    every ``ch`` invocation, which made that reachable from almost anywhere.
+
+    Depending on ``tmpdir`` does the work twice over. It chdirs every test into a fresh
+    directory, so the walk-up can't reach the real workspace in the first place; and it
+    gives the check something concrete to compare against — *this test's* directory, not
+    merely "somewhere temporary", which any stray path under the system temp dir would
+    satisfy.
+    """
+    real = Archive.open.__func__  # the underlying function, not the bound classmethod
+    # resolved on both sides: macOS hands out /var/folders/… for a TempDir while a path
+    # built by walking up from cwd comes back /private/var/folders/…
+    own = tmpdir.path.resolve()
+
+    def guarded(cls: type[Archive], path: Path) -> Archive:
+        if not path.resolve().is_relative_to(own):
+            raise AssertionError(
+                f'a test tried to open an archive outside its own directory: {path}\n'
+                f'(this test may only use {own})'
+            )
+        return real(cls, path)
+
+    replace.on_class(Archive.open, classmethod(guarded))
 
 
 @pytest.fixture(autouse=True)

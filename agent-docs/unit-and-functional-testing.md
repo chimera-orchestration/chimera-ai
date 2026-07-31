@@ -120,6 +120,27 @@ attribute, a later `in_module` resolves to the *stand-in's* defining module and 
 `Original '<stand-in>' not found` (testfixtures#259). A replacement that outlives one test —
 a conftest guard — sets `stand_in.__module__, stand_in.__name__ = real.__module__, real.__name__`.
 
+**Never reach the user's live workspace.** Two autouse guards in `tests/conftest.py`, and
+both are positional rather than trusting configuration:
+
+- `_no_real_harness` refuses any `Popen` naming a registered harness (below).
+- `_no_live_archive` refuses any `Archive.open` outside *this test's own* `tmpdir`. It depends
+  on the `tmpdir` fixture deliberately: that chdirs every test into a fresh directory, so
+  workspace resolution — which **walks up from cwd**, and the suite runs inside a chimera
+  worktree — can't reach the real workspace at all, and the check then has something concrete
+  to compare against. `tempfile.gettempdir()` would not do: "somewhere temporary" is satisfied
+  by any stray path, where "under this test's directory" is the actual rule.
+
+Clearing `$CHIMERA_WORKSPACE` does not cover this: identity resolution reads the archive on
+every `ch` invocation, and the walk-up finds the live workspace with the variable unset.
+
+**Loguru's default `extra` is process-global and nothing else resets it.**
+`chimera.logging.configure` binds `caller`/`seat` with `logger.configure(extra=…)`, which
+`LogCapture` does *not* restore — its loguru source saves and restores the handlers and the
+minimum level, a different thing (testfixtures#265). Without the `_clear_bound_identity`
+fixture, a test that never configures logging inherits whoever ran last, and log assertions
+start depending on test order.
+
 **Never launch a real agent session.** An autouse `_no_real_harness` fixture (`tests/conftest.py`)
 refuses any `Popen` whose argv names a registered harness. Observe a launch with
 `tests.cli.capture_launches`, a registry query with `MockPopen` — never by stubbing a layer of the
