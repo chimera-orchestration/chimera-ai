@@ -47,16 +47,13 @@ directory is — depth and naming are never assumed.
 Telling ``ch`` where the workspace is
 -------------------------------------
 
-.. envvar:: CHIMERA_WORKSPACE
-
-   The absolute path of the workspace. When set, every ``ch`` command uses
-   it; when unset, commands walk up from the current directory to the
-   nearest ``kind: workspace`` marker.
+:envvar:`CHIMERA_WORKSPACE` names the workspace: when it is set, every ``ch``
+command uses it, and when it is not, commands walk up from the current
+directory to the nearest ``kind: workspace`` marker.
 
 You will often run ``ch`` from a checkout that lives *outside* the workspace
 — a branch you have checked out to review, say — where the walk-up finds
-nothing. So set :envvar:`CHIMERA_WORKSPACE` once in your shell profile and
-``ch`` works from anywhere:
+nothing. So set it once in your shell profile and ``ch`` works from anywhere:
 
 .. code-block:: zsh
 

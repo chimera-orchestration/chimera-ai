@@ -49,5 +49,6 @@ read :doc:`concepts`. Day to day, the guides below cover each workflow, and
    :caption: Reference
 
    reference
+   environment
    changes
    license

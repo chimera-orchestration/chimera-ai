@@ -80,6 +80,7 @@ Topics docs live in agent-docs/{topic}.md, if you are working on/with {topic}, r
 - @agent-docs/commands.md
 - @agent-docs/unit-and-functional-testing.md
 - @agent-docs/documentation.md
+- @agent-docs/environment.md — read before adding, reading or removing an environment variable
 - @agent-docs/git-commits.md
 - @agent-docs/logging.md
 - @agent-docs/sessions.md — read before touching session identity, liveness, the archive, hooks, occupancy, `agent start`/`resume`/`stop`, or adding a harness

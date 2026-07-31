@@ -181,15 +181,53 @@ asymmetry is on file, not as a suggestion.
 - Every launch is accompanied by more SessionStart firings than there are conversations —
   budget for it when reasoning about "how many sessions are in this directory".
 
-## What this means for chimera
+## What this means for chimera — and what was built
 
-- **Identity comes from the launcher**, not the environment: mint a uuid and pass
-  `--session-id` (foreground), or read `backgrounded · <short>` back from stdout (`--bg`).
-- **Location is not identity.** cwd survives every transition, which makes it the right source
-  for *axes* (workspace/project/goal/actor) and a legitimate basis for *restricting* a session
-  — but never for granting it an address. See `chimera.addresses`.
-- **Liveness needs the `(pid, create_time)` pair**, captured at SessionStart and matched later.
-- **Occupancy must exclude non-conversations** and discount husks via the fork-event marker.
+**Identity comes from the launcher, but not from the environment.** A launcher records a
+`PendingLaunch` (cwd, address, model) *before* it spawns, and the session's own start hook
+claims it. This is uniform across both modes because neither lets a launcher write a complete
+row afterwards: a foreground launch blocks until the session exits, and `--bg` is refused the
+chance to choose an id at all. `--session-id` is still passed foreground — it makes the id
+chimera chose the one claude uses everywhere — but nothing depends on it.
+
+A claim is **consumed**, so two sessions starting in one directory can't both take an address;
+the second stays unaddressed, which is the safe way to be wrong. An unclaimed record **expires**
+(`LAUNCH_WINDOW`, 2 min): a launch that never produced a session would otherwise lie in wait to
+hand its address to whatever started there next.
+
+**Location is not identity.** cwd survives every transition, which makes it the right source
+for *axes* (workspace/project/goal/actor) and a legitimate basis for *restricting* a session —
+but never for granting it an address. The axes and the address are separate columns for exactly
+this reason. A raw `claude` in a goal worktree gets the axes and no address: no mail, no board
+slot, no resume handle — but it *is* fenced as that goal's agent, and it *does* count as an
+occupant.
+
+**The address is the only thing that crosses a bridge.** No id survives one, and the fork
+payload doesn't name its parent, so a `branched` session inherits from the newest session still
+open in the same cwd — *presumed*, and logged as such. Without it, backgrounding a chat would
+silently orphan its mail.
+
+**The role and its fence come from the address**, not from a stamp: `@@captain` unfenced,
+`<project>@@manager` and `<project>@<goal>@<actor>` fenced to their project. `CHIMERA_ROLE` is
+gone, because it reached a foreground session and nothing else — and passing a prompt is exactly
+what makes a launch background, so the unattended agents were the unfenced ones.
+
+**`$CLAUDE_ENV_FILE` injection was deliberately not built.** It works, but the archive row
+answers the same question over documented surfaces, and an optimisation is not worth a
+dependency the docs contradict.
+
+**Liveness needs the `(pid, create_time)` pair**, captured at SessionStart and matched later —
+never an inequality. `Agent.stop` re-verifies immediately before signalling, since that is the
+one place acting on a stale answer is unrecoverable.
+
+**Occupancy is not liveness.** `occupants()` excludes non-conversations (the harness's own
+`addressable` verdict, as recorded) and discounts husks via the fork-event marker. The launchers
+refuse a second writer; a harness-native start never reaches them and can only be warned at
+SessionStart, which cannot refuse.
+
+**Sessions that die unheard are closed by the listers** (`reconcile`), because an open row
+outranks the closed ones a resume chooses between. **Drift is caught by a doctor check**
+(`harness-contract`) re-asserting the claims above against recorded rows.
 
 ## Adding a harness
 
@@ -201,12 +239,17 @@ lives *inside* `Claude` and appears nowhere in the interface:
 
 | chimera asks | meaning | how `Claude` answers it |
 |---|---|---|
-| `start(…) -> native id` | launch a session and tell me its id | foreground: mint a uuid and pass `--session-id`; background: read back `backgrounded · <short>` |
+| `start(…) -> native id \| None` | launch a session and tell me its id, if you can | foreground: mints a uuid and passes `--session-id`; `--bg` refuses that flag, so it answers `None` and the hook binds the id |
 | `session_id_from_env()` | am I running inside one of your sessions — which? | `CLAUDE_CODE_SESSION_ID` |
 | `identity(payload)` | which session does this start event name? | the transcript stem, cross-checked against payload and env |
 | `addressable(payload, env)` | may this session hold an address? | no `agent_type`, entrypoint ≠ `sdk-cli` |
 | `lifecycle(payload)` | started, resumed, or branched from another? | `source`, mapping `fork` → branched |
 | `stop(session)` | end it | `claude stop <id>` for background, SIGTERM otherwise |
+
+Note what is *not* asked: whether a launch is allowed. An adapter reports what its registry
+claims is live; which of those count as occupants is chimera's policy, applied by the launchers
+(`chimera.commands.agent.occupants`). Keeping that inside the adapter meant the lower layer
+importing the higher one, which is how the layering announced itself.
 
 The line: **declare data chimera must compare against** (`platform`, `restricted`'s bypass
 spellings — chimera matches user input against these), **encapsulate every decision the

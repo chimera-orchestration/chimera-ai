@@ -94,17 +94,20 @@ agent:
   model: opus       # optional; harness-native name
 ```
 
-Every launcher also stamps role identity into the session's environment
-(`chimera.agent_env.role_env`, threaded to the harness as an `env` overlay on the parent
-environment): `CHIMERA_ROLE` — `captain` for the bare-workspace chat, `manager` for a project
-chat, `agent` for the goal-scoped launchers — plus `CHIMERA_ROLE_SCOPE` naming what it's fenced
-to (`<project>` for a manager, `<project>@<goal>` for an agent; the captain gets none —
-unfenced). The overlay wins over the launching session's own values, so a captain running
-`ch goal start` hands the child `agent`, never its own `captain`. The stamp drives the per-role
-command strip and, for a scoped manager, the arg-level project fence (both under
-`agent-docs/commands.md`, *Role-scoped commands*); `--dry` previews the stamp as a
-`role:` line. Honesty: env identity is a fence, not a wall — unset-able, like `CLAUDECODE`; the
-wall is the harness permission layer — the fence's value is not advertising footguns.
+Every launcher also puts the session's **address** on record before spawning
+(`chimera.commands.agent.record_launch`), and the session's own start hook claims it — see
+`agent-docs/sessions.md`. That address is the whole of its identity: role and fence both, since
+`@@captain` names no project (unfenced), while `<project>@@manager` and
+`<project>@<goal>@<actor>` name theirs. It drives the per-role command strip and the arg-level
+project fence (both under `agent-docs/commands.md`, *Role-scoped commands*); `--dry` previews it
+as an `address:` line.
+
+This replaced a `CHIMERA_ROLE` environment stamp, which reached a foreground session and
+nothing else — a background launch runs in a pooled worker that never saw the launcher's
+environment, and passing a prompt is exactly what makes a launch background. The unattended
+agents were the unfenced ones. Honesty, still: the fence is a fence, not a wall — a session that
+holds no address is simply unfenced, and the wall is the harness permission layer. Its value is
+in not advertising footguns.
 
 ## Chat: the captain and scoped conversations
 
@@ -207,8 +210,8 @@ project) → nothing rendered, nothing injected, no log line; with one, the role
 renders, so every workspace launch injects context.
 
 `ch prime` is the *pull* counterpart of this pushed context: run anywhere, it prints the
-scope's role-shaped golden path (the role from `CHIMERA_ROLE` when the session was launched
-by chimera, else inferred from cwd) — the same text `ch chat` pushes — see
+scope's role-shaped golden path (the role from the session's own address when chimera
+launched it, else inferred from cwd) — the same text `ch chat` pushes — see
 `agent-docs/commands.md`, *Self-documentation*.
 
 ## Prompt templates

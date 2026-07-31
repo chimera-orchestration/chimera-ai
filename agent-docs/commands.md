@@ -88,9 +88,8 @@ so they *could* drift — a test (`tests/test_prime.py`) pins every backtick-cit
 command to a live leaf of the tree that role's sessions actually see: the role allowlist
 prune for the listed roles (the captain skips it), then minus the human-only
 `RESTRICTED_COMMANDS` every AI session loses — so prime provably never mentions fenced
-capability. The role is the session's
-`CHIMERA_ROLE` stamp when set, else inferred from cwd (goal worktree → agent, project dir →
-manager, bare workspace → captain) — the pull path for sessions chimera didn't launch, and
+capability. The role comes from the session's own address when chimera launched it, else
+is inferred from cwd (goal worktree → agent, project dir → manager, bare workspace → captain) — the pull path for sessions chimera didn't launch, and
 for humans. The launchers also *push* the role's prime as the identity block of the launch
 context — chat the captain's/manager's, the goal launchers the agent's; `ch errand` alone
 keeps a bare identity sentence (see `agent-docs/workspace-layout.md`, *Launch context*) —
@@ -109,8 +108,8 @@ trails `ch help -v also lists…`; `ch doctor` reveals the count of passing chec
 An option too risky to trust to an AI agent's own judgement (`--force`, `--dangerous`) is named
 in `chimera.agent_env.RESTRICTED_OPTIONS`. When `chimera.agent_env.ai_session()` is true —
 either signal: a harness marker (`running_under_ai_agent()`, currently `CLAUDECODE`) *or* a
-chimera role stamp (`CHIMERA_ROLE`; launchers only ever stamp roles into AI sessions, so a
-future non-claude harness with no marker of its own still can't hand the options back) —
+the archive knowing this process to be a session it recorded (so a future harness with
+no marker of its own still can't hand the options back, provided chimera launched it) —
 `__main__.main()` builds the Click command tree via
 `typer.main.get_command(app)` and strips any parameter matching `RESTRICTED_OPTIONS` from every
 command's `.params` before invoking it (`_strip_restricted_options`) — not hidden, physically
@@ -139,10 +138,10 @@ caller asked for would just be confusing). It triggers on the same `ai_session()
 
 The same machinery one level up: where `RESTRICTED_OPTIONS` strips options, per-role command
 allowlists (`chimera.agent_env.ROLE_COMMANDS`, canonical leaf paths keyed by role) strip whole
-commands. The launchers themselves set the variable — every launch stamps
-`role_env(role, scope)` into the session's environment (see `agent-docs/workspace-layout.md`,
-*Choosing the harness and model*). When `CHIMERA_ROLE` names a listed role (`session_role()`;
-empty counts as unset), `main()` prunes the tree it built (`_strip_to_role`) before invoking: a leaf not in the role's
+commands. The launchers themselves establish it — every launch records the session's address before
+spawning, and the session's start hook claims it (see `agent-docs/workspace-layout.md`,
+*Choosing the harness and model*, and `agent-docs/sessions.md`). When the session's address names a listed role
+(`session_role()`), `main()` prunes the tree it built (`_strip_to_role`) before invoking: a leaf not in the role's
 set is deleted from its group's `commands` dict, a group emptied by that is deleted too —
 absent from parsing, `--help`, `ch help` and completion alike, and a synonym dies with its
 canonical target (`alias_group` resolves through the pruned dict). *Strip, don't admonish*:
@@ -151,15 +150,13 @@ prohibitions advertise targets. `errand` rides in **both** the manager's and the
 allowlists — cross-project *reading* is knowledge, not capability (the same rule that leaves
 listers unfenced), and its target axis carries its own containment (below). The captain has
 no `ROLE_COMMANDS` entry — full tree (the
-option strip still applies: any role stamp marks an AI session); an **unknown role fails hard
-and early** — `ch`
-refuses to run at all, before any command parses — never a silent full tree, never a silently
-narrowed one. One carve-out: Click's completion dispatch (`chimera.git.completing`, the same
+option strip still applies: a recorded session is an AI session). An unknown role is
+now unreachable rather than merely unobserved: a role is read off the address, whose three
+shapes *are* the three roles, so it can only be one of them or nothing at all. One carve-out: Click's completion dispatch (`chimera.git.completing`, the same
 detection that mutes the git DEBUG trace) instead completes *nothing*, silently, exit 0 — a
-completer must never raise or print, and a stale role stamp in a shell would otherwise break
+completer must never raise or print, and an archive awaiting migration would otherwise break
 every TAB; fail-closed keeps both rules standing (loud for invocations, silent for completers).
-Honesty: env-based identity is a fence, not a wall (unset-able, like
-`CLAUDECODE`) — the wall is the harness permission layer; the fence's real value is not
+Honesty: the fence is a fence, not a wall — a session holding no address is simply unfenced — the wall is the harness permission layer; the fence's real value is not
 advertising footguns.
 
 **Arg-level scope fencing** — policy the strip can't express: a command fine in-scope whose
