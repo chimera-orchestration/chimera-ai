@@ -64,6 +64,10 @@ you install, so a version that adds one leaves ``ch`` dying with
 ``ModuleNotFoundError`` on a module it now needs until you upgrade. Run both
 rather than working out which kind of change you just pulled.
 
+``uv tool upgrade`` prints ``Nothing to upgrade`` when the environment already
+matches — the editable package's version number never moves, so that line is
+about the version, not about the dependencies it just checked.
+
 With the ``deploy`` worktree above, the first step is instead moving ``deploy``
 onto the ``main`` you want to run — which is a check ``ch doctor`` already
 owns:
