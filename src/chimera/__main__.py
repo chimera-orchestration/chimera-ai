@@ -38,7 +38,7 @@ from chimera.commands.archive.backfill import backfill as _archive_backfill
 from chimera.commands.chat import chat as _chat
 from chimera.commands.dashboard import render as render_dashboard
 from chimera.commands.chat import chat_target
-from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
+from chimera.commands.doctor import REPAIR, Exclusions, Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.dump import dump as _dump
@@ -2065,12 +2065,19 @@ def main() -> None:
     try:
         role = session_role(Path.cwd())
         driven_by_agent = ai_session(Path.cwd())
-    except UserError:
+    except UserError as error:
         # a completer must never raise or print (an archive awaiting migration would
         # otherwise break every TAB), so fail closed and complete nothing
         if completing():
             raise SystemExit(0) from None
-        raise
+        # doctor is how a broken workspace gets repaired, so it has to run in one — it
+        # proceeds unidentified, and therefore unfenced, which is the same standing a
+        # human has. Everything else says what is wrong and stops, here rather than
+        # half-way through a command.
+        if REPAIR not in sys.argv[1:2]:
+            typer.echo(f'Error: {error}', err=True)
+            raise SystemExit(1) from None
+        role, driven_by_agent = None, False
     if driven_by_agent:
         command = get_command(app)
         if role in ROLE_COMMANDS:  # prune first: the later strips walk the smaller tree

@@ -20,7 +20,6 @@ from chimera.__main__ import (
 )
 from chimera.agent_env import ROLE_AGENT, ROLE_COMMANDS, ROLE_MANAGER, RESTRICTED_COMMANDS
 from tests.cli import Command as CliCommand
-from chimera.config import UserError
 from tests.cli import action_logs, as_session, leaves
 from tests.test_archive import legacy_archive
 
@@ -194,6 +193,7 @@ class TestStripToRole:
                 'msg',
                 'hook',
                 'dump',
+                'session',
             },
         )
         compare(  # prompt edit is human-only, so the manager's group is the read/copy trio
@@ -218,9 +218,18 @@ class TestStripToRole:
             expected={'session-start', 'session-end', 'deliver'},
         )
 
-    def test_agent_tree_is_help_prime_errand_mail_and_hooks(self) -> None:
+    def test_agent_tree_is_help_prime_errand_mail_hooks_and_its_own_identity(self) -> None:
         tree = _role_tree(ROLE_AGENT)
-        compare(set(tree.commands), expected={'help', 'prime', 'errand', 'msg', 'hook', 'dump'})
+        compare(
+            set(tree.commands),
+            expected={'help', 'prime', 'errand', 'msg', 'hook', 'dump', 'session'},
+        )
+        # an agent can ask what it is; a session that cannot has to guess, which is the
+        # failure the fence exists to prevent
+        compare(
+            set(cast(TyperGroup, _leaf(tree, 'session')).commands),
+            expected={'whoami', 'show'},
+        )
         compare(
             set(cast(TyperGroup, _leaf(tree, 'msg')).commands),
             expected={'ls', 'send', 'inbox', 'thread', 'ack', 'defer', 'drain', 'watch'},
@@ -376,14 +385,25 @@ class TestMainRole:
         compare({entry['path'] for entry in entries}, expected=set(ROLE_COMMANDS[ROLE_AGENT]))
 
     def test_an_archive_awaiting_migration_tells_a_human_what_to_do(
-        self, tmpdir: TempDir, replace: Replacer
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # identity is resolved before anything parses, so an unmigrated archive would
         # otherwise surface as a raw failure from inside an unrelated command
         legacy_archive(_legacy_workspace(tmpdir, replace))
         _argv(replace, 'help')
-        with ShouldRaise(UserError, match='predates the current session schema'):
+        with ShouldRaise(SystemExit(1)):
             main()
+        assert 'predates the current session schema' in capsys.readouterr().err
+
+    def test_doctor_still_runs_in_a_workspace_awaiting_migration(
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # doctor is how a broken workspace gets repaired, so it has to run in one
+        legacy_archive(_legacy_workspace(tmpdir, replace))
+        _argv(replace, 'doctor', '--help')
+        with ShouldRaise(SystemExit(0)):
+            main()
+        assert 'workspace' in capsys.readouterr().out
 
     def test_an_archive_awaiting_migration_completes_nothing_silently(
         self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
@@ -420,6 +440,7 @@ class TestMainRole:
                 'msg',
                 'hook',
                 'dump',
+                'session',
             },
         )
 

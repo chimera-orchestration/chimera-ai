@@ -53,6 +53,11 @@ _MSG_COMMANDS = frozenset(
     }
 )
 
+# Looking at sessions is knowledge, not capability — the same rule that leaves the listers
+# unfenced. `whoami` especially: a session that can't ask what it is has to guess, which is
+# the whole failure this fence exists to prevent.
+_SESSION_COMMANDS = frozenset({'session whoami', 'session show'})
+
 # The harness hooks — installed user-wide, so they fire inside chimera-launched sessions too,
 # where the role strip would otherwise reach them. They record to the archive and deliver
 # mail; harmless as capability, and the hook process (not the agent) is what invokes them.
@@ -90,11 +95,15 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
         }
     )
     | _MSG_COMMANDS
-    | _HOOK_COMMANDS,
+    | _HOOK_COMMANDS
+    | _SESSION_COMMANDS,
     # errand is deliberately in both trees: cross-project *reading* is knowledge, not
     # capability (same rule that leaves listers unfenced), and its target axis has its
     # own containment (see __main__._foreign)
-    ROLE_AGENT: frozenset({'help', 'prime', 'errand', 'dump'}) | _MSG_COMMANDS | _HOOK_COMMANDS,
+    ROLE_AGENT: frozenset({'help', 'prime', 'errand', 'dump'})
+    | _MSG_COMMANDS
+    | _HOOK_COMMANDS
+    | _SESSION_COMMANDS,
 }
 
 

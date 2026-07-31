@@ -424,6 +424,11 @@ add/retire via the `CHECKS` tuple). Current checks:
 
 Reports findings and exits non-zero while any remain unresolved.
 
+`ch doctor` is also the one command that still runs in a workspace too broken to identify a
+session in — an archive awaiting migration, say. Every other command says what is wrong and
+stops before parsing; doctor proceeds unidentified, and so unfenced, because it is how the
+workspace gets repaired.
+
 ## Adding and removing projects
 
 `ch project new <name>` creates a **workspace-only** project: a fresh bare repo at

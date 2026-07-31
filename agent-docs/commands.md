@@ -146,8 +146,10 @@ set is deleted from its group's `commands` dict, a group emptied by that is dele
 absent from parsing, `--help`, `ch help` and completion alike, and a synonym dies with its
 canonical target (`alias_group` resolves through the pruned dict). *Strip, don't admonish*:
 anything needing a "must not" in prose is instead absent from the session's world — written
-prohibitions advertise targets. `errand` rides in **both** the manager's and the agent's
-allowlists — cross-project *reading* is knowledge, not capability (the same rule that leaves
+prohibitions advertise targets. `session whoami`/`show` ride in every role's allowlist: looking at a session is knowledge,
+not capability — and `whoami` especially, since a session that cannot ask what it is has to
+guess, which is the failure the fence exists to prevent. `errand` rides in **both** the
+manager's and the agent's allowlists — cross-project *reading* is knowledge, not capability (the same rule that leaves
 listers unfenced), and its target axis carries its own containment (below). The captain has
 no `ROLE_COMMANDS` entry — full tree (the
 option strip still applies: a recorded session is an AI session). An unknown role is
