@@ -89,7 +89,8 @@ class TestStripRestrictedCommands:
         command = get_command(app)
         before = {path for path, _ in leaves(command)}
         _strip_restricted_commands(command)
-        compare(before - {path for path, _ in leaves(command)}, expected=RESTRICTED_COMMANDS)
+        # set() around the frozenset: a type mismatch compares by iteration order, not membership
+        compare(before - {path for path, _ in leaves(command)}, expected=set(RESTRICTED_COMMANDS))
 
     def test_a_group_emptied_by_the_strip_goes_with_it(self, replace: Replacer) -> None:
         # no restricted command is grouped today — prove the sweep on a synthetic tree so
@@ -110,13 +111,13 @@ class TestStripRestrictedCommands:
     def test_every_restricted_command_names_a_live_leaf(self) -> None:
         # a stale entry (a renamed/retired command) would silently restrict nothing
         live = {path for path, _ in leaves(get_command(app))}
-        compare(RESTRICTED_COMMANDS - live, expected=set())
+        compare(RESTRICTED_COMMANDS - live, expected=frozenset())
 
     def test_no_role_allowlist_grants_a_restricted_command(self) -> None:
         # the role prune runs first, so an allowlist entry here would be stripped anyway —
         # but listing one would misdocument the role; keep the two sets disjoint
         for role, allowed in ROLE_COMMANDS.items():
-            compare(allowed & RESTRICTED_COMMANDS, expected=set(), prefix=role)
+            compare(allowed & RESTRICTED_COMMANDS, expected=frozenset(), prefix=role)
 
 
 class TestMain:
@@ -227,7 +228,7 @@ class TestStripToRole:
         # a stale allowlist entry (a renamed/retired command) would silently allow nothing
         live = {path for path, _ in leaves(get_command(app))}
         for role, allowed in ROLE_COMMANDS.items():
-            compare(allowed - live, expected=set(), prefix=role)
+            compare(allowed - live, expected=frozenset(), prefix=role)
 
     def test_role_strip_composes_with_the_option_strip(self) -> None:
         command = get_command(app)

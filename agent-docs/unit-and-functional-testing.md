@@ -28,6 +28,12 @@ Two tools, split by what the check *is*:
     its attributes — compare the Finding, not `finding.fixable` then `finding.message`.
   - Only when an exact whole-object compare is genuinely impossible, narrow with
     `like(Cls, attr=…)` (a typed partial `Comparison`) — never fall back to comparing pieces.
+  - **Both sides must be the same container type.** `compare(a_set, expected=A_FROZENSET)`
+    doesn't compare as sets: testfixtures picks its comparer from the shared MRO, `set` and
+    `frozenset` share none, so it falls back to the *order-sensitive* generator comparer — and
+    since pydantic is installed (it registers `ignore_eq`, which blocks the `x == y`
+    shortcut for containers), that fallback is always reached. Two sets with identical members
+    then pass or fail on `PYTHONHASHSEED` alone. Coerce one side: `expected=set(FROZEN_CONST)`.
 - **A boolean fact → plain `assert`**: membership, existence, identity, inequality and
   predicates — `assert 'x' in text`, `assert not path.exists()`, `assert result is None`,
   `assert a != b`, `assert is_merged(git, ref, base)`.
