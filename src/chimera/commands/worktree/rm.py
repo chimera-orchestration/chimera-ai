@@ -162,5 +162,5 @@ def _refuse_if_unsafe(
         return
     joined = '\n  '.join(agents + work)
     fixes = [fix for fix, hit in (('stop the agents', agents), ('discard the work', work)) if hit]
-    hint = '' if ai_session() else f'\nuse --force to {" and ".join(fixes)}'
+    hint = '' if ai_session(git.path) else f'\nuse --force to {" and ".join(fixes)}'
     raise UserError(f'refusing to clean up:\n  {joined}{hint}')

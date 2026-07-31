@@ -4,7 +4,7 @@
 ``ch prime`` is the *orientation* — how to work here, right now: an editorial golden path
 per role whose cited commands are pinned by a test against that role's stripped command
 tree (see ``tests/test_prime.py``), so it provably never mentions fenced capability. The
-role comes from the session's ``CHIMERA_ROLE`` stamp when chimera launched it, else from
+role comes from the session's own address when chimera launched it, else from
 the shape of the cwd scope — making prime the pull path for sessions chimera didn't
 launch, and for humans. The launchers also *push* it: the role's prime is the identity
 block of every launch context — chat the captain's/manager's, the goal launchers the

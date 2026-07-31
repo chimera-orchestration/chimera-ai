@@ -91,7 +91,7 @@ def merge(
     # --force can resolve diverged actors here, but the flag is stripped from AI sessions'
     # trees — never signpost capability the session can't reach
     source = source_branch(
-        git, goal, actors, force, command='goal merge', or_force=not ai_session()
+        git, goal, actors, force, command='goal merge', or_force=not ai_session(git.path)
     )
     registered = registered_worktrees(git)
     worktrees = [

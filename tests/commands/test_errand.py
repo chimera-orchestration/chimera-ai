@@ -1,5 +1,5 @@
 import os
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from hashlib import sha256
 from pathlib import Path
 from secrets import token_hex
@@ -19,7 +19,14 @@ from chimera.commands.worktree.rm import remove
 from chimera.config import UserError
 from chimera.dry import Dry
 from chimera.git import Git
-from tests.cli import Command, action_logs, context_sources, general_capture, sources_lines
+from tests.cli import (
+    as_session,
+    Command,
+    action_logs,
+    context_sources,
+    general_capture,
+    sources_lines,
+)
 
 REFUSED_BYPASS = (
     '--dangerously-skip-permissions: not available when chimera is driven by an AI agent'
@@ -51,7 +58,6 @@ def _stub_run(
         *,
         model: str | None = None,
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         readonly: bool = True,
         timeout: float | None = None,
     ) -> str:
@@ -63,7 +69,6 @@ def _stub_run(
                 'extra': tuple(extra),
                 'model': model,
                 'context': context,
-                'env': env,
                 'readonly': readonly,
                 'timeout': timeout,
             }
@@ -120,7 +125,6 @@ class TestErrand:
                     'extra': (),
                     'model': None,
                     'context': None,
-                    'env': {},
                     'readonly': True,
                     'timeout': None,
                 }
@@ -149,7 +153,6 @@ class TestErrand:
             timeout=30,
             spec=AgentSpec(model='opus'),
             context=context,
-            env=lambda name, goal: {'CHIMERA_ROLE': 'agent'},
         )
         compare(names, expected=[f'proj@{result.goal}@agent'])
         compare(
@@ -162,7 +165,6 @@ class TestErrand:
                     'extra': ('--verbose',),
                     'model': 'opus',
                     'context': tmpdir / 'ctx.md',
-                    'env': {'CHIMERA_ROLE': 'agent'},
                     'readonly': True,
                     'timeout': 30,
                 }
@@ -362,12 +364,10 @@ def _stub_errand(
         timeout: float | None = None,
         spec: AgentSpec = AgentSpec(),
         context: Callable[[str, str], Path | None] | None = None,
-        env: Callable[[str, str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> ErrandResult:
         name = f'{target}@errand-abc123@agent'
         rendered = context(name, 'errand-abc123') if call_context and context is not None else None
-        stamp = env(name, 'errand-abc123') if env is not None else None
         calls.append(
             {
                 'repo': repo,
@@ -381,7 +381,6 @@ def _stub_errand(
                 'timeout': timeout,
                 'spec': spec,
                 'rendered': rendered,
-                'stamp': stamp,
                 'dry': dry,
             }
         )
@@ -422,10 +421,6 @@ class TestErrandCli:
         )
         [call] = calls
         compare(call['repo'], expected=git_repo.path)
-        compare(
-            call['stamp'],
-            expected={'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'proj@errand-abc123'},
-        )
 
     def test_renders_the_target_projects_context(
         self, tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
@@ -547,7 +542,7 @@ class TestErrandCli:
                     'target: proj',
                     'out: (stdout)',
                     'harness: claude',
-                    'role: agent (scope: proj@errand-abc123)',
+                    'address: proj@errand-abc123@agent',
                     'prompt: q (guardrail prepended)',
                     *sources_lines(sources),
                     f'context: {artifact}',
@@ -582,7 +577,7 @@ class TestErrandCli:
                     'target: proj',
                     'out: r.md',
                     'harness: claude',
-                    'role: agent (scope: proj@errand-abc123)',
+                    'address: proj@errand-abc123@agent',
                     'prompt: q (guardrail prepended)',
                     'context: (none)',
                 ]
@@ -602,12 +597,11 @@ def test_foreign_has_exactly_one_caller() -> None:
     compare(source.count('_foreign('), expected=2)  # its def and the single call site
 
 
-def _fenced(tmpdir: TempDir, git_repo: Repo, replace: Replacer, role: str, scope: str) -> Path:
-    """Two projects, the session role-stamped and fenced to 'proj'; cwd inside it."""
+def _fenced(tmpdir: TempDir, git_repo: Repo, replace: Replacer, address: str) -> Path:
+    """Two projects, the session holding ``address`` and so fenced to 'proj'; cwd inside it."""
     ws = _workspace_project(tmpdir, git_repo, replace)
     tmpdir.dump('lycia/other/config.yaml', {'kind': 'project', 'repo': str(git_repo.path)})
-    replace.in_environ('CHIMERA_ROLE', role)
-    replace.in_environ('CHIMERA_ROLE_SCOPE', scope)
+    as_session(tmpdir, replace, address, workspace=ws)
     os.chdir(ws / 'proj')
     return ws
 
@@ -637,11 +631,11 @@ class TestErrandFence:
     def test_manager_dispatches_across_the_fence(
         self, tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
     ) -> None:
-        _fenced(tmpdir, git_repo, replace, 'manager', 'proj')
+        _fenced(tmpdir, git_repo, replace, 'proj@@manager')
         self._dispatches_but_cannot_act(replace, command)
 
     def test_agent_dispatches_across_the_fence(
         self, tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
     ) -> None:
-        _fenced(tmpdir, git_repo, replace, 'agent', 'proj@g')
+        _fenced(tmpdir, git_repo, replace, 'proj@g@agent')
         self._dispatches_but_cannot_act(replace, command)

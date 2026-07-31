@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 from chimera.agents.registry import AgentSpec
@@ -20,7 +20,6 @@ def start(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
-    env: Mapping[str, str] = {},
     dry: Dry = Dry(),
 ) -> Path:
     """Create the goal's worktrees and branches, then launch its agent.
@@ -36,5 +35,5 @@ def start(
     require_valid_goal(goal)  # before the Dry guard, so --dry refuses a bad name too
     dry(add, repo, worktrees_root, goal=goal, frm=frm, fetch=fetch)
     agent_worktree = worktree_path(worktrees_root, goal, AGENT)
-    agent(agent_worktree, name, prompt, extra, dangerous, spec, context, env, dry)
+    agent(agent_worktree, name, prompt, extra, dangerous, spec, context, dry)
     return agent_worktree

@@ -301,7 +301,7 @@ def test_remove_refusal_never_signposts_force_to_an_ai_session(
 ) -> None:
     worktrees = _goal(tmpdir, git_repo)
     Repo(worktrees / 'g@agent').commit_content('work')  # unmerged
-    replace.in_module(ai_session, lambda: True, module=worktree_rm)
+    replace.in_module(ai_session, lambda cwd: True, module=worktree_rm)
     with ShouldRaise(UserError('refusing to clean up:\n  branch g/agent has unmerged commits')):
         remove(git_repo.path, worktrees, 'g')
 

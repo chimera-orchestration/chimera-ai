@@ -1,5 +1,5 @@
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from hashlib import sha256
 from pathlib import Path
 
@@ -36,10 +36,9 @@ def _stub_agent(replace: Replacer) -> list[object]:
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         dry: Dry = Dry(),
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous, spec, context, env))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context, dry))
 
     replace.in_module(agent, record, module=goal_start)
     return calls
@@ -85,7 +84,9 @@ def test_start_creates_worktrees_then_launches_the_agent(
     # foreground (no prompt), not dangerous
     compare(
         calls,
-        expected=[(worktrees / 'g@agent', 'proj@g@agent', None, (), False, AgentSpec(), None, {})],
+        expected=[
+            (worktrees / 'g@agent', 'proj@g@agent', None, (), False, AgentSpec(), None, Dry())
+        ],
     )
 
 
@@ -98,7 +99,7 @@ def test_start_passes_the_prompt_to_the_agent(
     compare(
         calls,
         expected=[
-            (worktrees / 'g@agent', 'proj@g@agent', 'do it', (), False, AgentSpec(), None, {})
+            (worktrees / 'g@agent', 'proj@g@agent', 'do it', (), False, AgentSpec(), None, Dry())
         ],
     )
 
@@ -111,7 +112,9 @@ def test_start_passes_dangerous_to_the_agent(
     start(git_repo.path, worktrees, 'g', 'proj@g@agent', dangerous=True)
     compare(
         calls,
-        expected=[(worktrees / 'g@agent', 'proj@g@agent', None, (), True, AgentSpec(), None, {})],
+        expected=[
+            (worktrees / 'g@agent', 'proj@g@agent', None, (), True, AgentSpec(), None, Dry())
+        ],
     )
 
 
@@ -151,7 +154,7 @@ def test_goal_start_cli(
                 False,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+                Dry(),
             )
         ],
     )
@@ -192,7 +195,7 @@ def test_goal_start_cli_with_prompt(
                 False,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+                Dry(),
             )
         ],
     )
@@ -233,7 +236,7 @@ def test_goal_start_cli_dangerous(
                 True,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+                Dry(),
             )
         ],
     )
@@ -274,7 +277,7 @@ def test_goal_start_cli_offline(
                 False,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+                Dry(),
             )
         ],
     )
@@ -315,7 +318,7 @@ def test_goal_start_cli_passes_extra_flags_through(
                 False,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+                Dry(),
             )
         ],
     )
@@ -346,7 +349,7 @@ def test_goal_start_cli_dry_role_leads_the_context(
             [
                 f'Would start g in {worktree}',
                 'harness: claude',
-                'role: agent (scope: proj@g)',
+                'address: proj@g@agent',
                 'prompt: (interactive)',
                 *sources_lines(sources),
                 f'context: {context}',
@@ -397,7 +400,7 @@ def test_goal_start_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
             [
                 f'Would start g in {worktree}',
                 'harness: claude',
-                'role: agent (scope: project@g)',
+                'address: project@g@agent',
                 'prompt: (interactive)',
                 'context: (none)',
             ]

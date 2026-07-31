@@ -4,9 +4,13 @@ environment for this purpose, so a future harness-agnostic detector is a one-fil
 """
 
 import os
+from pathlib import Path
 
+from loguru import logger
+
+from chimera.addresses import Address, AnyAddress, Actor, Captain, Manager
 from chimera.config import UserError
-from chimera.worktrees import SEP
+from chimera.identity import current_session
 
 _AGENT_ENV_VARS = ('CLAUDECODE',)  # Claude Code sets this for every subprocess it launches
 
@@ -27,8 +31,12 @@ RESTRICTED_COMMANDS = frozenset({'logtail', 'dashboard', 'prompt edit'})
 # string on a different axis (actor naming vs session role), deliberately kept apart.
 ROLE_CAPTAIN, ROLE_MANAGER, ROLE_AGENT = 'captain', 'manager', 'agent'
 
-ROLE_ENV_VAR = 'CHIMERA_ROLE'
-ROLE_SCOPE_ENV_VAR = 'CHIMERA_ROLE_SCOPE'  # '<project>' or '<project>@<goal>'
+_ROLES: dict[type[Address], str] = {
+    Captain: ROLE_CAPTAIN,
+    Manager: ROLE_MANAGER,
+    Actor: ROLE_AGENT,
+}
+"""The address shapes *are* the roles — one mapping, so the two can never drift."""
 
 # The inter-agent mail commands — every actor (manager and agent alike) sends, reads,
 # watches and retires its own mail, so both role trees carry the whole set.
@@ -95,22 +103,52 @@ def running_under_ai_agent() -> bool:
     return any(var in os.environ for var in _AGENT_ENV_VARS)
 
 
-def session_role() -> str | None:
-    """The role stamped into this session's environment, or None when unset/empty."""
-    return os.environ.get(ROLE_ENV_VAR) or None
+def session_address(cwd: Path) -> AnyAddress | None:
+    """The address of the session running this command, parsed, or ``None``.
+
+    Where the role and its fence both come from. An address already encodes both — a
+    manager's names its project, an agent's names project and goal — so nothing has to
+    be stamped anywhere or kept in step with anything.
+
+    This is why the role stamp is gone. ``CHIMERA_ROLE`` was written into the launched
+    session's environment, which reaches a foreground session and nothing else: a
+    background launch runs in a pooled worker that never sees it, and a bridge to the
+    background mints a fresh process the same way. Passing a prompt is exactly what makes
+    a launch background, so the unattended agents — the ones the fence most exists for —
+    were precisely the ones it never reached. The address survives all three, because it
+    lives in the archive rather than in an environment.
+
+    An address the grammar can't parse is treated as no address at all: an unparseable
+    claim is not a claim.
+    """
+    session = current_session(cwd)
+    if session is None or session.address is None:
+        return None
+    try:
+        return Address.parse(session.address)
+    except ValueError:
+        logger.bind(address=session.address, native_id=session.native_id).warning(
+            'agent: session address does not parse, treating the session as unaddressed'
+        )
+        return None
 
 
-def ai_session() -> bool:
+def session_role(cwd: Path) -> str | None:
+    """The role of the session running this command, or ``None`` for a human.
+
+    Read off the address (:func:`session_address`), whose three shapes *are* the three
+    roles — so a role can't disagree with the address that names it.
+    """
+    address = session_address(cwd)
+    return None if address is None else _ROLES[type(address)]
+
+
+def ai_session(cwd: Path) -> bool:
     """True when this invocation is inside an AI session, by either signal: the harness's
-    own marker (:func:`running_under_ai_agent`) or a chimera role stamp — a launcher only
-    ever stamps :data:`ROLE_ENV_VAR` into sessions it launches, so a non-empty role means
-    an AI session even under a future harness that sets no marker of its own."""
-    return running_under_ai_agent() or session_role() is not None
-
-
-def role_scope() -> str | None:
-    """The scope the session's role is fenced to, or None when unset/empty."""
-    return os.environ.get(ROLE_SCOPE_ENV_VAR) or None
+    own marker (:func:`running_under_ai_agent`) or the archive knowing this process to be
+    a session it recorded — so a future harness that sets no marker of its own is still
+    caught, provided chimera launched it."""
+    return running_under_ai_agent() or current_session(cwd) is not None
 
 
 class CrossScopeError(UserError):
@@ -124,46 +162,26 @@ class CrossScopeError(UserError):
         super().__init__(f'scoped to {fenced}; ask the captain')
 
 
-def role_scope_for(project: str, goal: str | None = None) -> str:
-    """The scope token a launcher stamps beside a role: ``<project>`` for a manager,
-    ``<project>@<goal>`` for a goal's agent. Deliberately the session-name grammar
-    (``chimera.worktrees.SEP``) — :func:`fenced_project` is the parse side of the pair,
-    splitting on the same ``@``."""
-    return project if goal is None else f'{project}{SEP}{goal}'
-
-
-def fenced_project() -> str | None:
+def fenced_project(cwd: Path) -> str | None:
     """The project this session's actions are fenced to, or ``None`` when unfenced.
 
-    Arms for a scoped manager; the agent — though its stripped tree carries no ``-p``
-    anywhere today — is fenced identically for symmetry (its scope's first ``@`` segment
-    names the project), so a command later joining its tree can't quietly widen it.
-    The captain, and any unstamped or unscoped session, is unfenced.
+    The address names it: a manager's is its project, an agent's the project its goal
+    belongs to. The agent's tree carries no ``-p`` anywhere today, but it is fenced
+    identically for symmetry, so a command later joining that tree can't quietly widen
+    it. The captain is unfenced by construction — its address names no project — and so
+    is a human.
     """
-    if session_role() not in (ROLE_MANAGER, ROLE_AGENT):
-        return None
-    scope = role_scope()
-    return scope.split(SEP)[0] if scope is not None else None
+    address = session_address(cwd)
+    return address.project or None if address is not None else None
 
 
-def refuse_cross_scope(resolved: str) -> None:
+def refuse_cross_scope(cwd: Path, resolved: str) -> None:
     """Refuse when project ``resolved`` falls outside the session's fence; else a no-op.
 
     Called with the project an action *resolved* — so an explicit cross-scope ``-p`` and
     a cwd standing in another project refuse identically. Listers are never fenced:
     cross-project listing is knowledge, not capability.
     """
-    fenced = fenced_project()
+    fenced = fenced_project(cwd)
     if fenced is not None and resolved != fenced:
         raise CrossScopeError(fenced)
-
-
-def role_env(role: str, scope: str | None = None) -> dict[str, str]:
-    """The env overlay a launcher stamps into a session: its role, plus the scope it is
-    fenced to. The captain gets no scope (unfenced); a manager's is ``<project>``, an
-    agent's ``<project>@<goal>`` (session-name grammar — it splits on the same ``@``).
-    An unscoped stamp writes ``''`` (which :func:`role_scope` reads as unset) rather than
-    omitting the variable — the overlay must *clear* a stale scope inherited from the
-    parent environment (e.g. a shell inside an agent session launching the captain), or
-    the deliberately-unfenced session would report itself fenced."""
-    return {ROLE_ENV_VAR: role, ROLE_SCOPE_ENV_VAR: scope if scope is not None else ''}

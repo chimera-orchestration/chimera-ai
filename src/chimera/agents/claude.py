@@ -87,7 +87,6 @@ class Claude(Agent):
         *,
         model: str | None = None,
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> str | None:
         """Run a claude session named ``name``, with cwd set to ``cwd``.
@@ -96,8 +95,7 @@ class Claude(Agent):
         it daemonizes (``claude --bg``) to work on the prompt autonomously. ``model``
         rides as ``--model``. ``extra`` is passed straight through to ``claude`` (e.g.
         ``--dangerously-skip-permissions``). ``dangerous`` makes bypass-permissions mode
-        reachable (see ``_session_args``). ``env`` is overlaid on the parent environment
-        (see ``Agent``).
+        reachable (see ``_session_args``).
 
         A foreground launch is given its id rather than asked for it: chimera mints a
         uuid and passes ``--session-id``, which claude honours across its environment,
@@ -109,7 +107,7 @@ class Claude(Agent):
         supplied = None if prompt is not None else str(uuid4())
         lead = ['--name', name] if supplied is None else ['--session-id', supplied, '--name', name]
         args = _session_args(lead, prompt, extra, dangerous, model, context)
-        self._launch(cwd, args, exclusive, env)
+        self._launch(cwd, args, exclusive)
         return supplied
 
     def resume(
@@ -123,7 +121,6 @@ class Claude(Agent):
         id: str | None = None,
         model: str | None = None,
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> str | None:
         """Resume a claude session, with cwd set to ``cwd``.
@@ -141,7 +138,7 @@ class Claude(Agent):
         """
         lead = ['--resume', id, '--name', name] if id is not None else ['--resume', name]
         args = _session_args(lead, prompt, extra, dangerous, model, context)
-        self._launch(cwd, args, exclusive, env)
+        self._launch(cwd, args, exclusive)
         return id
 
     def run(
@@ -153,7 +150,6 @@ class Claude(Agent):
         *,
         model: str | None = None,
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         readonly: bool = True,
         timeout: float | None = None,
     ) -> str:
@@ -178,7 +174,6 @@ class Claude(Agent):
                 text=True,
                 check=True,
                 timeout=timeout,
-                env={**os.environ, **env} if env else None,
             )
         except subprocess.CalledProcessError as error:
             logger.bind(
@@ -336,13 +331,9 @@ class Claude(Agent):
         return replace(session, summary=summary)
 
     def _launch(
-        self, cwd: Path, args: Sequence[str], exclusive: bool, env: Mapping[str, str] = {}
+        self, cwd: Path, args: Sequence[str], exclusive: bool
     ) -> subprocess.CompletedProcess[bytes]:
         """Run ``claude <args>`` in ``cwd``; under ``exclusive``, refuse if one is already live.
-
-        ``env`` is overlaid on the parent environment, the overlay winning — a captain
-        session launching ``ch goal start`` carries ``CHIMERA_ROLE=captain`` itself, and
-        the child must get ``agent``.
 
         Spawned through :class:`~subprocess.Popen` rather than ``subprocess.run`` so
         the launch is on record *while the session runs*, not once it exits: a
@@ -357,7 +348,7 @@ class Claude(Agent):
             ids = ', '.join(f'{s.id} ({s.status})' for s in running)
             raise RuntimeError(f'an agent is already live in {cwd}: {ids} — attach or stop it')
         argv = ['claude', *args]
-        process = subprocess.Popen(argv, cwd=cwd, env={**os.environ, **env} if env else None)
+        process = subprocess.Popen(argv, cwd=cwd)
         logger.bind(
             pid=process.pid,
             create_time=process_create_time(process.pid),

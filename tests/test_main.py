@@ -20,7 +20,9 @@ from chimera.__main__ import (
 )
 from chimera.agent_env import ROLE_AGENT, ROLE_COMMANDS, ROLE_MANAGER, RESTRICTED_COMMANDS
 from tests.cli import Command as CliCommand
-from tests.cli import action_logs, leaves
+from chimera.config import UserError
+from tests.cli import action_logs, as_session, leaves
+from tests.test_archive import legacy_archive
 
 
 def _leaf(root: Command, *path: str) -> Command:
@@ -42,6 +44,17 @@ def _role_tree(role: str) -> TyperGroup:
 
 def _argv(replace: Replacer, *argv: str) -> None:
     replace(target=sys.argv, container=sys, name='argv', replacement=['ch', *argv])
+
+
+def _legacy_workspace(tmpdir: TempDir, replace: Replacer) -> Path:
+    """A workspace whose archive still carries the pre-trim schema."""
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CLAUDECODE', '1')
+    (ws / 'state').mkdir()
+    os.chdir(ws)
+    return ws / 'state' / 'archive.db'
 
 
 def _completion_request(replace: Replacer, line: str = 'ch ') -> None:
@@ -92,7 +105,9 @@ class TestStripRestrictedCommands:
         # set() around the frozenset: a type mismatch compares by iteration order, not membership
         compare(before - {path for path, _ in leaves(command)}, expected=set(RESTRICTED_COMMANDS))
 
-    def test_a_group_emptied_by_the_strip_goes_with_it(self, replace: Replacer) -> None:
+    def test_a_group_emptied_by_the_strip_goes_with_it(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
         # no restricted command is grouped today — prove the sweep on a synthetic tree so
         # a future `log tail`-shaped entry can't leave an empty husk behind
         replace(
@@ -122,7 +137,7 @@ class TestStripRestrictedCommands:
 
 class TestMain:
     def test_logtail_unrecognized_under_agent_context(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', '1')
         _argv(replace, 'logtail')
@@ -131,7 +146,7 @@ class TestMain:
         assert 'No such command' in capsys.readouterr().err
 
     def test_logtail_recognized_without_agent_context(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', not_there)
         _argv(replace, 'logtail', '--help')
@@ -140,7 +155,7 @@ class TestMain:
         assert 'Initial lines to show' in capsys.readouterr().out
 
     def test_force_unrecognized_under_agent_context(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', '1')
         _argv(replace, 'worktree', 'rm', 'somegoal', '--force')
@@ -151,7 +166,7 @@ class TestMain:
         assert 'No such option' in capsys.readouterr().err
 
     def test_force_recognized_without_agent_context(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', not_there)
         _argv(replace, 'worktree', 'rm', '--help')
@@ -246,9 +261,7 @@ def _fenced_manager(tmpdir: TempDir, replace: Replacer) -> Path:
         project = ws / name
         (project / 'worktrees' / 'g@agent').mkdir(parents=True)
         tmpdir.dump(f'lycia/{name}/config.yaml', {'kind': 'project', 'repo': str(project)})
-    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    replace.in_environ('CHIMERA_ROLE', ROLE_MANAGER)
-    replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
+    as_session(tmpdir, replace, 'proj@@manager', workspace=ws)
     os.chdir(ws / 'proj')
     return ws
 
@@ -344,9 +357,9 @@ class TestScopeFence:
 
 class TestMainRole:
     def test_manager_cannot_reach_project_add(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'manager')
+        as_session(tmpdir, replace, 'proj@@manager')
         _argv(replace, 'project', 'add', 'https://example.com/r.git')
         with ShouldRaise(SystemExit(2)):
             main()
@@ -355,30 +368,28 @@ class TestMainRole:
     def test_agent_help_lists_only_allowed_leaves(
         self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'agent')
+        as_session(tmpdir, replace, 'proj@g@agent')
         _argv(replace, 'help', '--json')
         with ShouldRaise(SystemExit(0)):
             main()
         entries = json.loads(capsys.readouterr().out)
         compare({entry['path'] for entry in entries}, expected=set(ROLE_COMMANDS[ROLE_AGENT]))
 
-    def test_unknown_role_fails_hard_before_any_command_parses(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    def test_an_archive_awaiting_migration_tells_a_human_what_to_do(
+        self, tmpdir: TempDir, replace: Replacer
     ) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'bogus')
+        # identity is resolved before anything parses, so an unmigrated archive would
+        # otherwise surface as a raw failure from inside an unrelated command
+        legacy_archive(_legacy_workspace(tmpdir, replace))
         _argv(replace, 'help')
-        with ShouldRaise(SystemExit(1)):
+        with ShouldRaise(UserError, match='predates the current session schema'):
             main()
-        compare(
-            capsys.readouterr().err,
-            expected="Error: unknown CHIMERA_ROLE 'bogus' (known: captain, manager, agent)\n",
-        )
 
-    def test_unknown_role_completes_nothing_silently(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+    def test_an_archive_awaiting_migration_completes_nothing_silently(
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        # a stale role stamp must not break every TAB — fail closed, never loud
-        replace.in_environ('CHIMERA_ROLE', 'bogus')
+        # a completer must never raise or print, or every TAB breaks until doctor runs
+        legacy_archive(_legacy_workspace(tmpdir, replace))
         _completion_request(replace)
         with ShouldRaise(SystemExit(0)):
             main()
@@ -387,9 +398,9 @@ class TestMainRole:
         compare(captured.err, expected='')
 
     def test_listed_role_completes_within_its_stripped_tree(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        replace.in_environ('CHIMERA_ROLE', ROLE_MANAGER)
+        as_session(tmpdir, replace, 'proj@@manager')
         _completion_request(replace)
         with ShouldRaise(SystemExit(0)):
             main()
@@ -413,10 +424,10 @@ class TestMainRole:
         )
 
     def test_captain_keeps_the_full_tree_with_options_stripped(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', '1')
-        replace.in_environ('CHIMERA_ROLE', 'captain')
+        as_session(tmpdir, replace, '@@captain')
         _argv(replace, 'worktree', 'rm', 'somegoal', '--force')
         with ShouldRaise(SystemExit(2)):
             main()
@@ -425,31 +436,31 @@ class TestMainRole:
         assert 'No such option' in capsys.readouterr().err
 
     def test_captain_still_loses_human_only_commands(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # the role stamp alone marks the AI session — no CLAUDECODE needed (conftest clears it)
-        replace.in_environ('CHIMERA_ROLE', 'captain')
+        as_session(tmpdir, replace, '@@captain')
         _argv(replace, 'logtail')
         with ShouldRaise(SystemExit(2)):
             main()
         assert 'No such command' in capsys.readouterr().err
 
     def test_manager_command_present_with_restricted_option_stripped(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         replace.in_environ('CLAUDECODE', '1')
-        replace.in_environ('CHIMERA_ROLE', 'manager')
+        as_session(tmpdir, replace, 'proj@@manager')
         _argv(replace, 'goal', 'finish', 'somegoal', '--force')
         with ShouldRaise(SystemExit(2)):
             main()
         assert 'No such option' in capsys.readouterr().err
 
     def test_role_stamp_alone_strips_restricted_options(
-        self, replace: Replacer, capsys: pytest.CaptureFixture[str]
+        self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]
     ) -> None:
         # a future non-claude harness sets no CLAUDECODE (conftest clears it) — the role
         # stamp alone must still fence the options, never hand --force back to the session
-        replace.in_environ('CHIMERA_ROLE', 'manager')
+        as_session(tmpdir, replace, 'proj@@manager')
         _argv(replace, 'goal', 'finish', 'somegoal', '--force')
         with ShouldRaise(SystemExit(2)):
             main()

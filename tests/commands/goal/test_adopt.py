@@ -1,5 +1,5 @@
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 from giterator import Git
@@ -34,10 +34,9 @@ def _stub_agent(replace: Replacer) -> list[object]:
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         dry: Dry = Dry(),
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous, spec, context, env))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context, dry))
 
     replace.in_module(agent, record, module=goal_adopt)
     return calls
@@ -89,7 +88,7 @@ def test_adopt_restructures_the_branch_then_launches_the_agent(
                 False,
                 AgentSpec(),
                 None,
-                {},
+                Dry(),
             )
         ],
     )
@@ -149,7 +148,7 @@ def test_adopt_passes_the_prompt_to_the_agent(
                 False,
                 AgentSpec(),
                 None,
-                {},
+                Dry(),
             )
         ],
     )
@@ -300,7 +299,7 @@ def test_goal_adopt_cli(
                 False,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+                Dry(),
             )
         ],
     )
@@ -329,7 +328,7 @@ def test_goal_adopt_cli_passes_extra_flags_through(
                 False,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+                Dry(),
             )
         ],
     )
@@ -358,7 +357,7 @@ def test_goal_adopt_cli_dangerous(
                 True,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@feature-x'},
+                Dry(),
             )
         ],
     )
@@ -375,7 +374,7 @@ def test_goal_adopt_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
             [
                 f'Would adopt feature in {worktree}',
                 'harness: claude',
-                'role: agent (scope: project@feature)',
+                'address: project@feature@agent',
                 'prompt: (interactive)',
                 'context: (none)',
             ]

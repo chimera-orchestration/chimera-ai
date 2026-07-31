@@ -1,6 +1,6 @@
 import json
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from string import Template
 from urllib.parse import urlsplit
@@ -57,7 +57,6 @@ def review(
     review_step: str | None = None,
     spec: AgentSpec = AgentSpec(),
     context: Callable[[str, str], Path | None] | None = None,
-    env: Callable[[str, str], Mapping[str, str]] | None = None,
     dry: Dry = Dry(),
 ) -> Path:
     """Stand a goal up from pull request ``pr`` (number or URL) and launch a review agent.
@@ -129,7 +128,6 @@ def review(
             dangerous,
             spec,
             context(name, goal) if context is not None else None,
-            env(name, goal) if env is not None else {},
             dry,
         )
     return agent_worktree

@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -75,7 +75,7 @@ def stop(worktree: Path, dry: Dry = Dry(), timeout: float = 10.0) -> list[AgentS
     return [session for _, session in pairs]
 
 
-def refuse_restricted(spec: AgentSpec, extra: Sequence[str]) -> None:
+def refuse_restricted(cwd: Path, spec: AgentSpec, extra: Sequence[str]) -> None:
     """In an AI session, refuse the harness's permission-bypass spellings in ``extra``.
 
     The Click-level strip (``__main__.main``) removes ``--dangerous`` itself, but the
@@ -84,10 +84,10 @@ def refuse_restricted(spec: AgentSpec, extra: Sequence[str]) -> None:
     review, chat) already passes and the spec is resolved. Refusing beats silently
     dropping: a session launched *without* the bypass its caller asked for would just
     be confusing. Adapters declare the spellings (``Agent.restricted``); the trigger is
-    ``ai_session()`` — the same signal pair as the strip, so a role-stamped session
+    ``ai_session()`` — the same signal pair as the strip, so a session chimera launched
     under a markerless harness can't smuggle a bypass through the tail either.
     """
-    if ai_session() and (hit := sorted(spec.agent.restricted.intersection(extra))):
+    if ai_session(cwd) and (hit := sorted(spec.agent.restricted.intersection(extra))):
         raise UserError(f'{", ".join(hit)}: not available when chimera is driven by an AI agent')
 
 
@@ -130,15 +130,10 @@ def agent(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
-    env: Mapping[str, str] = {},
     dry: Dry = Dry(),
 ) -> None:
-    """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``).
-
-    ``env`` is extra variables overlaid on the session's environment — how a launcher
-    stamps role identity into it (see ``chimera.agent_env.role_env``).
-    """
-    refuse_restricted(spec, extra)
+    """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``)."""
+    refuse_restricted(worktree, spec, extra)
     dry(record_launch, worktree, name, spec)
     dry(
         spec.agent.start,
@@ -149,7 +144,6 @@ def agent(
         dangerous,
         model=spec.model,
         context=context,
-        env=env,
     )
 
 
@@ -189,14 +183,12 @@ def resume(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
-    env: Mapping[str, str] = {},
     dry: Dry = Dry(),
     id: str | None = None,
 ) -> None:
     """Revive ``spec``'s agent session — by archived ``id`` when the caller resolved
-    one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``); ``env`` as
-    on :func:`agent`."""
-    refuse_restricted(spec, extra)
+    one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``)."""
+    refuse_restricted(worktree, spec, extra)
     dry(record_launch, worktree, name, spec)
     dry(
         spec.agent.resume,
@@ -208,7 +200,6 @@ def resume(
         id=id,
         model=spec.model,
         context=context,
-        env=env,
     )
 
 

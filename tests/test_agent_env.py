@@ -1,16 +1,44 @@
-from testfixtures import Replacer, ShouldRaise, compare, not_there
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.agent_env import (
     CrossScopeError,
     ai_session,
     fenced_project,
     refuse_cross_scope,
-    role_env,
-    role_scope,
-    role_scope_for,
     running_under_ai_agent,
+    session_address,
     session_role,
 )
+from chimera.archive import Archive, ArchiveSession
+
+NOON = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture()
+def workspace(tmpdir: TempDir, replace: Replacer) -> Path:
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    return ws
+
+
+def _session(ws: Path, replace: Replacer, address: str | None, native_id: str = 'uuid-1') -> None:
+    """Put this process inside a recorded session holding ``address``."""
+    replace.in_environ('CLAUDE_CODE_SESSION_ID', native_id)
+    with Archive.open(ws / 'state' / 'archive.db') as store:
+        store.record_session(
+            ArchiveSession(
+                platform='claude',
+                native_id=native_id,
+                status='startup',
+                started_at=NOON,
+                address=address,
+            )
+        )
 
 
 class TestRunningUnderAiAgent:
@@ -18,119 +46,101 @@ class TestRunningUnderAiAgent:
         replace.in_environ('CLAUDECODE', '1')
         assert running_under_ai_agent()
 
-    def test_false_when_unset(self, replace: Replacer) -> None:
-        replace.in_environ('CLAUDECODE', not_there)
-        assert not running_under_ai_agent()
+    def test_false_when_unset(self) -> None:
+        assert not running_under_ai_agent()  # conftest clears it
 
 
 class TestAiSession:
-    def test_true_under_a_harness_marker(self, replace: Replacer) -> None:
+    def test_true_under_a_harness_marker(self, workspace: Path, replace: Replacer) -> None:
         replace.in_environ('CLAUDECODE', '1')
-        assert ai_session()
+        assert ai_session(workspace)
 
-    def test_true_under_a_role_stamp_alone(self, replace: Replacer) -> None:
-        # only a chimera launcher stamps roles, and only into AI sessions
-        replace.in_environ('CHIMERA_ROLE', 'manager')
-        assert ai_session()
+    def test_true_for_a_recorded_session_without_a_marker(
+        self, workspace: Path, replace: Replacer
+    ) -> None:
+        # a future harness that sets no marker of its own is still caught, provided
+        # chimera launched it — the archive knows this process to be a session
+        _session(workspace, replace, address='proj@@manager')
+        assert ai_session(workspace)
 
-    def test_false_for_a_human(self) -> None:
-        assert not ai_session()  # conftest clears both signals
+    def test_false_for_a_human(self, workspace: Path) -> None:
+        assert not ai_session(workspace)
 
 
 class TestSessionRole:
-    def test_reads_the_role(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'manager')
-        compare(session_role(), expected='manager')
+    def test_a_captains_address_is_the_captain(self, workspace: Path, replace: Replacer) -> None:
+        _session(workspace, replace, address='@@captain')
+        compare(session_role(workspace), expected='captain')
 
-    def test_unset_is_none(self) -> None:
-        assert session_role() is None  # conftest clears the variable
+    def test_a_managers_address_is_the_manager(self, workspace: Path, replace: Replacer) -> None:
+        _session(workspace, replace, address='proj@@manager')
+        compare(session_role(workspace), expected='manager')
 
-    def test_empty_counts_as_unset(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', '')
-        assert session_role() is None
+    def test_an_actors_address_is_the_agent(self, workspace: Path, replace: Replacer) -> None:
+        _session(workspace, replace, address='proj@g@agent')
+        compare(session_role(workspace), expected='agent')
 
+    def test_a_human_has_no_role(self, workspace: Path) -> None:
+        assert session_role(workspace) is None
 
-class TestRoleScope:
-    def test_reads_the_scope(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj@g')
-        compare(role_scope(), expected='proj@g')
+    def test_an_unaddressed_session_has_no_role(self, workspace: Path, replace: Replacer) -> None:
+        # a hand-launched claude: recorded, but holding no claim to act as anyone
+        _session(workspace, replace, address=None)
+        assert session_role(workspace) is None
 
-    def test_unset_is_none(self) -> None:
-        assert role_scope() is None
-
-    def test_empty_counts_as_unset(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE_SCOPE', '')
-        assert role_scope() is None
-
-
-class TestRoleScopeFor:
-    def test_project_only(self) -> None:
-        compare(role_scope_for('proj'), expected='proj')
-
-    def test_project_and_goal(self) -> None:
-        compare(role_scope_for('proj', 'g'), expected='proj@g')
-
-    def test_round_trips_through_fenced_project(self, replace: Replacer) -> None:
-        # the pair shares one grammar: what the builder stamps, the parser recovers
-        replace.in_environ('CHIMERA_ROLE', 'agent')
-        replace.in_environ('CHIMERA_ROLE_SCOPE', role_scope_for('proj', 'g'))
-        compare(fenced_project(), expected='proj')
+    def test_an_unparseable_address_is_no_address_at_all(
+        self, workspace: Path, replace: Replacer
+    ) -> None:
+        _session(workspace, replace, address='not-an-address')
+        assert session_address(workspace) is None
+        assert session_role(workspace) is None
 
 
 class TestFencedProject:
-    def test_scoped_manager_is_fenced(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'manager')
-        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
-        compare(fenced_project(), expected='proj')
+    def test_a_manager_is_fenced_to_its_project(self, workspace: Path, replace: Replacer) -> None:
+        _session(workspace, replace, address='proj@@manager')
+        compare(fenced_project(workspace), expected='proj')
 
-    def test_scoped_agent_is_fenced_to_its_project(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'agent')
-        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj@g')
-        compare(fenced_project(), expected='proj')
+    def test_an_agent_is_fenced_to_its_goals_project(
+        self, workspace: Path, replace: Replacer
+    ) -> None:
+        _session(workspace, replace, address='proj@g@agent')
+        compare(fenced_project(workspace), expected='proj')
 
-    def test_captain_is_unfenced(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'captain')
-        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')  # even a stray scope never fences
-        assert fenced_project() is None
+    def test_the_captain_is_unfenced(self, workspace: Path, replace: Replacer) -> None:
+        # by construction, not by exception: its address names no project
+        _session(workspace, replace, address='@@captain')
+        assert fenced_project(workspace) is None
 
-    def test_no_role_is_unfenced(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
-        assert fenced_project() is None  # conftest clears the role variable
+    def test_a_human_is_unfenced(self, workspace: Path) -> None:
+        assert fenced_project(workspace) is None
 
-    def test_role_without_scope_is_unfenced(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'manager')
-        assert fenced_project() is None
+    def test_an_unaddressed_session_is_unfenced(self, workspace: Path, replace: Replacer) -> None:
+        _session(workspace, replace, address=None)
+        assert fenced_project(workspace) is None
 
 
 class TestRefuseCrossScope:
-    def test_out_of_scope_refuses(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'manager')
-        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
+    def test_out_of_scope_refuses(self, workspace: Path, replace: Replacer) -> None:
+        _session(workspace, replace, address='proj@@manager')
         with ShouldRaise(CrossScopeError('proj')):
-            refuse_cross_scope('other')
+            refuse_cross_scope(workspace, 'other')
 
-    def test_in_scope_passes(self, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'manager')
-        replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj')
-        refuse_cross_scope('proj')
+    def test_in_scope_passes(self, workspace: Path, replace: Replacer) -> None:
+        _session(workspace, replace, address='proj@@manager')
+        refuse_cross_scope(workspace, 'proj')
 
-    def test_unfenced_passes_anything(self) -> None:
-        refuse_cross_scope('other')  # conftest clears role and scope
+    def test_unfenced_passes_anything(self, workspace: Path) -> None:
+        refuse_cross_scope(workspace, 'other')
 
     def test_error_signposts_depth_never_privilege(self) -> None:
         compare(str(CrossScopeError('proj')), expected='scoped to proj; ask the captain')
 
 
-class TestRoleEnv:
-    def test_unscoped_clears_the_scope(self) -> None:
-        # '' rather than omission: the overlay must displace a stale inherited scope
-        compare(
-            role_env('captain'),
-            expected={'CHIMERA_ROLE': 'captain', 'CHIMERA_ROLE_SCOPE': ''},
-        )
-
-    def test_scoped(self) -> None:
-        compare(
-            role_env('agent', 'proj@g'),
-            expected={'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'proj@g'},
-        )
+def test_a_background_agent_is_fenced_like_any_other(workspace: Path, replace: Replacer) -> None:
+    # the whole point of retiring the env stamp: a `--bg` session runs in a pooled worker
+    # that never saw the launcher's environment, and passing a prompt is exactly what
+    # makes a launch background — so the unattended agents were the unfenced ones
+    _session(workspace, replace, address='proj@g@agent')
+    compare(session_role(workspace), expected='agent')
+    compare(fenced_project(workspace), expected='proj')

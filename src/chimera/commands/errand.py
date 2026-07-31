@@ -7,7 +7,7 @@ chimera itself delivers the report (``out`` or the caller's stdout), and the goa
 swept back down through ``worktree rm``'s safety checks.
 """
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -60,7 +60,6 @@ def errand(
     timeout: float | None = None,
     spec: AgentSpec = AgentSpec(),
     context: Callable[[str, str], Path | None] | None = None,
-    env: Callable[[str, str], Mapping[str, str]] | None = None,
     dry: Dry = Dry(),
 ) -> ErrandResult:
     """Dispatch a one-shot read-only agent into ``target``'s ``repo``; deliver its report.
@@ -70,7 +69,7 @@ def errand(
     its worktree on the guardrailed prompt, then hands the report off: written to
     ``out`` when given (logged with path/bytes/sha256 on ``errand: result`` — the
     audit twin of ``context: rendered``), else returned for the caller to print.
-    ``context``/``env`` are factories keyed by ``(session name, goal)``, as on
+    ``context`` is a factory keyed by ``(session name, goal)``, as on
     ``review`` — only this function knows the generated goal.
 
     Unless ``keep``, the goal is then swept through ``worktree rm``'s safety checks:
@@ -82,7 +81,7 @@ def errand(
     Every mutation routes through ``dry``, so a dry run resolves everything —
     including the goal id — but creates, runs and removes nothing.
     """
-    refuse_restricted(spec, extra)
+    refuse_restricted(worktrees_root, spec, extra)
     if not repo.is_dir():
         raise UserError(f"project '{target}' has no repo checkout at {repo} to dispatch into")
     goal = _fresh_goal(worktrees_root)
@@ -92,7 +91,6 @@ def errand(
         dry(add, repo, worktrees_root, goal=goal, frm=frm, fetch=fetch)
     name = str(Actor(target, goal, AGENT))
     rendered = context(name, goal) if context is not None else None
-    stamp = env(name, goal) if env is not None else {}
     report = ''
 
     def _run() -> None:
@@ -104,7 +102,6 @@ def errand(
             extra,
             model=spec.model,
             context=rendered,
-            env=stamp,
             readonly=True,
             timeout=timeout,
         )

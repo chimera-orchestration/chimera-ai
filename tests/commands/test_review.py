@@ -177,7 +177,7 @@ def test_review_builds_the_goal_tracking_the_pr_and_launches(
                 False,
                 AgentSpec(),
                 None,
-                {},
+                Dry(),
             )
         ],
     )
@@ -221,7 +221,7 @@ def test_review_keys_the_context_by_the_resolved_session_name(
                 False,
                 AgentSpec(),
                 tmpdir / 'ctx.md',
-                {},
+                Dry(),
             )
         ],
     )
@@ -855,7 +855,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
                 True,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@pr-1'},
+                None,
             )
         ],
     )
@@ -891,7 +891,7 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
                 False,
                 AgentSpec(),
                 None,
-                {'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'project@pr-1'},
+                None,
             )
         ],
     )
@@ -914,11 +914,8 @@ def _dry_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         review_step: str | None = None,
         spec: AgentSpec = AgentSpec(),
         context: Callable[[str, str], Path | None] | None = None,
-        env: Callable[[str, str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
-        if env is not None:  # the real review stamps the role through the factory on launch
-            env('project@pr-1@agent', 'pr-1')
         calls.append(dry)
         return worktrees / 'pr-1@agent'
 
@@ -956,7 +953,7 @@ def test_review_cli_dry_with_packaged_template(
             [
                 f'Would review 1 in {expected}',
                 'harness: claude',
-                'role: agent (scope: project@pr-1)',
+                'address: project@pr-1@agent',
                 f'prompt: review template ({PACKAGED / "review.md"} (packaged)) + guardrail',
                 'context: (none)',
             ]
@@ -992,7 +989,7 @@ def test_review_cli_dry_names_the_project_template(
             [
                 f'Would review 1 in {expected}',
                 'harness: claude',
-                'role: agent (scope: project@pr-1)',
+                'address: project@pr-1@agent',
                 f'prompt: review template ({Path.cwd() / "prompts" / "review.md"}) + guardrail',
                 'context: (none)',
             ]

@@ -95,7 +95,6 @@ class Launch(Protocol):
         *,
         model: str | None = None,
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> str | None: ...
 
@@ -109,11 +108,7 @@ class Agent(ABC):
     file (see ``chimera.agents.context``) the harness injects by whatever channel it
     has — never by writing into the repo. ``dangerous`` asks the harness to make its
     permissions-bypass mode *reachable* (never active); a harness without such a mode
-    ignores it. ``extra`` is forwarded to the harness binary verbatim. ``env`` is extra
-    variables overlaid on the parent environment — how a launcher stamps role identity
-    (``CHIMERA_ROLE``/``CHIMERA_ROLE_SCOPE``) into the session; the overlay wins over
-    the parent's own values, so a captain session launching ``ch goal start`` hands the
-    child ``agent``, never its own ``captain``. ``exclusive`` (the default) refuses to
+    ignores it. ``extra`` is forwarded to the harness binary verbatim. ``exclusive`` (the default) refuses to
     launch while any session is live in ``cwd`` — a chat deliberately sits alongside a
     working agent, so it opts out.
     """
@@ -135,7 +130,6 @@ class Agent(ABC):
         *,
         model: str | None = None,
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> str | None:
         """Launch a new session named ``name`` in ``cwd``; background when ``prompt`` is given.
@@ -161,7 +155,6 @@ class Agent(ABC):
         id: str | None = None,
         model: str | None = None,
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         exclusive: bool = True,
     ) -> str | None:
         """Revive a session in ``cwd``, continuing it from wherever it left off.
@@ -186,7 +179,6 @@ class Agent(ABC):
         *,
         model: str | None = None,
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         readonly: bool = True,
         timeout: float | None = None,
     ) -> str:

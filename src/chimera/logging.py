@@ -90,11 +90,14 @@ def configure() -> None:
     matching in ``resolve_project``) never lands a stray trace line.
     """
     logger.remove()
+    # bound before the early return, and unconditionally: loguru's default extra is
+    # process-global, so leaving a previous call's identity in place would attribute
+    # these lines to whoever ran last
+    logger.configure(extra=_identity(Path.cwd()))
     try:
         workspace = resolve_workspace(Path.cwd())
     except NotInWorkspaceError:
         return
-    logger.configure(extra=_identity(Path.cwd()))
     logger.add(log_path(workspace), format=_format, level='DEBUG')
 
 

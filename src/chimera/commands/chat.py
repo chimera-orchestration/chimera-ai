@@ -1,4 +1,4 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
 
@@ -58,7 +58,6 @@ def chat(
     dangerous: bool = False,
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
-    env: Mapping[str, str] = {},
     resume: bool = False,
     dry: Dry = Dry(),
 ) -> str | None:
@@ -72,10 +71,8 @@ def chat(
     mutates nothing, and the scope's chat being live is its normal state, so refusing
     would make the preview unreachable exactly when it's wanted (the other launchers'
     liveness checks live inside the launch the ``dry`` switch already skips).
-    ``env`` is the role stamp overlaid on the session's environment (see
-    ``chimera.agent_env.role_env``).
     """
-    refuse_restricted(spec, extra)
+    refuse_restricted(cwd, spec, extra)
     live = any(session.name == name for session in spec.agent.live())
     if live and not dry.on:
         raise ChatAlreadyLiveError(name)
@@ -92,7 +89,6 @@ def chat(
         dangerous,
         model=spec.model,
         context=context,
-        env=env,
         exclusive=False,
     )
     if live:

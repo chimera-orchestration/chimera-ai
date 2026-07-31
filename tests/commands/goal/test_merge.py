@@ -138,7 +138,9 @@ def test_diverged_refusal_never_advertises_force_to_an_ai_session(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
     worktrees = _diverged(tmpdir, git_repo)
-    replace.in_environ('CHIMERA_ROLE', 'manager')  # --force is stripped from this session's tree
+    # --force is stripped from this session's tree, so the hint would name a flag it
+    # cannot reach; the session is an AI one because the archive says it is
+    replace.in_environ('CLAUDECODE', '1')
     with ShouldRaise(
         UserError(
             'no actor branch contains all the others (g/agent, g/human) — '

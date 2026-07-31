@@ -17,10 +17,12 @@ import os
 import re
 import subprocess
 from collections.abc import Iterator, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 from testfixtures import Command as _Command
+from testfixtures import TempDir
 from testfixtures import LogCapture, Replacer
 from testfixtures.command import AbstractRun, CheckResult
 from testfixtures.comparing import compare
@@ -30,7 +32,7 @@ from testfixtures.outputcapture import OutputCapture
 from typer._click.core import Command as ClickCommand
 from typer.core import TyperGroup
 
-from chimera.agents.claude import Claude
+from chimera.archive import Archive, ArchiveSession
 from chimera.logging import configure
 from chimera.processes import process_create_time
 
@@ -221,26 +223,6 @@ def launched(argv: Sequence[object], cwd: Path) -> dict[str, object]:
     }
 
 
-def capture_env(replace: Replacer) -> list[object]:
-    """The env overlay each launch hands the adapter (start and resume alike)."""
-    envs: list[object] = []
-
-    def launch(
-        self: Claude,
-        cwd: Path,
-        name: str,
-        prompt: str | None = None,
-        extra: Sequence[str] = (),
-        dangerous: bool = False,
-        **kw: object,
-    ) -> None:
-        envs.append(kw.get('env'))
-
-    replace.on_class(Claude.start, launch)
-    replace.on_class(Claude.resume, launch)
-    return envs
-
-
 def general_capture() -> LogCapture:
     """Capture the deterministic payload of every INFO+ line (drops only the timing).
 
@@ -298,3 +280,36 @@ class Run(AbstractRun):
 
 
 Command: TypeAlias = _Command[Run]
+
+
+def as_session(
+    tmpdir: TempDir, replace: Replacer, address: str | None, workspace: Path | None = None
+) -> Path:
+    """Run the rest of the test inside a recorded session holding ``address``.
+
+    The evidence a role and its fence are read from: a workspace, a session row, and the
+    harness naming this process as that session. Replaces the old ``CHIMERA_ROLE`` stamp
+    — which is exactly the point, since the stamp never reached a background session.
+
+    Makes a bare workspace and chdirs into it unless ``workspace`` names one the test
+    has already built; returns it either way.
+    """
+    if workspace is not None:
+        ws = workspace
+    else:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        os.chdir(ws)
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    replace.in_environ('CLAUDE_CODE_SESSION_ID', 'uuid-session')
+    with Archive.open(ws / 'state' / 'archive.db') as store:
+        store.record_session(
+            ArchiveSession(
+                platform='claude',
+                native_id='uuid-session',
+                status='startup',
+                started_at=datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc),
+                address=address,
+            )
+        )
+    return ws

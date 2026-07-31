@@ -11,7 +11,6 @@ from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.popen import MockPopen
 
 from chimera import agents
-from chimera.agent_env import ROLE_CAPTAIN, role_env
 from chimera.agents import Agent, AgentSession
 from chimera.agents.claude import (
     READONLY_TOOLS,
@@ -233,37 +232,6 @@ def _launched(replace: Replacer) -> MockPopen:
     return Popen
 
 
-def test_launch_overlays_env_with_the_overlay_winning(tmpdir: TempDir, replace: Replacer) -> None:
-    # the launching session's own role must never leak into the child it launches
-    replace.in_environ('CHIMERA_ROLE', 'captain')
-    Popen = _launched(replace)
-    Claude().start(tmpdir.makedir('wt'), 'n', env={'CHIMERA_ROLE': 'agent'}, exclusive=False)
-    compare(Popen.all_calls[0].kwargs['env'], expected={**os.environ, 'CHIMERA_ROLE': 'agent'})
-
-
-def test_launch_clears_a_stale_scope_for_an_unscoped_stamp(
-    tmpdir: TempDir, replace: Replacer
-) -> None:
-    # e.g. a shell inside an agent session launches the captain: the inherited scope must
-    # be cleared by the overlay, not survive it — an unfenced session reporting itself
-    # fenced would be wrong ('' reads as unset, see agent_env.role_scope)
-    replace.in_environ('CHIMERA_ROLE_SCOPE', 'proj@g')
-    Popen = _launched(replace)
-    Claude().start(tmpdir.makedir('wt'), 'n', env=role_env(ROLE_CAPTAIN), exclusive=False)
-    compare(
-        Popen.all_calls[0].kwargs['env'],
-        expected={**os.environ, 'CHIMERA_ROLE': 'captain', 'CHIMERA_ROLE_SCOPE': ''},
-    )
-
-
-def test_launch_without_overlay_inherits_the_environment(
-    tmpdir: TempDir, replace: Replacer
-) -> None:
-    Popen = _launched(replace)
-    Claude().resume(tmpdir.makedir('wt'), 'n', exclusive=False)
-    assert Popen.all_calls[0].kwargs['env'] is None  # inherits the parent environment wholesale
-
-
 def test_launch_is_on_record_before_the_session_ends(
     tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
 ) -> None:
@@ -321,7 +289,6 @@ class TestRun:
             expected=['claude', '-p', '--output-format', 'json', _READONLY, 'report on X'],
         )
         compare(root.kwargs['cwd'], expected=worktree)
-        assert root.kwargs['env'] is None  # no overlay: the parent environment, wholesale
         full_logs.check(
             {
                 'level': 'INFO',
@@ -369,12 +336,6 @@ class TestRun:
             Popen.all_calls[0].args[0],
             expected=['claude', '-p', '--output-format', 'json', _READONLY, '--model=sonnet', 'p'],
         )
-
-    def test_env_overlay_wins_over_the_parent(self, tmpdir: TempDir, replace: Replacer) -> None:
-        replace.in_environ('CHIMERA_ROLE', 'captain')
-        Popen = _printed(replace)
-        Claude().run(tmpdir.makedir('wt'), 'n', 'p', env={'CHIMERA_ROLE': 'agent'})
-        compare(Popen.all_calls[0].kwargs['env'], expected={**os.environ, 'CHIMERA_ROLE': 'agent'})
 
     def test_timeout_is_passed_and_raises_through(self, tmpdir: TempDir, replace: Replacer) -> None:
         # TimeoutExpired can only be raised from Popen.communicate(), a point MockPopen's

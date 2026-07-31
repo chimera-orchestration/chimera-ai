@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
@@ -20,13 +20,9 @@ from chimera.agent_env import (
     ROLE_AGENT,
     ROLE_CAPTAIN,
     ROLE_COMMANDS,
-    ROLE_ENV_VAR,
     ROLE_MANAGER,
-    ROLE_SCOPE_ENV_VAR,
     ai_session,
     refuse_cross_scope,
-    role_env,
-    role_scope_for,
     session_role,
 )
 from chimera.agents import AgentSession
@@ -439,7 +435,7 @@ def _project(ctx: typer.Context, explicit: str | None) -> Project:
     project = resolve_project(
         Path.cwd(), explicit if explicit is not None else _overrides(ctx).project
     )
-    refuse_cross_scope(project.name)
+    refuse_cross_scope(Path.cwd(), project.name)
     return project
 
 
@@ -527,13 +523,13 @@ def _dry_preview(
     prompt: str | None,
     extra: list[str],
     context: Path | None,
-    env: Mapping[str, str],
+    address: str,
     *,
     sources: tuple[Source, ...] = (),
     target: str | None = None,
     out: Path | None = None,
 ) -> None:
-    """What a --dry launch would inject: agent, role stamp, prompt, passthrough and context.
+    """What a --dry launch would do: the address it records, agent, prompt, passthrough, context.
 
     ``sources`` lists each glob the render searched with its match count — a ``(0)`` is
     the silent dead end the preview exists to reveal: a directive in the wrong place, or
@@ -545,8 +541,9 @@ def _dry_preview(
         typer.echo(f'target: {target}')
         typer.echo(f'out: {out}' if out is not None else 'out: (stdout)')
     typer.echo(f'harness: {spec.harness}' + (f'  model: {spec.model}' if spec.model else ''))
-    role, scope = env[ROLE_ENV_VAR], env.get(ROLE_SCOPE_ENV_VAR)
-    typer.echo(f'role: {role} (scope: {scope})' if scope else f'role: {role}')
+    # the address is what a real launch would put on record for the session to claim —
+    # and therefore its role and its fence, which the address already encodes
+    typer.echo(f'address: {address}')
     typer.echo(f'prompt: {prompt}' if prompt is not None else 'prompt: (interactive)')
     if extra:
         typer.echo(f'passthrough: {" ".join(extra)}')
@@ -617,7 +614,7 @@ def prime(ctx: typer.Context) -> None:
     scope = _scope(ctx, None, None)
     typer.echo(
         _prime(
-            resolve_role(session_role(), scope),
+            resolve_role(session_role(Path.cwd()), scope),
             workspace=scope.workspace.name,
             project=scope.project.name if scope.project else None,
             goal=scope.goal,
@@ -886,7 +883,6 @@ def review(
     spec = _spec(p, harness, model)
     context: Path | None = None
     sources: tuple[Source, ...] = ()
-    env: Mapping[str, str] = {}
 
     def _render_context(name: str, goal: str) -> Path | None:
         # keyed by the session name and goal _review resolves (pr-<N>, even from a URL
@@ -896,13 +892,6 @@ def review(
             p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=goal)
         )
         return context
-
-    def _role_stamp(name: str, goal: str) -> Mapping[str, str]:
-        # keyed the same way; the handle is kept so --dry previews the stamp the launch
-        # actually got, never a re-derivation
-        nonlocal env
-        env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
-        return env
 
     worktree = _review(
         p.repo,
@@ -917,7 +906,6 @@ def review(
         review_step=review_step,
         spec=spec,
         context=_render_context,
-        env=_role_stamp,
         dry=dry_run,
     )
     if no_agent:
@@ -937,7 +925,7 @@ def review(
                 f'review template ({template}) + guardrail{filled}',
                 _passthrough(ctx),
                 context,
-                env,
+                str(Actor(p.name, worktree.name.split(SEP, 1)[0], AGENT)),
                 sources=sources,
             )
 
@@ -977,7 +965,6 @@ def errand(
     spec = _spec(p, harness, model)
     context: Path | None = None
     sources: tuple[Source, ...] = ()
-    env: Mapping[str, str] = {}
 
     def _render_context(name: str, goal: str) -> Path | None:
         # keyed by the resolved session name and goal: only _errand knows the generated
@@ -985,12 +972,6 @@ def errand(
         nonlocal context, sources
         context, sources = _context_file(p, name, ROLE_AGENT, _agent_intro(p.name, goal))
         return context
-
-    def _role_stamp(name: str, goal: str) -> Mapping[str, str]:
-        # keyed the same way; the handle is kept so --dry previews the stamp the run got
-        nonlocal env
-        env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
-        return env
 
     result = _errand(
         p.repo,
@@ -1005,7 +986,6 @@ def errand(
         timeout=timeout,
         spec=spec,
         context=_render_context,
-        env=_role_stamp,
         dry=dry_run,
     )
     if dry:
@@ -1015,7 +995,7 @@ def errand(
             f'{prompt} (guardrail prepended)',
             _passthrough(ctx),
             context,
-            env,
+            str(Actor(p.name, result.goal, AGENT)),
             sources=sources,
             target=p.name,
             out=result.out,
@@ -1067,12 +1047,10 @@ def chat(
         spec = resolve_spec(harness, model, config.captain, config.agent)
         role = ROLE_CAPTAIN
         intro = _prime(ROLE_CAPTAIN, persona=config.captain.name, workspace=scope.workspace.name)
-        env = role_env(ROLE_CAPTAIN)  # no scope: the captain is unfenced
     else:
         spec = resolve_spec(harness, model, scope.project.config.agent, config.agent)
         role = ROLE_MANAGER
         intro = _prime(ROLE_MANAGER, project=scope.project.name)
-        env = role_env(ROLE_MANAGER, role_scope_for(scope.project.name))
     # the role's prime leads (identity + golden path, so the session starts knowing the
     # loop instead of pulling `ch prime`), then directives, principles, knowledge index
     rendered = assemble(scope.workspace, scope.project, role, intro)
@@ -1086,7 +1064,6 @@ def chat(
         dangerous,
         spec,
         context,
-        env,
         resume,
         dry_run,
     )
@@ -1097,7 +1074,7 @@ def chat(
     if note is not None:
         typer.echo(note)
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=rendered.sources)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, name, sources=rendered.sources)
 
 
 project_app = typer.Typer(
@@ -1395,7 +1372,6 @@ def goal_start(
         ROLE_AGENT,
         _prime(ROLE_AGENT, project=p.name, goal=goal),
     )
-    env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
     worktree = _goal_start(
         p.repo,
         p.worktrees,
@@ -1408,12 +1384,12 @@ def goal_start(
         dangerous=dangerous,
         spec=spec,
         context=context,
-        env=env,
         dry=dry_run,
     )
     typer.echo(f'{dry_run.verb("Started", "Would start")} {goal} in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
+        address = str(Actor(p.name, goal, AGENT))
+        _dry_preview(spec, prompt, _passthrough(ctx), context, address, sources=sources)
 
 
 @goal_app.command(
@@ -1442,7 +1418,6 @@ def goal_adopt(
         ROLE_AGENT,
         _prime(ROLE_AGENT, project=p.name, goal=goal),
     )
-    env = role_env(ROLE_AGENT, role_scope_for(p.name, goal))
     worktree = _goal_adopt(
         p.repo,
         p.worktrees,
@@ -1453,12 +1428,12 @@ def goal_adopt(
         dangerous,
         spec,
         context,
-        env,
         dry_run,
     )
     typer.echo(f'{dry_run.verb("Adopted", "Would adopt")} {goal} in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
+        address = str(Actor(p.name, goal, AGENT))
+        _dry_preview(spec, prompt, _passthrough(ctx), context, address, sources=sources)
 
 
 @goal_app.command(
@@ -1680,11 +1655,10 @@ def agent_start(
     context, sources = _context_file(
         p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=g)
     )
-    env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
-    _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run)
+    _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, dry_run)
     typer.echo(f'{dry_run.verb("Launched", "Would launch")} agent in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, name, sources=sources)
 
 
 @agent_app.command(
@@ -1713,15 +1687,12 @@ def agent_resume(
     context, sources = _context_file(
         p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=g)
     )
-    env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
     native = resume_target(Path.cwd(), spec.agent.platform, p.name, g, actor)
-    _resume(
-        worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run, native
-    )
+    _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, dry_run, native)
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
         typer.echo(f'session: {native}' if native else 'session: (no archived id — by name)')
-        _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
+        _dry_preview(spec, prompt, _passthrough(ctx), context, name, sources=sources)
 
 
 @agent_app.command(
@@ -2079,20 +2050,24 @@ def _strip_to_role(command: Command, allowed: frozenset[str], path: str = '') ->
 
 
 def main() -> None:
-    role = session_role()
-    if role is not None and role != ROLE_CAPTAIN and role not in ROLE_COMMANDS:
+    # Who this session is decides which tree it gets, so it is resolved before anything
+    # parses. There is no longer an unknown-role case to guard: a role is read off the
+    # address, whose three shapes are the three roles, so it can only be one of them or
+    # nothing at all.
+    # loguru ships a stderr sink that would print this resolution's own SQLite trace to
+    # the console before any command has run; `configure` drops it again for real once a
+    # workspace is known (and for the same reason resolves identity before adding a sink)
+    logger.remove()
+    try:
+        role = session_role(Path.cwd())
+        driven_by_agent = ai_session(Path.cwd())
+    except UserError:
+        # a completer must never raise or print (an archive awaiting migration would
+        # otherwise break every TAB), so fail closed and complete nothing
         if completing():
-            # a completer must never raise or print — a stale role stamp in a shell
-            # would otherwise break every TAB; fail closed and complete nothing
-            raise SystemExit(0)
-        # fail hard and early: never a silent full tree, never a silently narrowed one
-        typer.echo(
-            f'Error: unknown CHIMERA_ROLE {role!r} '
-            f'(known: {", ".join((ROLE_CAPTAIN, *ROLE_COMMANDS))})',
-            err=True,
-        )
-        raise SystemExit(1)
-    if ai_session():  # a role stamp alone marks an AI session — CLAUDECODE isn't required
+            raise SystemExit(0) from None
+        raise
+    if driven_by_agent:
         command = get_command(app)
         if role in ROLE_COMMANDS:  # prune first: the later strips walk the smaller tree
             _strip_to_role(command, ROLE_COMMANDS[role])

@@ -74,7 +74,7 @@ the context the agent will be given) but changes nothing:
     $ ch goal start add-greeting -p demo --dry
     Would start add-greeting in /Users/you/lycia/demo/worktrees/add-greeting@agent
     harness: claude
-    role: agent (scope: demo@add-greeting)
+    address: demo@add-greeting@agent
     prompt: (interactive)
     ...
 

@@ -37,7 +37,7 @@ from chimera.prime import prime
 from tests.cli import (
     Command,
     action_logs,
-    capture_env,
+    as_session,
     capture_launches,
     context_sources,
     full_capture,
@@ -660,12 +660,13 @@ def test_extra_bypass_flags_refused_under_an_ai_agent(tmpdir: TempDir, replace: 
     compare(calls, expected=[])  # never launched
 
 
-def test_extra_bypass_flags_refused_under_a_role_stamp_alone(
+def test_extra_bypass_flags_refused_for_a_recorded_session_alone(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
-    # no CLAUDECODE (conftest clears it): the role stamp alone marks the AI session
+    # no CLAUDECODE (conftest clears it): the archive knowing this process to be a
+    # session it recorded is enough on its own
+    as_session(tmpdir, replace, 'proj@@manager')
     worktree = tmpdir.makedir('wt')
-    replace.in_environ('CHIMERA_ROLE', 'manager')
     calls = _stub(replace)
     with ShouldRaise(
         UserError(
@@ -1302,7 +1303,7 @@ def test_agent_start_cli_dry_previews_without_launching(
             [
                 f'Would launch agent in {expected_wt}',
                 'harness: claude  model: opus',
-                'role: agent (scope: proj@g)',
+                'address: proj@g@agent',
                 'prompt: do it',
                 *sources_lines(sources),
                 f'context: {context}',
@@ -1356,7 +1357,7 @@ def test_agent_resume_cli_dry_without_context(
                 f'Would resume agent in {expected_wt}',
                 'session: (no archived id — by name)',
                 'harness: claude',
-                'role: agent (scope: myproject@g)',
+                'address: myproject@g@agent',
                 'prompt: (interactive)',
                 'passthrough: --verbose',
                 'context: (none)',
@@ -1378,38 +1379,6 @@ def test_agent_resume_cli_dry_without_context(
         ),
     )
     compare(calls, expected=[])  # nothing launched
-
-
-def test_agent_env_overlay_reaches_the_adapter(tmpdir: TempDir, replace: Replacer) -> None:
-    worktree = tmpdir.makedir('wt')
-    envs = capture_env(replace)
-    agent(worktree, 'n', env={'CHIMERA_ROLE': 'agent'})
-    resume(worktree, 'n', env={'CHIMERA_ROLE': 'agent'})
-    compare(envs, expected=[{'CHIMERA_ROLE': 'agent'}, {'CHIMERA_ROLE': 'agent'}])
-
-
-def test_agent_env_defaults_to_empty(tmpdir: TempDir, replace: Replacer) -> None:
-    envs = capture_env(replace)
-    agent(tmpdir.makedir('wt'), 'n')
-    compare(envs, expected=[{}])
-
-
-def test_agent_start_cli_stamps_the_agent_role(
-    tmpdir: TempDir, replace: Replacer, command: Command
-) -> None:
-    _project_with_worktree(tmpdir)
-    envs = capture_env(replace)
-    command.run('agent', 'start', '-g', 'g')
-    compare(envs, expected=[{'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'myproject@g'}])
-
-
-def test_agent_resume_cli_stamps_the_agent_role(
-    tmpdir: TempDir, replace: Replacer, command: Command
-) -> None:
-    _project_with_worktree(tmpdir)
-    envs = capture_env(replace)
-    command.run('agent', 'resume', '-g', 'g')
-    compare(envs, expected=[{'CHIMERA_ROLE': 'agent', 'CHIMERA_ROLE_SCOPE': 'myproject@g'}])
 
 
 def _orphan_sleeper() -> int:
