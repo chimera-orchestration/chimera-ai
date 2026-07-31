@@ -231,6 +231,12 @@ def checkout_here(git: Git, branch_name: str, into: Path, log_as: str) -> Checko
     return Checkout(done=True, where=top, branch=branch_name, was=landed)
 
 
+_PATHSPEC_LIMIT = 60_000
+"""Total pathspec bytes above which the squash search stops scoping by path and replays
+base's whole history: pathspecs ride argv (``git log`` has no ``--pathspec-from-file``),
+and a branch touching enough files would overflow the OS argument limit."""
+
+
 def _patch_ids(diffs: bytes) -> set[str]:
     """The set of patch-ids in a (possibly multi-commit) diff, one per commit it contains.
 
@@ -262,22 +268,29 @@ def is_merged(git: Git, ref: str, base: str) -> bool:
         pass
     # '-' marks a commit whose patch base already carries; '+' one it doesn't — or an empty
     # commit, which has no patch to match, so '+'es are harmless when their patches are empty
-    cherry = [line.split() for line in git('cherry', base, ref).splitlines()]
+    # (--root: a parentless commit's patch is its whole tree, never empty). Anything not
+    # shaped '<mark> <sha>' is a warning stderr merged into the output — never cherry's.
+    cherry = [
+        line.split()
+        for line in git('cherry', base, ref).splitlines()
+        if line.startswith(('+ ', '- '))
+    ]
     unmatched = (sha for mark, sha in cherry if mark == '+')
     if any(mark == '-' for mark, _ in cherry) and not any(
-        git.raw('diff-tree', '--no-commit-id', '-p', sha).strip() for sha in unmatched
+        git.raw('diff-tree', '--root', '--no-commit-id', '-p', sha).strip() for sha in unmatched
     ):
         return True
     mb = git('merge-base', base, ref).strip()
     paths = [
-        os.fsdecode(p)
+        b':(literal)' + p  # a file named ':…' or '*' must match itself, never parse as magic
         for p in git.raw('diff', '--name-only', '--no-renames', '-z', mb, ref).split(b'\0')
         if p
     ]
     if not paths:
         return False  # ref's tree is mb's own — no diff to seek on base
+    scope = ('--', *map(os.fsdecode, paths)) if sum(map(len, paths)) < _PATHSPEC_LIMIT else ()
     base_ids = _patch_ids(
-        git.raw('log', '-p', '--no-color', '--full-history', f'{mb}..{base}', '--', *paths)
+        git.raw('log', '-p', '--no-color', '--full-history', f'{mb}..{base}', *scope)
     )
     return next(iter(_patch_ids(git.raw('diff', mb, ref))), '') in base_ids
 

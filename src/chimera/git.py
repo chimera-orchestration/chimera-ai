@@ -21,7 +21,7 @@ import shlex
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from subprocess import STDOUT, CalledProcessError, check_output
+from subprocess import PIPE, run
 from urllib.parse import urlsplit
 
 from giterator import Git as GiteratorGit
@@ -142,23 +142,25 @@ class Git(GiteratorGit):
             logger.bind(git_cwd=str(cwd)).debug(shlex.join(('git', *command)))
 
     def raw(self, *command: str, cwd: Path | None = None) -> bytes:
-        """Run a git command, returning its output as raw bytes.
+        """Run a git command, returning its stdout as raw bytes.
 
         For output that splices blob content in (``log -p``, ``diff``) or ``-z`` file names:
         git never transcodes, so none of that is guaranteed UTF-8 — decoding it crashes on
-        the first latin-1 file in someone's history.
+        the first latin-1 file in someone's history. stderr stays out of the return value
+        (callers parse these bytes; a stray ``warning:`` would corrupt them) and joins the
+        :class:`GitError` on failure.
         """
         where = cwd or self.path
         self._trace(command, where)
-        try:
-            return check_output(
-                ('git', *command), cwd=where, stderr=STDOUT, env=_env(os.environ, None)
-            )
-        except CalledProcessError as e:
+        result = run(
+            ('git', *command), cwd=where, stdout=PIPE, stderr=PIPE, env=_env(os.environ, None)
+        )
+        if result.returncode:
             raise GitError(
-                f'{" ".join(e.cmd)!r} gave return code {e.returncode}:\n\n'
-                f'{e.output.decode(errors="replace")}\n\n'
-            ) from None
+                f'{" ".join(("git", *command))!r} gave return code {result.returncode}:\n\n'
+                f'{(result.stderr + result.stdout).decode(errors="replace")}\n\n'
+            )
+        return result.stdout
 
     def ref_exists(self, ref: str) -> bool:
         try:

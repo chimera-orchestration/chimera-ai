@@ -2,7 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import LogCapture, ShouldRaise, TempDir, compare
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
 from chimera.config import UserError
@@ -239,6 +239,54 @@ class TestIsMerged:
         repo('checkout', '-q', 'main')
         repo.commit_content('other-work')
         assert not is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_unmerged_root_commit_is_not_mistaken_for_empty(self, tmpdir: TempDir) -> None:
+        # a parentless commit shows no patch without --root — it must never read as harmless
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '--orphan', 'vendored')
+        repo('rm', '-rfq', '.')
+        (repo.path / 'important.txt').write_text('vendored')
+        repo('add', 'important.txt')
+        repo('commit', '-qm', 'vendored root')
+        repo('checkout', '-q', '-b', 'feature', 'main')
+        repo('merge', '-q', '--allow-unrelated-histories', '--no-edit', 'vendored')
+        repo.commit_content('x')
+        repo('checkout', '-q', 'main')
+        repo('cherry-pick', repo('rev-parse', 'feature').strip())
+        assert not is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_survives_an_ambiguous_refname_warning(self, tmpdir: TempDir) -> None:
+        # a tag shadowing the branch name makes git warn on stderr before every answer
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        git = Git(repo.path)
+        git('cherry-pick', *git('rev-list', '--reverse', 'main..feature').split())
+        repo('tag', 'feature', 'refs/heads/feature')
+        assert is_merged(git, 'feature', 'main')
+
+    def test_squash_merge_of_pathspec_hostile_filenames(self, tmpdir: TempDir) -> None:
+        # ':(bogus)…' is invalid pathspec magic and ':odd' an empty one — both are just files
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        (repo.path / ':(bogus)data').write_text('x')
+        (repo.path / ':odd').write_text('y')
+        repo('add', '.')
+        repo('commit', '-qm', 'hostile names')
+        repo('checkout', '-q', 'main')
+        repo.commit_content('other-work')
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_branch_too_wide_to_pathspec_searches_unscoped(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        replace('chimera.worktrees._PATHSPEC_LIMIT', 0)
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')
+        assert is_merged(Git(repo.path), 'feature', 'main')
 
     def test_squash_merge_when_base_history_carries_non_utf8(self, tmpdir: TempDir) -> None:
         # unrelated latin-1 content landing on main must never crash the containment check
