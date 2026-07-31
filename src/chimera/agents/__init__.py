@@ -95,7 +95,6 @@ class Launch(Protocol):
         *,
         model: str | None = None,
         context: Path | None = None,
-        exclusive: bool = True,
     ) -> str | None: ...
 
 
@@ -108,9 +107,12 @@ class Agent(ABC):
     file (see ``chimera.agents.context``) the harness injects by whatever channel it
     has — never by writing into the repo. ``dangerous`` asks the harness to make its
     permissions-bypass mode *reachable* (never active); a harness without such a mode
-    ignores it. ``extra`` is forwarded to the harness binary verbatim. ``exclusive`` (the default) refuses to
-    launch while any session is live in ``cwd`` — a chat deliberately sits alongside a
-    working agent, so it opts out.
+    ignores it. ``extra`` is forwarded to the harness binary verbatim.
+
+    Whether a launch is *allowed* — whether something else is already working in that
+    worktree — is not asked here: an adapter reports what its registry claims is live
+    (:meth:`live`), and which of those count as occupants is chimera's policy, applied by
+    the launchers (``chimera.commands.agent.occupants``).
     """
 
     platform: ClassVar[str]
@@ -130,7 +132,6 @@ class Agent(ABC):
         *,
         model: str | None = None,
         context: Path | None = None,
-        exclusive: bool = True,
     ) -> str | None:
         """Launch a new session named ``name`` in ``cwd``; background when ``prompt`` is given.
 
@@ -155,7 +156,6 @@ class Agent(ABC):
         id: str | None = None,
         model: str | None = None,
         context: Path | None = None,
-        exclusive: bool = True,
     ) -> str | None:
         """Revive a session in ``cwd``, continuing it from wherever it left off.
 

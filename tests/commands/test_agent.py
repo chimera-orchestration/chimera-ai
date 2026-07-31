@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import replace as replace_field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 
@@ -14,14 +15,15 @@ from chimera import __main__ as chimera_main
 from chimera.agents import AgentSession
 from chimera.agents.claude import Claude
 from chimera.agents.registry import AgentSpec
-from chimera.archive import Archive
-from chimera.archive import ArchiveSession
+from chimera.archive import Archive, ArchiveSession, Event
 from chimera.commands.agent import (
     agent,
     agents,
     in_goal,
     live,
+    occupants,
     reconcile,
+    refuse_occupied,
     resume,
     resume_target,
     scope_line,
@@ -1630,3 +1632,113 @@ class TestReconcile:
                 'sessions': ['gone'],
             }
         )
+
+
+class TestOccupants:
+    # "live here" and "would clash with me here" are different questions, and the gap is
+    # made of things a harness reports as sessions that nobody would call an occupant
+
+    def _workspace(self, tmpdir: TempDir, replace: Replacer) -> Path:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+        return ws
+
+    def _archived(self, ws: Path, native_id: str, cwd: Path, **kw: Any) -> None:
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            store.record_session(
+                ArchiveSession(
+                    platform='claude',
+                    native_id=native_id,
+                    status='startup',
+                    started_at=datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc),
+                    cwd=cwd,
+                    workspace=ws.name,
+                    **kw,
+                )
+            )
+
+    def _branch(self, ws: Path, native_id: str) -> None:
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            store.record_event(
+                Event(
+                    at=datetime(2026, 6, 15, 13, 0, tzinfo=timezone.utc),
+                    kind='branched',
+                    platform='claude',
+                    native_id=native_id,
+                )
+            )
+
+    def test_a_working_session_occupies(self, tmpdir: TempDir, replace: Replacer) -> None:
+        ws = self._workspace(tmpdir, replace)
+        wt = tmpdir.makedir('ws/wt')
+        self._archived(ws, 'chat', wt)
+        replace.on_class(Claude.live, lambda self, cwd=None: [_agent_at(wt, 'chat')])
+        compare([s.id for s in occupants(wt)], expected=['chat'])
+
+    def test_a_session_the_archive_never_saw_still_occupies(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # anything unrecognised counts: refusing beside a harmless session is
+        # recoverable, a second writer in one worktree is not
+        self._workspace(tmpdir, replace)
+        wt = tmpdir.makedir('ws/wt')
+        replace.on_class(Claude.live, lambda self, cwd=None: [_agent_at(wt, 'unknown')])
+        compare([s.id for s in occupants(wt)], expected=['unknown'])
+
+    def test_a_non_conversation_does_not_occupy(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # a browser draft and a one-shot -p run share the worktree with the real thing
+        ws = self._workspace(tmpdir, replace)
+        wt = tmpdir.makedir('ws/wt')
+        self._archived(ws, 'draft', wt, addressable=False)
+        replace.on_class(Claude.live, lambda self, cwd=None: [_agent_at(wt, 'draft')])
+        compare(occupants(wt), expected=[])
+
+    def test_a_husk_does_not_occupy(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # backgrounding leaves the parent registry-live but conversationally frozen, for
+        # as long as its terminal wrapper lives — up to 35 hours observed
+        ws = self._workspace(tmpdir, replace)
+        wt = tmpdir.makedir('ws/wt')
+        self._archived(ws, 'husk', wt)
+        self._archived(ws, 'fork', wt)
+        self._branch(ws, 'fork')
+        replace.on_class(
+            Claude.live, lambda self, cwd=None: [_agent_at(wt, 'husk'), _agent_at(wt, 'fork')]
+        )
+        compare([s.id for s in occupants(wt)], expected=['fork'])  # the fork is the live one
+
+    def test_a_session_never_finds_itself(self, tmpdir: TempDir, replace: Replacer) -> None:
+        ws = self._workspace(tmpdir, replace)
+        wt = tmpdir.makedir('ws/wt')
+        self._archived(ws, 'me', wt)
+        replace.on_class(Claude.live, lambda self, cwd=None: [_agent_at(wt, 'me')])
+        compare(occupants(wt, excluding='me'), expected=[])
+
+    def test_outside_a_workspace_every_live_session_counts(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # no archive to consult, so nothing can be ruled out — the safe way to be wrong
+        wt = tmpdir.makedir('loose')
+        replace.on_class(Claude.live, lambda self, cwd=None: [_agent_at(wt, 'x')])
+        compare([s.id for s in occupants(wt)], expected=['x'])
+
+    def test_an_empty_worktree_asks_the_archive_nothing(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        replace.on_class(Claude.live, lambda self, cwd=None: [])
+        compare(occupants(tmpdir.makedir('wt')), expected=[])
+
+
+class TestRefuseOccupied:
+    def test_a_preview_is_never_blocked_by_liveness(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # a preview mutates nothing, so a live session must not make it unavailable
+        wt = tmpdir.makedir('wt')
+        replace.on_class(Claude.live, lambda self, cwd=None: [_agent_at(wt, 'busy')])
+        refuse_occupied(wt, Dry(on=True))
+
+    def test_a_missing_worktree_is_left_to_the_launch(self, tmpdir: TempDir) -> None:
+        # nothing can occupy a directory that isn't there; the launch says the definite
+        # thing, and the registry is never asked
+        refuse_occupied(tmpdir.path / 'ghost')

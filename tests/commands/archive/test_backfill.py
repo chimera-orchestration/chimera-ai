@@ -190,7 +190,9 @@ def test_rerun_leaves_backfilled_rows_untouched(tmpdir: TempDir) -> None:
     compare(_archived(ws), expected=before)
 
 
-def test_hook_recorded_session_is_left_untouched(tmpdir: TempDir) -> None:
+def test_hook_recorded_session_is_left_untouched(tmpdir: TempDir, replace: Replacer) -> None:
+    # firing a start hook asks who else is working there, and so the registry
+    replace.on_class(Claude.live, lambda self, cwd=None: [])
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace', 'captain': 'pegasus'})
     ws = tmpdir.path / 'ws'
     session_start(

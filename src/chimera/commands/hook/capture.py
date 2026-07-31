@@ -25,8 +25,9 @@ from pathlib import Path
 
 from loguru import logger
 
-from chimera.agents import BRANCHED, RESUME, Agent
+from chimera.agents import BRANCHED, RESUME, STARTUP, Agent
 from chimera.archive import Archive, ArchiveSession, Event, archive
+from chimera.commands.agent import occupants
 from chimera.config import NotInWorkspaceError
 from chimera.context import resolve_scope
 from chimera.worktrees import worktree_actor
@@ -172,6 +173,28 @@ def session_start(agent: Agent, payload: Mapping[str, object], env: Mapping[str,
         )
         store.record_event(
             Event(at=now, kind=lifecycle, platform=agent.platform, native_id=native_id)
+        )
+    _warn_if_crowded(cwd, native_id, lifecycle, conversation)
+
+
+def _warn_if_crowded(cwd: Path, native_id: str, lifecycle: str, conversation: bool) -> None:
+    """Warn when a session starts somewhere another is already working.
+
+    The launchers refuse this outright, but they only see launches *they* make: a raw
+    ``claude`` opened in a goal worktree, or a browser attach, arrives here with the
+    session already running. A SessionStart hook cannot turn one away — the documented
+    outputs are context injection only, and an exit code merely renders an error the
+    model never sees (``agent-docs/sessions.md``) — so the most this can do is say so.
+
+    Only a cold start is worth warning about. A ``branched`` session *is* the fork whose
+    parent it appears to be crowding, and a ``resume`` is the same conversation coming
+    back; neither is a second writer.
+    """
+    if not conversation or lifecycle != STARTUP:
+        return
+    if crowd := occupants(cwd, excluding=native_id):
+        logger.bind(session=native_id, cwd=str(cwd), occupants=[s.id for s in crowd]).warning(
+            'hook session-start: another agent is already working here'
         )
 
 

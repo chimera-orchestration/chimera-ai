@@ -3,15 +3,27 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from testfixtures import Replacer, TempDir, compare
+import pytest
+from testfixtures import LogCapture, Replacer, TempDir, compare
 
 from chimera.archive import LAUNCH_WINDOW, Archive, ArchiveSession, Event, PendingLaunch
+from chimera.agents import AgentSession
 from chimera.agents.claude import Claude
 from chimera.commands.hook.capture import session_end, session_start
 from tests.cli import Command, action_logs
 
 START = 'chimera.commands.hook.capture.session_start'
 END = 'chimera.commands.hook.capture.session_end'
+
+
+@pytest.fixture(autouse=True)
+def _nothing_running(replace: Replacer) -> None:
+    """No session is live anywhere unless a test says so.
+
+    Every start now asks who else is working in that cwd (the crowding warning), which
+    means the registry — so a test that doesn't care must still not shell out to it.
+    """
+    replace.on_class(Claude.live, lambda self, cwd=None: [])
 
 
 def _archived(ws: Path) -> list[ArchiveSession]:
@@ -444,3 +456,68 @@ class TestAddressIsClaimedOnEvidence:
         _start(worktree, 'uuid-real', 'startup')
         addressed = {s.native_id: s.address for s in _archived(ws)}
         compare(addressed, expected={'uuid-draft': None, 'uuid-real': 'proj@g@agent'})
+
+
+class TestCrowdingWarning:
+    # the launchers refuse a second writer, but they only see launches *they* make: a raw
+    # claude or a browser attach arrives with the session already running, and a
+    # SessionStart hook cannot turn one away — so the most it can do is say so
+
+    @pytest.fixture(autouse=True)
+    def _nothing_running(self) -> None:
+        """Overrides the module's blanket stub: these tests replace it themselves."""
+
+    def _live(self, replace: Replacer, cwd: Path) -> list[str]:
+        """The ids the registry reports live in ``cwd`` — append to change what's running.
+
+        One replacement, mutated in place: replacing the same attribute twice hands the
+        second call the stand-in rather than the method (testfixtures#259).
+        """
+        running: list[str] = []
+        replace.on_class(
+            Claude.live,
+            lambda self, c=None: [AgentSession(i, i, 'idle', cwd, None) for i in running],
+        )
+        return running
+
+    def test_a_cold_start_beside_a_working_agent_warns(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+        running = self._live(replace, ws)  # nothing live yet: the first start warns about nothing
+        _start(ws, 'first', 'startup')
+        running.append('first')
+        _start(ws, 'second', 'startup')
+        full_logs.check_present(
+            {
+                'level': 'WARNING',
+                'message': 'hook session-start: another agent is already working here',
+                'session': 'second',
+                'cwd': str(ws),
+                'occupants': ['first'],
+            }
+        )
+
+    def test_a_branched_session_is_not_crowding_its_own_parent(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+        running = self._live(replace, ws)
+        _start(ws, 'parent', 'startup')
+        running.append('parent')
+        _start(ws, 'fork', 'fork')
+        assert not [entry for entry in full_logs.actual() if entry.get('level') == 'WARNING']
+
+    def test_an_empty_worktree_warns_about_nothing(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+        self._live(replace, ws)
+        _start(ws, 'only', 'startup')
+        assert not [entry for entry in full_logs.actual() if entry.get('level') == 'WARNING']

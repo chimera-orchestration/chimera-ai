@@ -87,7 +87,6 @@ class Claude(Agent):
         *,
         model: str | None = None,
         context: Path | None = None,
-        exclusive: bool = True,
     ) -> str | None:
         """Run a claude session named ``name``, with cwd set to ``cwd``.
 
@@ -107,7 +106,7 @@ class Claude(Agent):
         supplied = None if prompt is not None else str(uuid4())
         lead = ['--name', name] if supplied is None else ['--session-id', supplied, '--name', name]
         args = _session_args(lead, prompt, extra, dangerous, model, context)
-        self._launch(cwd, args, exclusive)
+        self._launch(cwd, args)
         return supplied
 
     def resume(
@@ -121,7 +120,6 @@ class Claude(Agent):
         id: str | None = None,
         model: str | None = None,
         context: Path | None = None,
-        exclusive: bool = True,
     ) -> str | None:
         """Resume a claude session, with cwd set to ``cwd``.
 
@@ -138,7 +136,7 @@ class Claude(Agent):
         """
         lead = ['--resume', id, '--name', name] if id is not None else ['--resume', name]
         args = _session_args(lead, prompt, extra, dangerous, model, context)
-        self._launch(cwd, args, exclusive)
+        self._launch(cwd, args)
         return id
 
     def run(
@@ -330,10 +328,8 @@ class Claude(Agent):
         summary = session_summary(str(session.cwd), session.name, self.projects)
         return replace(session, summary=summary)
 
-    def _launch(
-        self, cwd: Path, args: Sequence[str], exclusive: bool
-    ) -> subprocess.CompletedProcess[bytes]:
-        """Run ``claude <args>`` in ``cwd``; under ``exclusive``, refuse if one is already live.
+    def _launch(self, cwd: Path, args: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
+        """Run ``claude <args>`` in ``cwd``.
 
         Spawned through :class:`~subprocess.Popen` rather than ``subprocess.run`` so
         the launch is on record *while the session runs*, not once it exits: a
@@ -344,9 +340,6 @@ class Claude(Agent):
         """
         if not cwd.is_dir():
             raise FileNotFoundError(cwd)
-        if exclusive and (running := self.live(cwd)):
-            ids = ', '.join(f'{s.id} ({s.status})' for s in running)
-            raise RuntimeError(f'an agent is already live in {cwd}: {ids} — attach or stop it')
         argv = ['claude', *args]
         process = subprocess.Popen(argv, cwd=cwd)
         logger.bind(

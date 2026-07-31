@@ -239,7 +239,7 @@ def test_launch_is_on_record_before_the_session_ends(
     # blocks in _launch for as long as the human keeps talking to it
     worktree = tmpdir.makedir('wt')
     _launched(replace)
-    Claude().start(worktree, 'proj@g@agent', exclusive=False)
+    Claude().start(worktree, 'proj@g@agent')
     [entry] = full_logs.actual()
     compare(entry['message'], expected='agent: launched')
     compare(entry['argv'][:1] + entry['argv'][3:], expected=['claude', '--name', 'proj@g@agent'])
@@ -254,7 +254,7 @@ def test_launch_that_exits_nonzero_raises(tmpdir: TempDir, replace: Replacer) ->
     Popen.set_default(returncode=2)
     Popen.set_default(returncode=2)
     with ShouldRaise(subprocess.CalledProcessError) as raised:
-        Claude().start(tmpdir.makedir('wt'), 'n', exclusive=False)
+        Claude().start(tmpdir.makedir('wt'), 'n')
     compare(raised.raised.returncode, expected=2)
 
 
@@ -722,7 +722,7 @@ def test_a_foreground_start_supplies_and_reports_its_own_session_id(
 ) -> None:
     # the id chimera hands claude is the one it reports back, so a launcher can record it
     Popen = _launched(replace)
-    supplied = Claude().start(tmpdir.makedir('wt'), 'n', exclusive=False)
+    supplied = Claude().start(tmpdir.makedir('wt'), 'n')
     assert supplied is not None
     UUID(supplied)  # a real uuid, not a handle claude would refuse
     argv = Popen.all_calls[0].args[0]
@@ -733,5 +733,5 @@ def test_a_background_start_cannot_name_its_session(tmpdir: TempDir, replace: Re
     # --bg refuses --session-id ("--bg manages the session id"), so chimera doesn't guess:
     # the full id arrives later from the session's own hook
     Popen = _launched(replace)
-    assert Claude().start(tmpdir.makedir('wt'), 'n', 'do it', exclusive=False) is None
+    assert Claude().start(tmpdir.makedir('wt'), 'n', 'do it') is None
     assert '--session-id' not in Popen.all_calls[0].args[0]

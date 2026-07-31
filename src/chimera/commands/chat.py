@@ -89,7 +89,6 @@ def chat(
         dangerous,
         model=spec.model,
         context=context,
-        exclusive=False,
     )
     if live:
         logger.bind(session=name).warning('chat: already live')

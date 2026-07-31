@@ -5,7 +5,7 @@ from pathlib import Path
 from loguru import logger
 
 from chimera.agent_env import ai_session
-from chimera.agents import AgentSession
+from chimera.agents import BRANCHED, AgentSession
 from chimera.agents.registry import AGENTS, AgentSpec
 from chimera.archive import RECONCILED, ArchiveSession, Event, PendingLaunch, archive
 from chimera.config import NotInWorkspaceError, UserError
@@ -91,6 +91,85 @@ def refuse_restricted(cwd: Path, spec: AgentSpec, extra: Sequence[str]) -> None:
         raise UserError(f'{", ".join(hit)}: not available when chimera is driven by an AI agent')
 
 
+def occupants(worktree: Path, excluding: str | None = None) -> list[AgentSession]:
+    """Who is really *working* in ``worktree`` — the one definition, for every consumer.
+
+    "Live here" is not the same question as "would clash with me here", and the gap is
+    made of things the harness reports as sessions but nobody would call an occupant:
+
+    - **non-conversations.** A ``claude agents`` browser draft and a one-shot ``claude -p``
+      fire the same session hooks as a chat, and both routinely share a worktree with the
+      real thing. The archive already records the harness's verdict (``addressable``), so
+      that is what's consulted — not a re-derivation here.
+    - **husks.** Backgrounding a session leaves the parent alive but conversationally
+      frozen, registry-``busy`` until its terminal wrapper exits — observed for as long as
+      35 hours. A later ``branched`` session in the same cwd is the marker that a fork
+      happened, and the husk it left is nobody's occupant.
+    - **me.** A session asking whether the worktree is free must not find itself.
+
+    Anything unrecognised counts, deliberately: refusing to launch beside a session that
+    turns out to be harmless is recoverable, while launching a second writer into one
+    worktree is not.
+    """
+    sessions = live(worktree)
+    if not sessions:
+        return []
+    try:
+        workspace = resolve_workspace(worktree)
+    except NotInWorkspaceError:
+        return [s for s in sessions if s.id != excluding]
+    with archive(workspace) as store:
+        rows = {row.native_id: row for row in store.sessions(workspace=workspace.name)}
+        branched = {
+            event.native_id
+            for event in store.events()
+            if event.kind == BRANCHED and rows.get(event.native_id or '') is not None
+        }
+    forked_from = {row.cwd for native_id in branched if (row := rows.get(native_id)) is not None}
+    keep: list[AgentSession] = []
+    for session in sessions:
+        if session.id == excluding:
+            continue
+        row = rows.get(session.id)
+        if row is not None and not row.addressable:
+            logger.bind(session=session.id, cwd=str(worktree)).debug(
+                'agent: not a conversation, not an occupant'
+            )
+            continue
+        if row is not None and row.cwd in forked_from and session.id not in branched:
+            logger.bind(session=session.id, cwd=str(worktree)).debug(
+                'agent: husk of a backgrounded session, not an occupant'
+            )
+            continue
+        keep.append(session)
+    return keep
+
+
+def refuse_occupied(worktree: Path, dry: Dry = Dry()) -> None:
+    """Refuse to launch into a worktree something else is already working in.
+
+    One writer per worktree: two agents editing one checkout is how work gets lost. This
+    is the exclusive-launch guard every goal-worktree launcher takes — ``ch chat`` alone
+    opts out, by not calling it, since a chat deliberately sits alongside a working agent.
+
+    It asks :func:`occupants` rather than the raw registry, so a browser draft or the husk
+    of a backgrounded session no longer refuses a launch nothing is really using the
+    worktree for. A harness-native start (a raw ``claude``, a browser attach) never
+    reaches a launcher and so cannot be refused here at all — that is what the
+    SessionStart warning is for.
+
+    Two things it deliberately does not do. It doesn't ask about a worktree that isn't
+    there: nothing can occupy a missing directory, and the launch's own error says the
+    definite thing. And it stands down under ``dry``, because a preview mutates nothing —
+    liveness must never be what makes a preview unavailable.
+    """
+    if dry.on or not worktree.is_dir():
+        return
+    if running := occupants(worktree):
+        ids = ', '.join(f'{s.id} ({s.status})' for s in running)
+        raise RuntimeError(f'an agent is already live in {worktree}: {ids} — attach or stop it')
+
+
 def reconcile(workspace: Path, listing: list[AgentSession]) -> list[ArchiveSession]:
     """Close archived sessions no harness reports live any more; return the ones closed.
 
@@ -169,6 +248,7 @@ def agent(
 ) -> None:
     """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``)."""
     refuse_restricted(worktree, spec, extra)
+    refuse_occupied(worktree, dry)
     dry(record_launch, worktree, name, spec)
     dry(
         spec.agent.start,
@@ -224,6 +304,7 @@ def resume(
     """Revive ``spec``'s agent session — by archived ``id`` when the caller resolved
     one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``)."""
     refuse_restricted(worktree, spec, extra)
+    refuse_occupied(worktree, dry)
     dry(record_launch, worktree, name, spec)
     dry(
         spec.agent.resume,
