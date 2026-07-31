@@ -334,6 +334,16 @@ add/retire via the `CHECKS` tuple). Current checks:
   retroactively: a claim survives only where the dying `manager` column proves a launcher
   stamped the session, or the axes name a goal worktree. Claims inferred from geography alone
   are dropped, since geography never entitled a session to an address
+- **harness-contract** — the sessions already recorded still behave the way
+  `agent-docs/sessions.md` says harnesses do. Almost everything chimera knows about a harness
+  is *observed* rather than promised, so it will drift, and drift nobody notices is the
+  expensive kind. Re-asserts the load-bearing claims for a SQL read and no model turn: a
+  session's transcript is named after it (identity anchors on that stem precisely because it
+  is documented *and* definitionally resumable), and a branched session has a plausible parent
+  (a fork inherits its address from whatever else was recorded in its directory). Never
+  fixable — each finding says a harness changed under us, which is a human's to read. Each run
+  logs how many sessions it checked and every harness version seen, so a build this doc has
+  never validated is visible too
 - **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **inert-branches** — delete a known goal's non-agent actor branch (`{goal}/human`, `reviewer`, `pr`,

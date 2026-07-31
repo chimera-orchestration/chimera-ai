@@ -1,4 +1,6 @@
 import shutil
+from datetime import datetime, timezone
+from typing import Any
 import subprocess
 from pathlib import Path
 from typing import NoReturn
@@ -10,10 +12,11 @@ from testfixtures.loguru import LoguruSource
 from testfixtures.popen import MockPopen, shell_join
 
 from chimera.commands.doctor import checks as doctor_checks
-from chimera.archive import Archive, needs_migration
+from chimera.archive import Archive, ArchiveSession, Event, needs_migration
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
     ArchiveSchemaCheck,
+    HarnessContractCheck,
     WorkspaceDirsCheck,
     BgIsolationCheck,
     CaptainCheck,
@@ -269,6 +272,92 @@ class TestGitignore:
         compare(
             (ws / '.gitignore').read_text(),
             expected='*.lock\nservices-running.jsonl\nstate/\n*/repo/\n*/worktrees/\n',
+        )
+
+
+NOON = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+
+
+class TestHarnessContract:
+    # everything chimera knows about a harness is observed, not promised, so it will
+    # drift — and drift nobody notices is the expensive kind
+
+    def _archive(self, tmpdir: TempDir, *sessions: ArchiveSession) -> Path:
+        ws = _ws(tmpdir)
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            for session in sessions:
+                store.record_session(session)
+        return ws
+
+    def _session(self, native_id: str, **kw: Any) -> ArchiveSession:
+        return ArchiveSession(
+            platform='claude',
+            native_id=native_id,
+            status='startup',
+            started_at=NOON,
+            **kw,
+        )
+
+    def test_no_archive_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(HarnessContractCheck(), _ws(tmpdir)), expected=[])
+
+    def test_a_legacy_archive_defers_to_the_schema_check(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        (ws / 'state').mkdir(parents=True)
+        legacy_archive(ws / 'state' / 'archive.db')
+        compare(_run(HarnessContractCheck(), ws), expected=[])
+
+    def test_a_well_formed_session_is_silent(self, tmpdir: TempDir) -> None:
+        ws = self._archive(tmpdir, self._session('uuid-1', transcript=Path('/t/uuid-1.jsonl')))
+        compare(_run(HarnessContractCheck(), ws), expected=[])
+
+    def test_a_transcript_that_stopped_naming_its_session_is_reported(
+        self, tmpdir: TempDir
+    ) -> None:
+        # identity anchors on the stem; if that stops holding, resume hands out ids the
+        # harness no longer knows
+        ws = self._archive(tmpdir, self._session('uuid-1', transcript=Path('/t/other.jsonl')))
+        [finding] = _run(HarnessContractCheck(), ws)
+        assert 'transcript is named other' in finding.message
+        assert not finding.fixable  # a harness changed under us; that is a human's to read
+
+    def test_a_branch_with_nothing_to_inherit_from_is_reported(self, tmpdir: TempDir) -> None:
+        ws = self._archive(
+            tmpdir, self._session('fork', cwd=Path('/wt'), transcript=Path('/t/fork.jsonl'))
+        )
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            store.record_event(Event(at=NOON, kind='branched', platform='claude', native_id='fork'))
+        [finding] = _run(HarnessContractCheck(), ws)
+        assert 'can have inherited nothing' in finding.message
+
+    def test_a_branch_beside_its_parent_is_silent(self, tmpdir: TempDir) -> None:
+        ws = self._archive(
+            tmpdir,
+            self._session('parent', cwd=Path('/wt'), transcript=Path('/t/parent.jsonl')),
+            self._session('fork', cwd=Path('/wt'), transcript=Path('/t/fork.jsonl')),
+        )
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            store.record_event(Event(at=NOON, kind='branched', platform='claude', native_id='fork'))
+        compare(_run(HarnessContractCheck(), ws), expected=[])
+
+    def test_it_logs_the_versions_it_saw(self, tmpdir: TempDir, full_logs: LogCapture) -> None:
+        # a session recorded under a build sessions.md has never validated is the alarm
+        ws = self._archive(
+            tmpdir,
+            self._session(
+                'uuid-1',
+                transcript=Path('/t/uuid-1.jsonl'),
+                harness_version='claude-code_2-1-220_agent',
+            ),
+        )
+        _run(HarnessContractCheck(), ws)
+        full_logs.check_present(
+            {
+                'level': 'INFO',
+                'message': 'doctor: harness contract checked',
+                'sessions': 1,
+                'versions': ['claude-code_2-1-220_agent'],
+            }
         )
 
 

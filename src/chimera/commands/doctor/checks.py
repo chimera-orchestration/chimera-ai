@@ -7,7 +7,8 @@ from pathlib import Path
 from giterator import GitError
 from loguru import logger
 
-from chimera.archive import migrate, needs_migration
+from chimera.agents import BRANCHED
+from chimera.archive import Archive, migrate, needs_migration
 from chimera.commands.doctor.core import (
     Check,
     Exclusions,
@@ -315,6 +316,68 @@ class ArchiveSchemaCheck:
         if fixing:
             logger.bind(path=str(path), sessions=migrate(path)).info('doctor: archive migrated')
         yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
+class HarnessContractCheck:
+    """Recorded sessions still behave the way ``agent-docs/sessions.md`` says they do.
+
+    Almost everything chimera knows about a harness is *observed*, not promised, so it
+    will drift — and drift that nobody notices is the expensive kind. This re-asserts the
+    load-bearing claims against sessions already recorded, which costs a SQL read and no
+    model turn, and so can run on every doctor:
+
+    - **the transcript is named after the session.** Identity anchors on the transcript
+      stem precisely because that is documented *and* definitionally resumable; a row
+      whose stem disagrees with its id means that stopped being true, and resume would be
+      handing out ids the harness no longer knows.
+    - **a branched session has a plausible parent.** A fork inherits its address from the
+      session it was split off, presumed by cwd. One with no other session ever recorded
+      in that directory means the presumption had nothing to work with.
+
+    Findings are never fixable: each one says a harness changed under us, which is a
+    human's to read and act on, not doctor's to paper over. Versions are reported too —
+    every session records the build that produced it, so a version this doc has never
+    validated is itself worth seeing.
+    """
+
+    name = 'harness-contract'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        path = workspace / 'state' / 'archive.db'
+        if not path.exists() or needs_migration(path):
+            return  # nothing to check, or the schema check has the floor
+        with Archive.open(path) as store:
+            sessions = store.sessions()
+            branched = {event.native_id for event in store.events() if event.kind == BRANCHED}
+        by_cwd: dict[Path, int] = {}
+        for session in sessions:
+            if session.cwd is not None:
+                by_cwd[session.cwd] = by_cwd.get(session.cwd, 0) + 1
+        for session in sessions:
+            if session.transcript is not None and session.transcript.stem != session.native_id:
+                yield Finding(
+                    self.name,
+                    f'{session.native_id}: transcript is named {session.transcript.stem}, '
+                    f'not the session — identity no longer anchors on it',
+                    resolved=False,
+                    fixable=False,
+                )
+            if (
+                session.native_id in branched
+                and session.cwd is not None
+                and by_cwd.get(session.cwd, 0) < 2
+            ):
+                yield Finding(
+                    self.name,
+                    f'{session.native_id}: branched, but no other session was ever recorded '
+                    f'in {session.cwd} — it can have inherited nothing',
+                    resolved=False,
+                    fixable=False,
+                )
+        logger.bind(
+            sessions=len(sessions),
+            versions=sorted({s.harness_version for s in sessions if s.harness_version}),
+        ).info('doctor: harness contract checked')
 
 
 class StaleHumanWorktreeCheck:
@@ -1037,6 +1100,7 @@ CHECKS: tuple[Check, ...] = (
     ProjectConfigCheck(),
     RuntimeStateDirCheck(),
     ArchiveSchemaCheck(),
+    HarnessContractCheck(),
     StaleHumanWorktreeCheck(),
     InertBranchCheck(),
     LegacyWorktreeSeparatorCheck(),
