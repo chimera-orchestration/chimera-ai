@@ -31,7 +31,7 @@ from chimera.worktrees import (
 )
 
 
-def _refs_log() -> LogCapture:
+def _log() -> LogCapture:
     return LogCapture(LoguruSource(('message', 'extra'), level='INFO'))
 
 
@@ -331,7 +331,7 @@ class TestIsMerged:
         repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
         repo('merge', '-q', '--squash', 'feature')
         repo('commit', '-qm', 'squash feature')
-        with _refs_log() as log:
+        with _log() as log:
             assert is_merged(Git(repo.path), 'feature', 'main')
         log.check(
             (
@@ -465,7 +465,7 @@ class TestCheckoutHere:
         git = Git(git_repo.path)
         git('branch', 'g/human', 'main')  # a bare branch to land
         full = git.rev_parse('main', short=False)
-        with _refs_log() as log:
+        with _log() as log:
             result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
         compare(
             result,
@@ -487,7 +487,7 @@ class TestCheckoutHere:
         git('branch', 'g/human', 'main')
         git('checkout', '-q', '--detach', 'main')  # HEAD detached, not on a branch
         full = git.rev_parse('main', short=False)
-        with _refs_log() as log:
+        with _log() as log:
             result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
         compare(result, expected=Checkout(True, git_repo.path.resolve(), 'g/human', was=None))
         log.check(
@@ -504,7 +504,7 @@ class TestCheckoutHere:
         git = Git(git_repo.path)
         git('branch', 'g/human', 'main')
         (git_repo.path / 'scratch.txt').write_text('wip')
-        with _refs_log() as log:
+        with _log() as log:
             result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
         compare(result, expected=Checkout(False, git_repo.path.resolve(), 'g/human', was='main'))
         compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
@@ -542,7 +542,7 @@ class TestCheckoutHere:
     def test_skips_when_already_on_the_branch(self, git_repo: Repo) -> None:
         git = Git(git_repo.path)
         git('checkout', '-q', '-b', 'g/human')  # already here
-        with _refs_log() as log:
+        with _log() as log:
             assert checkout_here(git, 'g/human', git_repo.path, 'x') is None
         log.check_empty()
 
