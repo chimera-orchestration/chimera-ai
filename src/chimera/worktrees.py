@@ -256,10 +256,17 @@ def is_merged(git: Git, ref: str, base: str) -> bool:
     fast-forward or a real merge commit), or every commit unique to ref has an equivalent patch
     already on base (rebase-merge, or a single squashed commit — ``git cherry``, which computes
     the patch-ids inside git, so base's whole history never streams through this process), or
-    ref's combined diff matches one commit on base (a squash-merge of several commits) — sought
-    only among the base commits touching ref's own paths, so a busy base replays a sliver of
-    its history, not every diff anyone landed. What diff text we do handle stays bytes
-    throughout (:meth:`Git.raw`): blob content is never guaranteed UTF-8.
+    ref's tree is the merge-base's own (whatever its commits did, they net to content base
+    already has), or ref's combined diff matches one commit on base (a squash-merge of several
+    commits) — sought only among the base commits touching ref's own paths, so a busy base
+    replays a sliver of its history, not every diff anyone landed.
+
+    That last scoping widens the match as well as narrowing the search: a base commit is
+    compared on its diff *restricted to ref's paths*, so one that made exactly ref's changes
+    and others besides now counts. Ref's work is on base either way, which is all this answers.
+
+    What diff text we do handle stays bytes throughout (:meth:`Git.raw`): blob content is
+    never guaranteed UTF-8.
     """
     try:
         git('merge-base', '--is-ancestor', ref, base)
@@ -287,7 +294,7 @@ def is_merged(git: Git, ref: str, base: str) -> bool:
         if p
     ]
     if not paths:
-        return False  # ref's tree is mb's own — no diff to seek on base
+        return True  # ref's tree is mb's own, so it carries nothing base doesn't already have
     scope = ('--', *map(os.fsdecode, paths)) if sum(map(len, paths)) < _PATHSPEC_LIMIT else ()
     base_ids = _patch_ids(
         git.raw('log', '-p', '--no-color', '--full-history', f'{mb}..{base}', *scope)

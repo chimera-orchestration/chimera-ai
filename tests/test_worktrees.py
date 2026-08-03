@@ -231,14 +231,53 @@ class TestIsMerged:
         repo('checkout', '-q', 'main')
         assert is_merged(git, 'feature', 'main')
 
-    def test_only_empty_commits_is_unmerged(self, tmpdir: TempDir) -> None:
+    def test_only_empty_commits_is_merged(self, tmpdir: TempDir) -> None:
+        # feature's tree is the merge-base's own, so there is no content to lose
         repo = Repo.make(tmpdir / 'r')
         repo.commit_content('seed')
         repo('checkout', '-q', '-b', 'feature')
         repo('commit', '-q', '--allow-empty', '-m', 'marker')
         repo('checkout', '-q', 'main')
         repo.commit_content('other-work')
-        assert not is_merged(Git(repo.path), 'feature', 'main')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_only_empty_commits_answers_the_same_when_base_has_one_too(
+        self, tmpdir: TempDir
+    ) -> None:
+        # two empty commits share a patch-id, so cherry matches this pair where the test above
+        # has nothing to match — the answer must not turn on base's own empty commits
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        repo('commit', '-q', '--allow-empty', '-m', 'marker')
+        repo('checkout', '-q', 'main')
+        repo('commit', '-q', '--allow-empty', '-m', 'base marker')
+        repo.commit_content('other-work')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_net_zero_branch_is_merged(self, tmpdir: TempDir) -> None:
+        # added then removed again: real commits, but the same tree as the merge-base
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        (repo.path / 'scratch.txt').write_text('scratch')
+        repo('add', 'scratch.txt')
+        repo('commit', '-qm', 'add scratch')
+        repo('rm', '-q', 'scratch.txt')
+        repo('commit', '-qm', 'drop scratch')
+        repo('checkout', '-q', 'main')
+        repo.commit_content('other-work')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_squash_carrying_extra_changes_still_contains_the_branch(self, tmpdir: TempDir) -> None:
+        # the base commit is matched on its diff restricted to feature's paths, so folding
+        # unrelated work into the squash doesn't hide that feature's own work landed
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        repo('merge', '-q', '--squash', 'feature')
+        (repo.path / 'unrelated.txt').write_text('landed in the same commit')
+        repo('add', 'unrelated.txt')
+        repo('commit', '-qm', 'squash feature, plus a drive-by')
+        assert is_merged(Git(repo.path), 'feature', 'main')
 
     def test_unmerged_root_commit_is_not_mistaken_for_empty(self, tmpdir: TempDir) -> None:
         # a parentless commit shows no patch without --root — it must never read as harmless
