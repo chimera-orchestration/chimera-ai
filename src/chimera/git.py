@@ -1,7 +1,11 @@
 """Chimera's Git: giterator's, plus command tracing, ref-mutation logging and network timeouts.
 
-Every chimera module uses this subclass (never ``giterator.Git`` directly), so
-:meth:`Git.__call__` is the single choke point every git subprocess runs through:
+Every chimera module uses this subclass (never ``giterator.Git`` directly), so its two entry
+points are what every git subprocess runs through: :meth:`Git.__call__` for output that is
+text (and may carry ``env`` overrides or a :meth:`Git.ref_log` block), :meth:`Git.raw` for
+output that isn't — diff text and ``-z`` file names, which git never transcodes. ``raw``
+carries neither of those extras deliberately: it is the byte path, not a second general one.
+Both behave alike otherwise:
 
 - **Tracing** — each command lands a DEBUG line *before* it runs (a hung fetch is on record
   while it hangs): the message is the exact command, the working directory rides the ``git_cwd``
@@ -141,7 +145,7 @@ class Git(GiteratorGit):
         if not completing():
             logger.bind(git_cwd=str(cwd)).debug(shlex.join(('git', *command)))
 
-    def raw(self, *command: str, cwd: Path | None = None) -> bytes:
+    def raw(self, *command: str) -> bytes:
         """Run a git command, returning its stdout as raw bytes.
 
         For output that splices blob content in (``log -p``, ``diff``) or ``-z`` file names:
@@ -150,10 +154,9 @@ class Git(GiteratorGit):
         (callers parse these bytes; a stray ``warning:`` would corrupt them) and joins the
         :class:`GitError` on failure.
         """
-        where = cwd or self.path
-        self._trace(command, where)
+        self._trace(command, self.path)
         result = run(
-            ('git', *command), cwd=where, stdout=PIPE, stderr=PIPE, env=_env(os.environ, None)
+            ('git', *command), cwd=self.path, stdout=PIPE, stderr=PIPE, env=_env(os.environ, None)
         )
         if result.returncode:
             raise GitError(

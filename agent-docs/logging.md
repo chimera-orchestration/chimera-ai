@@ -49,8 +49,10 @@ field of every record (params, git before/after maps, full tracebacks).
 
 ## Git command trace
 
-Every git subprocess runs through `chimera.git.Git` (never `giterator.Git` directly), whose
-`__call__` lands a DEBUG line *before* the command runs — so a hung fetch is on record while it
+Every git subprocess runs through `chimera.git.Git` (never `giterator.Git` directly), whose two
+entry points — `__call__` for text output, `raw` for bytes (diff text and `-z` names, which git
+never transcodes; it also keeps stderr out of what callers parse) — each land a DEBUG line
+*before* the command runs, so a hung fetch is on record while it
 hangs (`tail -f state/log.jsonl` to watch live — the raw form deliberately, since agents
 don't get `ch logtail`). The message is the exact command
 (`git fetch --prune origin`), the working directory rides `git_cwd`. The trace goes only to the
