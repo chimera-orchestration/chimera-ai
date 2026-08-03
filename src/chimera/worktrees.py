@@ -291,7 +291,13 @@ def is_merged(git: Git, ref: str, base: str) -> bool:
     ]
     if not paths:
         return True  # ref's tree is mb's own, so it carries nothing base doesn't already have
-    scope = ('--', *map(os.fsdecode, paths)) if sum(map(len, paths)) < _PATHSPEC_LIMIT else ()
+    if sum(map(len, paths)) < _PATHSPEC_LIMIT:
+        scope = ('--', *map(os.fsdecode, paths))
+    else:
+        scope = ()
+        logger.bind(ref=ref, base=base, paths=len(paths)).warning(
+            'is_merged: too many paths to scope by, replaying all of base'
+        )
     base_ids = _patch_ids(
         git.raw('log', '-p', '--no-color', '--full-history', f'{mb}..{base}', *scope)
     )

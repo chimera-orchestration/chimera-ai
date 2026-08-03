@@ -5,6 +5,7 @@ from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
+from chimera import worktrees
 from chimera.config import UserError
 from chimera.git import Git
 from chimera.worktrees import (
@@ -321,11 +322,23 @@ class TestIsMerged:
     def test_branch_too_wide_to_pathspec_searches_unscoped(
         self, tmpdir: TempDir, replace: Replacer
     ) -> None:
-        replace('chimera.worktrees._PATHSPEC_LIMIT', 0)
+        replace(
+            target=worktrees._PATHSPEC_LIMIT,
+            container=worktrees,
+            name='_PATHSPEC_LIMIT',
+            replacement=0,
+        )
         repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
         repo('merge', '-q', '--squash', 'feature')
         repo('commit', '-qm', 'squash feature')
-        assert is_merged(Git(repo.path), 'feature', 'main')
+        with _refs_log() as log:
+            assert is_merged(Git(repo.path), 'feature', 'main')
+        log.check(
+            (
+                'is_merged: too many paths to scope by, replaying all of base',
+                {'ref': 'feature', 'base': 'main', 'paths': 2},
+            ),
+        )
 
     def test_squash_merge_when_base_history_carries_non_utf8(self, tmpdir: TempDir) -> None:
         # unrelated latin-1 content landing on main must never crash the containment check
