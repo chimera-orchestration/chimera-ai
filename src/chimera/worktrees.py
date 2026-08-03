@@ -275,13 +275,9 @@ def is_merged(git: Git, ref: str, base: str) -> bool:
         pass
     # '-' marks a commit whose patch base already carries; '+' one it doesn't — or an empty
     # commit, which has no patch to match, so '+'es are harmless when their patches are empty
-    # (--root: a parentless commit's patch is its whole tree, never empty). Anything not
-    # shaped '<mark> <sha>' is a warning stderr merged into the output — never cherry's.
-    cherry = [
-        line.split()
-        for line in git('cherry', base, ref).splitlines()
-        if line.startswith(('+ ', '- '))
-    ]
+    # (--root: a parentless commit's patch is its whole tree, never empty). raw() so a warning
+    # on stderr can't reach the parse — every line here is cherry's own '<mark> <sha>'.
+    cherry = [line.split() for line in git.raw('cherry', base, ref).decode().splitlines()]
     unmatched = (sha for mark, sha in cherry if mark == '+')
     if any(mark == '-' for mark, _ in cherry) and not any(
         git.raw('diff-tree', '--root', '--no-commit-id', '-p', sha).strip() for sha in unmatched
