@@ -290,7 +290,12 @@ def is_merged(git: Git, ref: str, base: str) -> bool:
         if p
     ]
     if not paths:
-        return True  # ref's tree is mb's own, so it carries nothing base doesn't already have
+        # ref's tree is mb's own, so it carries nothing base doesn't already have — but its
+        # commits go when the caller sweeps it, so say which branch and against what
+        logger.bind(ref=ref, base=base, merge_base=mb).info(
+            'is_merged: nets to nothing since the merge-base'
+        )
+        return True
     if sum(map(len, paths)) < _PATHSPEC_LIMIT:
         scope = ('--', *map(os.fsdecode, paths))
     else:

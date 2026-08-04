@@ -268,7 +268,19 @@ class TestIsMerged:
         repo('commit', '-qm', 'drop scratch')
         repo('checkout', '-q', 'main')
         repo.commit_content('other-work')
-        assert is_merged(Git(repo.path), 'feature', 'main')
+        git = Git(repo.path)
+        with _log() as log:
+            assert is_merged(git, 'feature', 'main')
+        log.check(
+            (
+                'is_merged: nets to nothing since the merge-base',
+                {
+                    'ref': 'feature',
+                    'base': 'main',
+                    'merge_base': git.rev_parse('main~1', short=False),
+                },
+            ),
+        )
 
     def test_squash_carrying_extra_changes_still_contains_the_branch(self, tmpdir: TempDir) -> None:
         # the base commit is matched on its diff restricted to feature's paths, so folding
