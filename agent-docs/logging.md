@@ -56,8 +56,10 @@ never transcodes; it also keeps stderr out of what callers parse) — each land 
 hangs (`tail -f state/log.jsonl` to watch live — the raw form deliberately, since agents
 don't get `ch logtail`). The message is the exact command
 (`git fetch --prune origin`), the working directory rides `git_cwd`. The trace goes only to the
-log file, never the console (and is suppressed during shell completion, where the file sink
-isn't configured). `chimera.git` also injects network timeouts (`GIT_SSH_COMMAND`
+log file, never the console — a decision `chimera.git` makes no part of: it always traces, and a
+context that must stay quiet silences the *sink* (`main` drops loguru's handlers while
+completing, since completion never reaches the command that would otherwise configure them).
+`chimera.git` also injects network timeouts (`GIT_SSH_COMMAND`
 connect/keepalive, `GIT_HTTP_LOW_SPEED_*`) unless the user set their own, so a dead transport
 fails in seconds instead of hanging forever. The trace is spew-exempt by construction: it lives
 at DEBUG, below the triage levels, and tests pin their captures to INFO+ so command sequences

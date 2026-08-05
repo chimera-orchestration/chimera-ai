@@ -10,6 +10,7 @@ line), so a ``-p`` typed at any level is read from the raw context chain rather 
 the usual ``Overrides`` on ``ctx.obj``.
 """
 
+import os
 from pathlib import Path
 
 from typer._click.core import Context
@@ -22,6 +23,17 @@ from chimera.commands.prompt import names
 from chimera.context import resolve_project, resolve_scope, resolve_workspace
 from chimera.git import Git
 from chimera.worktrees import ACTORS
+
+_COMPLETION_VARS = ('_CH_COMPLETE', '_CHIMERA_COMPLETE')
+
+
+def completing() -> bool:
+    """True while Click's shell-completion dispatch is driving this process (its callback
+    env var is set). The one detection every completion-aware site shares: ``__main__.main``
+    drops loguru's sinks under it (completion never reaches the command, so nothing else
+    would) and swaps its unknown-role failure for a silent empty completion — a completer
+    must never raise or print."""
+    return any(var in os.environ for var in _COMPLETION_VARS)
 
 
 def _typed_project(ctx: Context) -> str | None:

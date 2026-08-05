@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -5,6 +6,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from loguru import logger
 from testfixtures import Replacer, ShouldRaise, TempDir, compare, not_there
 from typer._click.core import Command, Context
 from typer.core import TyperCommand, TyperGroup
@@ -372,6 +374,17 @@ class TestMainRole:
             capsys.readouterr().err,
             expected="Error: unknown CHIMERA_ROLE 'bogus' (known: captain, manager, agent)\n",
         )
+
+    def test_completion_drops_the_log_sinks(self, replace: Replacer) -> None:
+        # completion never reaches LoggingCommand.invoke, so nothing else clears loguru's
+        # default stderr sink — a completer's own git calls would trace into its output
+        core = getattr(logger, '_core')  # no typed helper fits an instance attribute
+        replace(target=core.handlers, container=core, name='handlers', replacement={})
+        logger.add(io.StringIO())
+        _completion_request(replace)
+        with ShouldRaise(SystemExit(0)):
+            main()
+        compare(getattr(logger, '_core').handlers, expected={})
 
     def test_unknown_role_completes_nothing_silently(
         self, replace: Replacer, capsys: pytest.CaptureFixture[str]

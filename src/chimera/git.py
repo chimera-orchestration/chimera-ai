@@ -9,9 +9,10 @@ Both behave alike otherwise:
 
 - **Tracing** — each command lands a DEBUG line *before* it runs (a hung fetch is on record
   while it hangs): the message is the exact command, the working directory rides the ``git_cwd``
-  key. Where the lines go is a sink concern (see :func:`chimera.logging.configure` — the
-  workspace's log file); nothing here prints. Suppressed during shell completion, where
-  ``configure`` never runs and loguru's default stderr sink would print into the completer.
+  key. Where the lines go is entirely a sink concern (see :func:`chimera.logging.configure` —
+  the workspace's log file); nothing here prints, and nothing here decides when to stay
+  quiet, so muting a context (``__main__.main`` drops the sinks while completing) never
+  needs a second guard at this end.
 - **Ref-mutation logging** — :meth:`Git.ref_log` wraps a mutating block in the before/after
   snapshot ``agent-docs/logging.md`` mandates, so call sites can't drift from the rule.
 - **Network timeouts** — a stalled SSH/HTTPS transport fails in seconds instead of hanging
@@ -39,16 +40,6 @@ and a mid-transfer dead peer in ~60s."""
 
 HTTP_TIMEOUTS = {'GIT_HTTP_LOW_SPEED_LIMIT': '1024', 'GIT_HTTP_LOW_SPEED_TIME': '30'}
 """Abort an HTTPS transfer crawling under 1KB/s for 30s, unless the user tuned their own."""
-
-_COMPLETION_VARS = ('_CH_COMPLETE', '_CHIMERA_COMPLETE')
-
-
-def completing() -> bool:
-    """True while Click's shell-completion dispatch is driving this process (its callback
-    env var is set). The one detection every completion-aware site shares: the DEBUG trace
-    below goes quiet under it, and ``__main__.main`` swaps its unknown-role failure for a
-    silent empty completion — a completer must never raise or print."""
-    return any(var in os.environ for var in _COMPLETION_VARS)
 
 
 def repo_slug(path: str) -> str:
@@ -142,8 +133,7 @@ class Git(GiteratorGit):
     git = __call__
 
     def _trace(self, command: tuple[str, ...], cwd: Path) -> None:
-        if not completing():
-            logger.bind(git_cwd=str(cwd)).debug(shlex.join(('git', *command)))
+        logger.bind(git_cwd=str(cwd)).debug(shlex.join(('git', *command)))
 
     def raw(self, *command: str) -> bytes:
         """Run a git command, returning its stdout as raw bytes.

@@ -154,8 +154,10 @@ no `ROLE_COMMANDS` entry — full tree (the
 option strip still applies: any role stamp marks an AI session); an **unknown role fails hard
 and early** — `ch`
 refuses to run at all, before any command parses — never a silent full tree, never a silently
-narrowed one. One carve-out: Click's completion dispatch (`chimera.git.completing`, the same
-detection that mutes the git DEBUG trace) instead completes *nothing*, silently, exit 0 — a
+narrowed one. One carve-out: Click's completion dispatch (`chimera.completions.completing`, the
+same detection `main` drops loguru's sinks on — completion never reaches a command, so nothing
+else would clear the default stderr sink and a completer's own git calls would trace into its
+output) instead completes *nothing*, silently, exit 0 — a
 completer must never raise or print, and a stale role stamp in a shell would otherwise break
 every TAB; fail-closed keeps both rules standing (loud for invocations, silent for completers).
 Honesty: env-based identity is a fence, not a wall (unset-able, like

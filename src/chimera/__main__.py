@@ -105,8 +105,8 @@ from chimera.context import (
     resolve_scope,
     resolve_workspace,
 )
+from chimera.completions import completing
 from chimera.dry import Dry
-from chimera.git import completing
 from chimera.help import command_index, render_json, render_text
 from chimera.prime import prime as _prime
 from chimera.prime import resolve_role
@@ -2063,6 +2063,10 @@ def _strip_to_role(command: Command, allowed: frozenset[str], path: str = '') ->
 
 
 def main() -> None:
+    if completing():
+        # completion never reaches LoggingCommand.invoke, so configure() never runs and
+        # loguru's default stderr sink would print the git trace into the completer
+        logger.remove()
     role = session_role()
     if role is not None and role != ROLE_CAPTAIN and role not in ROLE_COMMANDS:
         if completing():
