@@ -1,13 +1,18 @@
 """Chimera's Git: giterator's, plus command tracing, ref-mutation logging and network timeouts.
 
-Every chimera module uses this subclass (never ``giterator.Git`` directly), so
-:meth:`Git.__call__` is the single choke point every git subprocess runs through:
+Every chimera module uses this subclass (never ``giterator.Git`` directly), so its two entry
+points are what every git subprocess runs through: :meth:`Git.__call__` for output that is
+text (and may carry ``env`` overrides or a :meth:`Git.ref_log` block), :meth:`Git.raw` for
+output that isn't — diff text and ``-z`` file names, which git never transcodes. ``raw``
+carries neither of those extras deliberately: it is the byte path, not a second general one.
+Both behave alike otherwise:
 
 - **Tracing** — each command lands a DEBUG line *before* it runs (a hung fetch is on record
   while it hangs): the message is the exact command, the working directory rides the ``git_cwd``
-  key. Where the lines go is a sink concern (see :func:`chimera.logging.configure` — the
-  workspace's log file); nothing here prints. Suppressed during shell completion, where
-  ``configure`` never runs and loguru's default stderr sink would print into the completer.
+  key. Where the lines go is entirely a sink concern (see :func:`chimera.logging.configure` —
+  the workspace's log file); nothing here prints, and nothing here decides when to stay
+  quiet, so muting a context (``__main__.main`` drops the sinks while completing) never
+  needs a second guard at this end.
 - **Ref-mutation logging** — :meth:`Git.ref_log` wraps a mutating block in the before/after
   snapshot ``agent-docs/logging.md`` mandates, so call sites can't drift from the rule.
 - **Network timeouts** — a stalled SSH/HTTPS transport fails in seconds instead of hanging
@@ -21,6 +26,7 @@ import shlex
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from subprocess import PIPE, run
 from urllib.parse import urlsplit
 
 from giterator import Git as GiteratorGit
@@ -34,16 +40,6 @@ and a mid-transfer dead peer in ~60s."""
 
 HTTP_TIMEOUTS = {'GIT_HTTP_LOW_SPEED_LIMIT': '1024', 'GIT_HTTP_LOW_SPEED_TIME': '30'}
 """Abort an HTTPS transfer crawling under 1KB/s for 30s, unless the user tuned their own."""
-
-_COMPLETION_VARS = ('_CH_COMPLETE', '_CHIMERA_COMPLETE')
-
-
-def completing() -> bool:
-    """True while Click's shell-completion dispatch is driving this process (its callback
-    env var is set). The one detection every completion-aware site shares: the DEBUG trace
-    below goes quiet under it, and ``__main__.main`` swaps its unknown-role failure for a
-    silent empty completion — a completer must never raise or print."""
-    return any(var in os.environ for var in _COMPLETION_VARS)
 
 
 def repo_slug(path: str) -> str:
@@ -131,11 +127,33 @@ class Git(GiteratorGit):
     def __call__(
         self, *command: str, env: dict[str, str] | None = None, cwd: Path | None = None
     ) -> str:
-        if not completing():
-            logger.bind(git_cwd=str(cwd or self.path)).debug(shlex.join(('git', *command)))
+        self._trace(command, cwd or self.path)
         return super().__call__(*command, env=_env(os.environ, env), cwd=cwd or self.path)
 
     git = __call__
+
+    def _trace(self, command: tuple[str, ...], cwd: Path) -> None:
+        logger.bind(git_cwd=str(cwd)).debug(shlex.join(('git', *command)))
+
+    def raw(self, *command: str) -> bytes:
+        """Run a git command, returning its stdout as raw bytes.
+
+        For output that splices blob content in (``log -p``, ``diff``) or ``-z`` file names:
+        git never transcodes, so none of that is guaranteed UTF-8 — decoding it crashes on
+        the first latin-1 file in someone's history. stderr stays out of the return value
+        (callers parse these bytes; a stray ``warning:`` would corrupt them) and joins the
+        :class:`GitError` on failure.
+        """
+        self._trace(command, self.path)
+        result = run(
+            ('git', *command), cwd=self.path, stdout=PIPE, stderr=PIPE, env=_env(os.environ, None)
+        )
+        if result.returncode:
+            raise GitError(
+                f'{" ".join(("git", *command))!r} gave return code {result.returncode}:\n\n'
+                f'{(result.stderr + result.stdout).decode(errors="replace")}\n\n'
+            )
+        return result.stdout
 
     def ref_exists(self, ref: str) -> bool:
         try:

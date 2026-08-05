@@ -151,7 +151,10 @@ Tuning the templates: ``ch prompt``
 fills, each with the value it renders as — so a default is something you can
 read rather than something buried in the code:
 
+.. the $HOLE output lines lex as shell commands, tripping strict pygments — hence :force:
+
 .. code-block:: console
+    :force:
 
     $ ch prompt show review
     source: .../chimera/prompts/review.md (packaged)

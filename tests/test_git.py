@@ -1,4 +1,3 @@
-import pytest
 from giterator import GitError
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
@@ -48,14 +47,32 @@ class TestTrace:
                 Git(git_repo.path)('no-such-subcommand')
         log.check(('git no-such-subcommand', {'git_cwd': str(git_repo.path)}))
 
-    @pytest.mark.parametrize('var', ['_CH_COMPLETE', '_CHIMERA_COMPLETE'])
-    def test_shell_completion_suppresses_the_trace(
-        self, git_repo: Repo, replace: Replacer, var: str
-    ) -> None:
-        replace.in_environ(var, 'zsh_complete')
+    def test_traces_even_while_completing(self, git_repo: Repo, replace: Replacer) -> None:
+        # muting is the sink's job (``main`` drops them while completing), never this end's
+        replace.in_environ('_CH_COMPLETE', 'zsh_complete')
         with _trace() as log:
             Git(git_repo.path)('rev-parse', '--git-dir')
-        log.check_empty()
+        log.check(('git rev-parse --git-dir', {'git_cwd': str(git_repo.path)}))
+
+
+class TestRaw:
+    def test_returns_output_undecoded(self, git_repo: Repo) -> None:
+        (git_repo.path / 'legacy.csv').write_bytes(b'M\xf6tley Cr\xfce\n')  # not valid UTF-8
+        git_repo('add', 'legacy.csv')
+        git_repo('commit', '-qm', 'latin-1 export')
+        compare(
+            Git(git_repo.path).raw('show', 'HEAD:legacy.csv'),
+            expected=b'M\xf6tley Cr\xfce\n',
+        )
+
+    def test_traces_like_call(self, git_repo: Repo) -> None:
+        with _trace() as log:
+            Git(git_repo.path).raw('rev-parse', '--git-dir')
+        log.check(('git rev-parse --git-dir', {'git_cwd': str(git_repo.path)}))
+
+    def test_failure_raises_git_error(self, git_repo: Repo) -> None:
+        with ShouldRaise(GitError, match='no-such-subcommand'):
+            Git(git_repo.path).raw('no-such-subcommand')
 
 
 class TestEnv:

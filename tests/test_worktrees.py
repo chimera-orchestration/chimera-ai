@@ -2,9 +2,10 @@ from datetime import datetime
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import LogCapture, ShouldRaise, TempDir, compare
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 from testfixtures.loguru import LoguruSource
 
+from chimera import worktrees
 from chimera.config import UserError
 from chimera.git import Git
 from chimera.worktrees import (
@@ -30,7 +31,7 @@ from chimera.worktrees import (
 )
 
 
-def _refs_log() -> LogCapture:
+def _log() -> LogCapture:
     return LogCapture(LoguruSource(('message', 'extra'), level='INFO'))
 
 
@@ -222,6 +223,160 @@ class TestIsMerged:
         git('cherry-pick', *git('rev-list', '--reverse', 'main..feature').split())
         assert is_merged(git, 'feature', 'main')
 
+    def test_rebase_merge_with_empty_commit_left_on_feature(self, tmpdir: TempDir) -> None:
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        git = Git(repo.path)
+        git('cherry-pick', *git('rev-list', '--reverse', 'main..feature').split())
+        repo('checkout', '-q', 'feature')
+        repo('commit', '-q', '--allow-empty', '-m', 'marker')
+        repo('checkout', '-q', 'main')
+        assert is_merged(git, 'feature', 'main')
+
+    def test_only_empty_commits_is_merged(self, tmpdir: TempDir) -> None:
+        # feature's tree is the merge-base's own, so there is no content to lose
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        repo('commit', '-q', '--allow-empty', '-m', 'marker')
+        repo('checkout', '-q', 'main')
+        repo.commit_content('other-work')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_only_empty_commits_answers_the_same_when_base_has_one_too(
+        self, tmpdir: TempDir
+    ) -> None:
+        # two empty commits share a patch-id, so cherry matches this pair where the test above
+        # has nothing to match — the answer must not turn on base's own empty commits
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        repo('commit', '-q', '--allow-empty', '-m', 'marker')
+        repo('checkout', '-q', 'main')
+        repo('commit', '-q', '--allow-empty', '-m', 'base marker')
+        repo.commit_content('other-work')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_net_zero_branch_is_merged(self, tmpdir: TempDir) -> None:
+        # added then removed again: real commits, but the same tree as the merge-base
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        (repo.path / 'scratch.txt').write_text('scratch')
+        repo('add', 'scratch.txt')
+        repo('commit', '-qm', 'add scratch')
+        repo('rm', '-q', 'scratch.txt')
+        repo('commit', '-qm', 'drop scratch')
+        repo('checkout', '-q', 'main')
+        repo.commit_content('other-work')
+        git = Git(repo.path)
+        with _log() as log:
+            assert is_merged(git, 'feature', 'main')
+        log.check(
+            (
+                'is_merged: nets to nothing since the merge-base',
+                {
+                    'ref': 'feature',
+                    'base': 'main',
+                    'merge_base': git.rev_parse('main~1', short=False),
+                },
+            ),
+        )
+
+    def test_squash_carrying_extra_changes_still_contains_the_branch(self, tmpdir: TempDir) -> None:
+        # the base commit is matched on its diff restricted to feature's paths, so folding
+        # unrelated work into the squash doesn't hide that feature's own work landed
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        repo('merge', '-q', '--squash', 'feature')
+        (repo.path / 'unrelated.txt').write_text('landed in the same commit')
+        repo('add', 'unrelated.txt')
+        repo('commit', '-qm', 'squash feature, plus a drive-by')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_unmerged_root_commit_is_not_mistaken_for_empty(self, tmpdir: TempDir) -> None:
+        # a parentless commit shows no patch without --root — it must never read as harmless
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '--orphan', 'vendored')
+        repo('rm', '-rfq', '.')
+        (repo.path / 'important.txt').write_text('vendored')
+        repo('add', 'important.txt')
+        repo('commit', '-qm', 'vendored root')
+        repo('checkout', '-q', '-b', 'feature', 'main')
+        repo('merge', '-q', '--allow-unrelated-histories', '--no-edit', 'vendored')
+        repo.commit_content('x')
+        repo('checkout', '-q', 'main')
+        repo('cherry-pick', repo('rev-parse', 'feature').strip())
+        assert not is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_survives_an_ambiguous_refname_warning(self, tmpdir: TempDir) -> None:
+        # a tag shadowing the branch name makes git warn on stderr before every answer
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        git = Git(repo.path)
+        git('cherry-pick', *git('rev-list', '--reverse', 'main..feature').split())
+        repo('tag', 'feature', 'refs/heads/feature')
+        assert is_merged(git, 'feature', 'main')
+
+    def test_squash_merge_of_pathspec_hostile_filenames(self, tmpdir: TempDir) -> None:
+        # ':(bogus)…' is invalid pathspec magic and ':odd' an empty one — both are just files
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        (repo.path / ':(bogus)data').write_text('x')
+        (repo.path / ':odd').write_text('y')
+        repo('add', '.')
+        repo('commit', '-qm', 'hostile names')
+        repo('checkout', '-q', 'main')
+        repo.commit_content('other-work')
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_branch_too_wide_to_pathspec_searches_unscoped(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        replace(
+            target=worktrees._PATHSPEC_LIMIT,
+            container=worktrees,
+            name='_PATHSPEC_LIMIT',
+            replacement=0,
+        )
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')
+        with _log() as log:
+            assert is_merged(Git(repo.path), 'feature', 'main')
+        log.check(
+            (
+                'is_merged: too many paths to scope by, replaying all of base',
+                {'ref': 'feature', 'base': 'main', 'paths': 2},
+            ),
+        )
+
+    def test_squash_merge_when_base_history_carries_non_utf8(self, tmpdir: TempDir) -> None:
+        # unrelated latin-1 content landing on main must never crash the containment check
+        repo = _branched_then_advanced(Repo.make(tmpdir / 'r'))
+        (repo.path / 'legacy.csv').write_bytes(b'M\xf6tley Cr\xfce\n')
+        repo('add', 'legacy.csv')
+        repo('commit', '-qm', 'latin-1 export')
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
+    def test_squash_merge_of_non_utf8_content(self, tmpdir: TempDir) -> None:
+        # the branch's own diff is latin-1, so the patch text itself can't be decoded
+        repo = Repo.make(tmpdir / 'r')
+        repo.commit_content('seed')
+        repo('checkout', '-q', '-b', 'feature')
+        (repo.path / 'legacy.csv').write_bytes(b'M\xf6tley Cr\xfce\n')
+        repo('add', 'legacy.csv')
+        repo('commit', '-qm', 'latin-1 export')
+        repo.commit_content('more')
+        repo('checkout', '-q', 'main')
+        repo.commit_content('other-work')
+        repo('merge', '-q', '--squash', 'feature')
+        repo('commit', '-qm', 'squash feature')
+        assert is_merged(Git(repo.path), 'feature', 'main')
+
 
 def test_is_dirty(git_repo: Repo) -> None:
     assert not is_dirty(git_repo.path)
@@ -322,7 +477,7 @@ class TestCheckoutHere:
         git = Git(git_repo.path)
         git('branch', 'g/human', 'main')  # a bare branch to land
         full = git.rev_parse('main', short=False)
-        with _refs_log() as log:
+        with _log() as log:
             result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
         compare(
             result,
@@ -344,7 +499,7 @@ class TestCheckoutHere:
         git('branch', 'g/human', 'main')
         git('checkout', '-q', '--detach', 'main')  # HEAD detached, not on a branch
         full = git.rev_parse('main', short=False)
-        with _refs_log() as log:
+        with _log() as log:
             result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
         compare(result, expected=Checkout(True, git_repo.path.resolve(), 'g/human', was=None))
         log.check(
@@ -361,7 +516,7 @@ class TestCheckoutHere:
         git = Git(git_repo.path)
         git('branch', 'g/human', 'main')
         (git_repo.path / 'scratch.txt').write_text('wip')
-        with _refs_log() as log:
+        with _log() as log:
             result = checkout_here(git, 'g/human', git_repo.path, 'goal sync')
         compare(result, expected=Checkout(False, git_repo.path.resolve(), 'g/human', was='main'))
         compare(git('rev-parse', '--abbrev-ref', 'HEAD').strip(), expected='main')
@@ -399,7 +554,7 @@ class TestCheckoutHere:
     def test_skips_when_already_on_the_branch(self, git_repo: Repo) -> None:
         git = Git(git_repo.path)
         git('checkout', '-q', '-b', 'g/human')  # already here
-        with _refs_log() as log:
+        with _log() as log:
             assert checkout_here(git, 'g/human', git_repo.path, 'x') is None
         log.check_empty()
 
