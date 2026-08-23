@@ -1,9 +1,11 @@
 import os
+import signal
 import subprocess
+import time
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, cast
 
 import pytest
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
@@ -12,11 +14,14 @@ from testfixtures.popen import MockPopen
 from chimera.agent_env import ROLE_CAPTAIN, role_env
 from chimera.agents import Agent, Session
 from chimera.agents.claude import (
+    ENDED_STATES,
     READONLY_TOOLS,
     Claude,
+    _dismiss,
     _print_args,
     _session_args,
     _warn_missing_binary,
+    job_parked,
     session_summary,
 )
 from chimera.config import UserError
@@ -93,12 +98,15 @@ def test_reported_tolerates_missing_fields(replace: Replacer) -> None:
     )
 
 
-def test_reported_marks_the_degraded_pidless_remnant_stale(replace: Replacer) -> None:
+def test_reported_marks_the_degraded_pidless_remnant_stale(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
     # the degraded shape claude's registry reports briefly after a killed pid is pruned:
     # marked at the source (claude-registry knowledge), never silently dropped
     _registry(replace, '[{"kind": "background", "startedAt": 1781247747055, "name": "x"}]')
+    jobs = tmpdir.makedir('jobs')
     compare(
-        Claude().reported(),
+        Claude(jobs=jobs).reported(),
         expected=[
             Session(
                 id='?',
@@ -112,7 +120,83 @@ def test_reported_marks_the_degraded_pidless_remnant_stale(replace: Replacer) ->
             )
         ],
     )
-    compare(Claude().live(), expected=[])  # …and live() is what filters it
+    compare(Claude(jobs=jobs).live(), expected=[])  # …and live() is what filters it
+
+
+# A parked entry as claude's registry reports it: pid gone, the daemon's stale claim left.
+PARKED_RECORD = (
+    '[{"id": "ab12cd34", "sessionId": "ab12cd34-e776-4059-b67f-b3b9bb70b85e",'
+    ' "state": "blocked", "kind": "background", "name": "proj@g@agent", "cwd": "/work"}]'
+)
+
+
+def _job(tmpdir: TempDir, state: dict[str, object], job_id: str = 'ab12cd34') -> Path:
+    """A daemon jobs tree holding one job's ``state.json``; returns the jobs root."""
+    tmpdir.dump(f'jobs/{job_id}/state.json', state)
+    return tmpdir / 'jobs'
+
+
+def test_reported_marks_a_revivable_pidless_job_parked(tmpdir: TempDir, replace: Replacer) -> None:
+    _registry(replace, PARKED_RECORD)
+    jobs = _job(tmpdir, {'state': 'blocked', 'respawnFlags': ['--name', 'proj@g@agent']})
+    harness = Claude(jobs=jobs)
+    compare(
+        harness.reported(),
+        expected=[
+            Session(
+                id='ab12cd34-e776-4059-b67f-b3b9bb70b85e',
+                name='proj@g@agent',
+                # the registry's own 'blocked' describes a worker that no longer exists
+                status='parked',
+                cwd=Path('/work'),
+                summary=None,
+                kind='background',
+                parked=True,
+            )
+        ],
+    )
+    # parked still owns its worktree: live() keeps it, so launch guards and sweeps see it
+    compare([session.parked for session in harness.live()], expected=[True])
+
+
+def test_reported_ended_job_is_stale_not_parked(tmpdir: TempDir, replace: Replacer) -> None:
+    # a done/stopped/failed job still carries respawnFlags — the state is what ends it
+    _registry(replace, PARKED_RECORD)
+    jobs = _job(tmpdir, {'state': 'done', 'respawnFlags': ['--name', 'proj@g@agent']})
+    (session,) = Claude(jobs=jobs).reported()
+    assert not session.parked
+    compare(session.stale, expected='no pid in the registry entry (degraded remnant)')
+
+
+def test_reported_job_without_a_respawn_recipe_is_stale(tmpdir: TempDir, replace: Replacer) -> None:
+    _registry(replace, PARKED_RECORD)
+    (session,) = Claude(jobs=_job(tmpdir, {'state': 'blocked'})).reported()
+    assert not session.parked
+    assert session.stale is not None
+
+
+class TestJobParked:
+    def test_parked(self, tmpdir: TempDir) -> None:
+        assert job_parked(_job(tmpdir, {'state': 'blocked', 'respawnFlags': ['-x']}), 'ab12cd34')
+
+    def test_working_job_also_counts(self, tmpdir: TempDir) -> None:
+        # classification is only consulted for pid-less registry entries, so a 'working'
+        # state here means the worker was reaped mid-flight — still revivable
+        assert job_parked(_job(tmpdir, {'state': 'working', 'respawnFlags': ['-x']}), 'ab12cd34')
+
+    @pytest.mark.parametrize('state', sorted(ENDED_STATES))
+    def test_ended_states_are_dead(self, tmpdir: TempDir, state: str) -> None:
+        assert not job_parked(_job(tmpdir, {'state': state, 'respawnFlags': ['-x']}), 'ab12cd34')
+
+    def test_empty_respawn_recipe_is_dead(self, tmpdir: TempDir) -> None:
+        assert not job_parked(_job(tmpdir, {'state': 'blocked', 'respawnFlags': []}), 'ab12cd34')
+
+    def test_missing_job_dir_is_dead(self, tmpdir: TempDir) -> None:
+        assert not job_parked(tmpdir.makedir('jobs'), 'ab12cd34')
+
+    def test_unparseable_state_file_is_dead(self, tmpdir: TempDir) -> None:
+        tmpdir.write('jobs/ab12cd34/state.json', 'not json')
+        assert not job_parked(tmpdir / 'jobs', 'ab12cd34')
 
 
 def _raising(error: Exception):
@@ -479,6 +563,118 @@ class TestStop:
         session = _bg_session(kind=None)
         Claude().stop(session)
         compare(calls, expected=[session])
+
+    def test_parked_session_stops_via_the_daemon_despite_no_pid(self, replace: Replacer) -> None:
+        # parked = worker reaped: nothing to SIGTERM, but `claude stop` acts on the job record
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_default(returncode=0)
+        session = Session(
+            id='1ff2c8e3-54c6-4afe-9b24-f1c40d360770',
+            name='proj@g@agent',
+            status='parked',
+            cwd=Path('/wt'),
+            summary=None,
+            kind='background',
+            parked=True,
+        )
+        Claude().stop(session)
+        compare(Popen.all_calls[0].args[0], expected=['claude', 'stop', '1ff2c8e3'])
+
+
+def _parked_session() -> Session:
+    return Session(
+        id='ab12cd34-e776-4059-b67f-b3b9bb70b85e',
+        name='proj@g@agent',
+        status='parked',
+        cwd=Path('/work'),
+        summary=None,
+        kind='background',
+        parked=True,
+    )
+
+
+ATTACH = 'script -q /dev/null claude attach ab12cd34'
+
+
+class TestWake:
+    # `claude attach` revives the SAME session (daemon respawn from respawnFlags);
+    # `--resume` would mint a new one — see knowledge/parked-sessions-rc-wake.md
+
+    def _kills(self, replace: Replacer) -> list[tuple[int, int]]:
+        kills: list[tuple[int, int]] = []
+        replace(
+            target=os.killpg,
+            container=os,
+            name='killpg',
+            replacement=lambda pgid, sig: kills.append((pgid, sig)),
+        )
+        replace(target=time.sleep, container=time, name='sleep', replacement=lambda s: None)
+        return kills
+
+    def test_wake_attaches_then_verifies_the_respawn(
+        self, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(ATTACH)
+        respawned = (
+            '[{"id": "ab12cd34", "sessionId": "ab12cd34-e776-4059-b67f-b3b9bb70b85e",'
+            ' "state": "working", "pid": 4242, "kind": "background",'
+            ' "name": "proj@g@agent", "cwd": "/work"}]'
+        )
+        Popen.set_command('claude agents --json --cwd /work', stdout=respawned.encode())
+        kills = self._kills(replace)
+        woken = Claude().wake(_parked_session())
+        compare(woken.pid, expected=4242)
+        # the client ran under a pty (script) in its own process group…
+        client = Popen.all_calls[0]
+        compare(client.args[0], expected=ATTACH.split())
+        assert client.kwargs['start_new_session'] is True
+        assert client.kwargs['stdin'] == subprocess.PIPE  # EOF would read as detach
+        # …and was dismissed once the pid was back; the worker is daemon-owned
+        ((_, sig),) = kills
+        compare(sig, expected=signal.SIGTERM)
+        full_logs.check_present(
+            {
+                'level': 'INFO',
+                'message': 'agent wake',
+                'session': 'proj@g@agent',
+                'id': 'ab12cd34',
+                'pid': 4242,
+            }
+        )
+
+    def test_dismiss_escalates_to_sigkill_on_a_stubborn_client(self, replace: Replacer) -> None:
+        class Stubborn:
+            pid = 4242
+
+            def wait(self, timeout: float | None = None) -> int:
+                raise subprocess.TimeoutExpired(cmd='script', timeout=timeout or 0)
+
+        kills: list[tuple[int, int]] = []
+        replace(
+            target=os.killpg,
+            container=os,
+            name='killpg',
+            replacement=lambda pgid, sig: kills.append((pgid, sig)),
+        )
+        _dismiss(cast('subprocess.Popen[bytes]', Stubborn()))
+        compare(kills, expected=[(4242, signal.SIGTERM), (4242, signal.SIGKILL)])
+
+    def test_wake_raises_when_the_respawn_never_lands(self, replace: Replacer) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(ATTACH)
+        kills = self._kills(replace)
+        with ShouldRaise(
+            UserError(
+                'proj@g@agent (job ab12cd34) did not respawn within 0s — '
+                'try `claude attach ab12cd34` in a terminal'
+            )
+        ):
+            Claude().wake(_parked_session(), timeout=0)
+        assert kills  # the client is dismissed even on failure
 
 
 def test_print_args_defaults() -> None:

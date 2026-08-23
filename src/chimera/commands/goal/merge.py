@@ -169,11 +169,12 @@ def _refuse_if_unstoppable(worktrees: list[Path]) -> None:
     """A live session :func:`chimera.commands.agent.stop` couldn't stop refuses up front.
 
     ``stop`` itself refuses a pid-less session, but merge only calls it after the base has
-    moved — knowable-now problems must refuse before anything does.
+    moved — knowable-now problems must refuse before anything does. A parked session is
+    exempt with it: no pid, but its harness's daemon stop ends it fine.
     """
     for path in worktrees:
         for session in live(path):
-            if session.pid is None:
+            if session.pid is None and not session.parked:
                 raise UserError(
                     f'{session.name} reports no pid — stop it from its own harness, then re-run'
                 )

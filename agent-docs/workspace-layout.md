@@ -540,6 +540,32 @@ remote-tracking ref rides `goal pr: refs`; the PR lands `goal pr: opened`/`goal 
 existing`. `--dry` resolves everything — source, commits, remote and head spec, title,
 body — and pushes and opens nothing.
 
+**Parked sessions.** claude's daemon *parks* a long-idle `--bg` job: the worker process is
+reaped (the registry entry loses its pid) but the job's `state.json` keeps the
+`respawnFlags` that `claude attach` revives the *same* session from. To pre-classification
+chimera that looked identical to a dead remnant — and a parked agent got resumed over,
+orphaning it. Classification lives at the source (`chimera.agents.claude.job_parked`,
+consulted by `Claude.reported` for pid-less entries): job dir + `state.json` with
+`respawnFlags` and a state outside stopped/done/failed → `Session.parked`, status
+`parked`; anything else → stale. Parked stays out of `stale`, so it counts as *occupying*
+everywhere liveness gates: `agent ls` shows it by default, `worktree rm`/`goal finish`/
+`goal rename` refuse over it, the exclusive-launch guard refuses launches into its
+worktree, and `agent resume` refuses outright (a resume mints a fresh session and orphans
+the parked identity and any remote bridge riding it), pointing at `ch wake`. Stops work:
+a parked job needs no pid — `claude stop` acts on the daemon's job record.
+
+`ch wake [<goal>|<session>]` is the lossless revive: it wraps the pty attach recipe
+(`script -q /dev/null claude attach <job>` — darwin-verified; see the workspace's
+`knowledge/parked-sessions-rc-wake.md`) as `Agent.wake`, verifying the respawn (the job
+back in the registry with a pid, polled up to a timeout) rather than assuming it, then
+dismissing the throwaway client — the worker is daemon-owned and survives it. The
+positional resolves like the other goal commands (a goal's worktree wins; cwd infers when
+omitted); a target that isn't a resolvable goal may name a parked session directly (name,
+full id, or short id, across every harness) — except for a scoped manager, whose fence
+keeps waking inside its own project. A live session refuses (attach to it); a truly dead
+one points back at `ch agent resume`. `--dry` previews which session would be woken.
+Only the manager and captain trees carry `wake`.
+
 `ch agent stop [-g <goal>] [-a <actor>]` stops the live agent session in a goal's worktree:
 SIGTERM to its pid, waiting (10s) for it to exit — never SIGKILL; a session that won't die,
 or reports no pid to signal, is refused for a human to inspect, as is a goal/actor with no

@@ -1,10 +1,11 @@
 from pathlib import Path
 
-from testfixtures import Replacer, compare
+from testfixtures import Replacer, ShouldRaise, compare
 
 import os
 
-from chimera.agents import Session, _distrusted
+from chimera.agents import Agent, Session, _distrusted
+from chimera.config import UserError
 
 
 def test_short_is_the_leading_block_of_a_full_id() -> None:
@@ -50,3 +51,17 @@ def test_an_already_marked_session_is_not_probed(replace: Replacer) -> None:
     replace.in_module(os.kill, _dead, module=os)
     session = Session('i', 'n', 'idle', Path('/w'), None, pid=999999, stale='registry remnant')
     compare(_distrusted(session), expected=session)
+
+
+class Parkless(Agent):
+    """A harness with no park concept — only the base behaviours."""
+
+    platform = 'parkless'
+
+    start = resume = run = sessions = reported = None  # type: ignore[assignment]
+
+
+def test_wake_refuses_on_a_harness_that_never_parks() -> None:
+    session = Session('i', 'proj@g@agent', 'parked', Path('/w'), None, parked=True)
+    with ShouldRaise(UserError('proj@g@agent: parkless sessions cannot be woken')):
+        Parkless().wake(session)

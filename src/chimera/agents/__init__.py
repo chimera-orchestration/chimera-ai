@@ -36,6 +36,10 @@ class Session:
     ``stale`` is ``None`` while there is no reason to doubt the session is live;
     otherwise it names why the entry is a corpse (a registry remnant, a dead pid) —
     marked rather than hidden, so staleness can be surfaced, not just logged.
+    ``parked`` marks a session whose worker its harness's daemon has reaped but kept
+    revivable (see :meth:`Agent.wake`) — no process, yet not a corpse: it still owns
+    its worktree, so it stays out of ``stale`` and counts as occupying everywhere
+    liveness gates a launch or a sweep.
     """
 
     id: str
@@ -47,6 +51,7 @@ class Session:
     kind: str | None = None
     started: datetime | None = None
     stale: str | None = None
+    parked: bool = False
 
     @property
     def short(self) -> str:
@@ -222,7 +227,8 @@ class Agent(ABC):
         shutdown call overrides this (e.g. one with a supervisor that would otherwise
         treat a bare SIGTERM as a crash and respawn the session under it). SIGKILL is
         never sent — a session that won't die is the caller's to inspect. The caller
-        has already established ``session.pid`` is not ``None``.
+        has already established ``session.pid`` is not ``None`` — a parked session has
+        none, so a harness that parks must override to stop those through its daemon.
         """
         assert session.pid is not None
         pid = session.pid
@@ -251,6 +257,18 @@ class Agent(ABC):
             f'{session.name} (pid {pid}) is still running {timeout:g}s after SIGTERM — '
             f'kill it by hand, then re-run'
         )
+
+    def wake(self, session: Session, timeout: float = 30.0) -> Session:
+        """Revive a parked ``session`` losslessly, returning it verified live.
+
+        Waking is not resuming: a resume mints a fresh session, orphaning the parked
+        identity (and any remote bridge riding it) — wake respawns the *same* session
+        through the harness's own daemon. Only a harness that parks sessions
+        (:attr:`Session.parked`) has anything to wake, so the base refuses; an
+        override must verify the respawn (a pid back in the registry) within
+        ``timeout`` seconds, never assume it.
+        """
+        raise UserError(f'{session.name}: {self.platform} sessions cannot be woken')
 
 
 def _distrusted(session: Session) -> Session:

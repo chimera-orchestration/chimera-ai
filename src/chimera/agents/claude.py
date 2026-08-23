@@ -3,8 +3,11 @@
 import json
 import os
 import re
+import signal
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from functools import cache
 from dataclasses import replace
 from datetime import datetime
@@ -43,20 +46,45 @@ READONLY_TOOLS = (
 )
 
 
+# Daemon job states that mean the job is over — a pid-less entry in one of these is a
+# corpse however complete its state.json looks (a done job still carries respawnFlags).
+ENDED_STATES = frozenset({'stopped', 'done', 'failed'})
+
+
+def job_parked(jobs: Path, job_id: str) -> bool:
+    """Whether daemon job ``job_id`` is parked — worker reaped but revivable.
+
+    After long idleness claude's daemon parks a ``--bg`` job: the worker process is
+    reaped (so the registry entry loses its pid, indistinguishable from a corpse
+    there) but ``jobs/<job_id>/state.json`` keeps the ``respawnFlags`` that ``claude
+    attach`` relaunches the *same* session from (verified against binary 2.1.239).
+    Parked is exactly: that file present and parseable, ``respawnFlags`` non-empty,
+    and a ``state`` outside :data:`ENDED_STATES`. Anything else — dir swept, file
+    unreadable, no respawn recipe, job over — is dead.
+    """
+    try:
+        state = json.loads((jobs / job_id / 'state.json').read_text())
+    except (OSError, ValueError):
+        return False
+    return bool(state.get('respawnFlags')) and state.get('state') not in ENDED_STATES
+
+
 class Claude(Agent):
     """The claude-code harness (the ``claude`` CLI).
 
     ``projects`` is where claude keeps its per-cwd transcript folders (default
-    ``~/.claude/projects``) — session summaries are read from there; tests point it
-    at a scratch tree.
+    ``~/.claude/projects``) — session summaries are read from there; ``jobs`` is the
+    daemon's per-job state (default ``~/.claude/jobs``) — parked-vs-dead classification
+    reads it (see :func:`job_parked`). Tests point both at scratch trees.
     """
 
     platform = 'claude'
 
     restricted = _BYPASS_FLAGS
 
-    def __init__(self, projects: Path | None = None) -> None:
+    def __init__(self, projects: Path | None = None, jobs: Path | None = None) -> None:
         self.projects = projects
+        self.jobs = jobs if jobs is not None else Path.home() / '.claude' / 'jobs'
 
     def start(
         self,
@@ -182,10 +210,13 @@ class Claude(Agent):
     def reported(self, cwd: Path | None = None) -> list[Session]:
         """What claude's own registry (``claude agents --json``) claims is live.
 
-        One piece of claude-registry knowledge applies here rather than in the shared
-        ``checked()``: after a session dies, the registry can briefly keep a *degraded*
-        entry with pid and status stripped. Such an entry isn't "a session with no pid
-        to claim" — it's a remnant, so it's marked stale (and logged) at the source.
+        Two pieces of claude-registry knowledge apply here rather than in the shared
+        ``checked()``. A pid-less entry whose daemon job is still revivable (see
+        :func:`job_parked`) is *parked*, not dead — marked ``parked`` with status
+        ``parked`` (the registry's own claim, e.g. ``blocked``, describes a worker
+        that no longer exists). Otherwise: after a session dies, the registry can
+        briefly keep a *degraded* entry with pid and status stripped — a remnant, so
+        it's marked stale (and logged) at the source.
 
         A machine with no ``claude`` binary at all answers with no sessions — nothing
         the harness runs can be live there — so every liveness consumer (worktree rm,
@@ -207,8 +238,16 @@ class Claude(Agent):
         for raw in json.loads(result.stdout):
             session = _parse(raw)
             if session.pid is None:
-                logger.bind(session=raw).warning('agent: session has no pid, treating as stale')
-                session = replace(session, stale='no pid in the registry entry (degraded remnant)')
+                # the daemon job id is claude's short handle, not the session UUID —
+                # though the two agree today (`stop` already leans on that)
+                if job_parked(self.jobs, str(raw.get('id') or session.short)):
+                    logger.bind(session=raw).info('agent: session is parked (ch wake revives it)')
+                    session = replace(session, status='parked', parked=True)
+                else:
+                    logger.bind(session=raw).warning('agent: session has no pid, treating as stale')
+                    session = replace(
+                        session, stale='no pid in the registry entry (degraded remnant)'
+                    )
             claims.append(session)
         return claims
 
@@ -227,9 +266,11 @@ class Claude(Agent):
         ``stop`` subcommand — keyed by :attr:`Session.short`, the job id ``claude
         stop`` expects (the full ``sessionId`` UUID is *not* accepted). An interactive
         session has no such supervisor and stops cleanly on a plain SIGTERM, so it
-        keeps the base behaviour.
+        keeps the base behaviour. A *parked* session has no pid to signal at all, but
+        ``claude stop`` acts on the daemon's job record, not the worker — so it ends a
+        parked job the same way (and only ever parks ``--bg`` jobs anyway).
         """
-        if session.kind != 'background':
+        if session.kind != 'background' and not session.parked:
             super().stop(session, timeout)
             return
         result = subprocess.run(['claude', 'stop', session.short], capture_output=True, text=True)
@@ -239,6 +280,45 @@ class Claude(Agent):
                 f'{result.stderr.strip() or result.stdout.strip()}'
             )
         logger.bind(session=session.name, id=session.short).info('agent stop')
+
+    def wake(self, session: Session, timeout: float = 30.0) -> Session:
+        """Respawn the parked ``session``'s worker, keeping its identity — verified, never assumed.
+
+        ``claude attach <job>`` is the one verb that revives the SAME session (and any
+        remote bridge riding it): the daemon relaunches the worker from the job's
+        ``respawnFlags``. A ``--resume`` would mint a fresh session instead — the
+        orphaning this verb exists to avoid. attach needs a tty, so the throwaway
+        client runs under ``script(1)`` (BSD spelling — the darwin-verified recipe) in
+        its own process group, stdin held open (EOF reads as detach, possibly before
+        the respawn lands). The worker is daemon-owned and survives the client, which
+        is dismissed once the respawn is verified: the job back in the registry with a
+        pid, polled for up to ``timeout`` seconds — the returned session. No pid by
+        the deadline raises, naming the by-hand attach.
+        """
+        job = session.short
+        client = subprocess.Popen(
+            ['script', '-q', '/dev/null', 'claude', 'attach', job],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                time.sleep(1.0)
+                for candidate in self.reported(session.cwd):
+                    if candidate.pid is not None and candidate.short == job:
+                        logger.bind(session=session.name, id=job, pid=candidate.pid).info(
+                            'agent wake'
+                        )
+                        return candidate
+            raise UserError(
+                f'{session.name} (job {job}) did not respawn within {timeout:g}s — '
+                f'try `claude attach {job}` in a terminal'
+            )
+        finally:
+            _dismiss(client)
 
     def _enriched(self, session: Session) -> Session:
         if session.cwd == Path('.'):  # registry entry had no cwd — no transcript folder to read
@@ -259,10 +339,28 @@ class Claude(Agent):
             raise FileNotFoundError(cwd)
         if exclusive and (running := self.live(cwd)):
             ids = ', '.join(f'{s.id} ({s.status})' for s in running)
+            if all(s.parked for s in running):
+                raise RuntimeError(f'a parked session owns {cwd}: {ids} — ch wake revives it')
             raise RuntimeError(f'an agent is already live in {cwd}: {ids} — attach or stop it')
         return subprocess.run(
             ['claude', *args], cwd=cwd, check=True, env={**os.environ, **env} if env else None
         )
+
+
+def _dismiss(client: 'subprocess.Popen[bytes]') -> None:
+    """End the throwaway attach client (and its pty children) — never the worker.
+
+    The client's whole group gets SIGTERM (``script`` doesn't reliably forward a
+    signal to its pty child); the daemon-owned worker is in neither. A client that
+    ignores the term is SIGKILLed — it's ours and holds nothing.
+    """
+    with suppress(ProcessLookupError):
+        os.killpg(client.pid, signal.SIGTERM)
+    try:
+        client.wait(5)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(client.pid, signal.SIGKILL)
 
 
 @cache

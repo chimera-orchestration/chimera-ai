@@ -191,6 +191,56 @@ def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
         resume(tmpdir / 'nope', 'x')
 
 
+def _parked_at(cwd: Path) -> Session:
+    return Session(
+        'ab12cd34-e776-4059', 'p@g@agent', 'parked', cwd, None, kind='background', parked=True
+    )
+
+
+def test_resume_refuses_a_parked_target_pointing_at_wake(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # resuming a parked session mints a fresh one, silently orphaning the parked identity
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace, sessions=[_parked_at(worktree)])
+    with ShouldRaise(
+        UserError(
+            'p@g@agent (ab12cd34) is parked, not dead — '
+            'ch wake revives it; a resume would orphan it'
+        )
+    ):
+        resume(worktree, 'p@g@agent')
+    compare(calls, expected=[])  # never launched
+
+
+def test_agent_start_refuses_when_only_a_parked_session_owns_the_worktree(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace, sessions=[_parked_at(worktree)])
+    with ShouldRaise(
+        RuntimeError(
+            f'a parked session owns {worktree}: ab12cd34-e776-4059 (parked) — ch wake revives it'
+        )
+    ):
+        agent(worktree, 'proj@goal@agent')
+    compare(calls, expected=[])  # never launched
+
+
+def test_resume_dry_notes_a_parked_target_instead_of_refusing(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    worktree = tmpdir.makedir('wt')
+    calls = _stub(replace, sessions=[_parked_at(worktree)])
+    note = resume(worktree, 'p@g@agent', dry=Dry(on=True))
+    compare(
+        note,
+        expected='note: p@g@agent (ab12cd34) is parked, not dead — '
+        'ch wake revives it; a resume would orphan it',
+    )
+    compare(calls, expected=[])  # a preview mutates nothing
+
+
 def test_resume_by_archived_id_reasserts_the_canonical_name(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
@@ -1253,6 +1303,52 @@ def test_agent_resume_cli_dry_without_context(
     compare(calls, expected=[])  # nothing launched
 
 
+def test_agent_resume_cli_dry_notes_a_parked_target(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    _project_with_worktree(tmpdir)
+    expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
+    calls = _stub(replace, sessions=[_parked_at(expected_wt)])
+    logging = action_logs(
+        'agent resume',
+        'chimera.commands.agent.resume',
+        {
+            'prompt': None,
+            'goal': 'g',
+            'actor': None,
+            'project': None,
+            'dangerous': False,
+            'harness': None,
+            'model': None,
+            'dry': True,
+        },
+    )
+    logging[1:1] = [
+        {
+            'level': 'WARNING',
+            'goal': 'g',
+            'session': 'p@g@agent',
+            'message': 'agent resume: target is parked',
+        }
+    ]
+    command.run('agent', 'resume', '-g', 'g', '--dry').check(
+        output='\n'.join(
+            [
+                f'Would resume agent in {expected_wt}',
+                'note: p@g@agent (ab12cd34) is parked, not dead — '
+                'ch wake revives it; a resume would orphan it',
+                'session: (no archived id — by name)',
+                'harness: claude',
+                'role: agent (scope: myproject@g)',
+                'prompt: (interactive)',
+                'context: (none)',
+            ]
+        ),
+        logging=logging,
+    )
+    compare(calls, expected=[])  # a preview mutates nothing
+
+
 def test_agent_env_overlay_reaches_the_adapter(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
     envs = capture_env(replace)
@@ -1329,6 +1425,16 @@ def test_stop_refuses_a_pidless_session(tmpdir: TempDir, replace: Replacer) -> N
         UserError('p@g@agent reports no pid — stop it from its own harness, then re-run')
     ):
         stop(tmpdir.path)
+
+
+def test_stop_ends_a_parked_session_through_its_harness(tmpdir: TempDir, replace: Replacer) -> None:
+    # parked has no pid either, but the harness's daemon stop handles it — no refusal
+    session = _parked_at(tmpdir.path)
+    replace.on_class(Claude.live, lambda self, cwd=None: [session])
+    stops: list[Session] = []
+    replace.on_class(Claude.stop, lambda self, s, timeout=10.0: stops.append(s))
+    compare(stop(tmpdir.path), expected=[session])
+    compare(stops, expected=[session])
 
 
 def test_stop_refuses_a_session_that_will_not_die(tmpdir: TempDir, replace: Replacer) -> None:
