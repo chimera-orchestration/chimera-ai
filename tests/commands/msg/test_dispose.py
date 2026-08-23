@@ -42,6 +42,14 @@ def test_dispose_retires_a_message(tmpdir: TempDir) -> None:
     assert inbox(ws, 'me@g@agent', unread_only=False) == []
 
 
+def test_dispose_on_a_bare_role_mailbox_still_works(tmpdir: TempDir) -> None:
+    # send refuses bare roles; disposing a stranded dead letter must keep working.
+    ws = tmpdir.path
+    _seed(ws, 'manager', 'm1')
+    dispose(ws, 'manager', 'm1')
+    assert inbox(ws, 'manager', unread_only=False) == []
+
+
 def test_msg_ack_cli(tmpdir: TempDir, command: Command, replace: Replacer) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     ws = tmpdir.path / 'ws'

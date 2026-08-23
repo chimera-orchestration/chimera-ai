@@ -45,6 +45,80 @@ def test_send_reply_threads_on_the_original(tmpdir: TempDir) -> None:
     assert (message.thread, message.re) == ('root-1', 'root-1')
 
 
+def test_send_refuses_bare_manager_with_the_senders_project(tmpdir: TempDir) -> None:
+    with ShouldRaise(
+        UserError(
+            "'manager' is a bare role — its mailbox is a dead letter no session reads; "
+            'send to proj@manager'
+        )
+    ):
+        send(
+            tmpdir.path,
+            sender='proj@g@agent',
+            to='manager',
+            subject='done',
+            body='.',
+            kind='message',
+            priority='normal',
+            re=None,
+        )
+    tmpdir.compare(expected=())  # refused before the store — no mailbox minted
+
+
+def test_send_refuses_bare_manager_with_the_shape_outside_a_project(tmpdir: TempDir) -> None:
+    with ShouldRaise(
+        UserError(
+            "'manager' is a bare role — its mailbox is a dead letter no session reads; "
+            'send to <project>@manager'
+        )
+    ):
+        send(
+            tmpdir.path,
+            sender='pegasus',
+            to='manager',
+            subject='done',
+            body='.',
+            kind='message',
+            priority='normal',
+            re=None,
+        )
+
+
+def test_send_refuses_bare_agent_with_the_goal_shape(tmpdir: TempDir) -> None:
+    with ShouldRaise(
+        UserError(
+            "'agent' is a bare role — its mailbox is a dead letter no session reads; "
+            'send to proj@<goal>@agent'
+        )
+    ):
+        send(
+            tmpdir.path,
+            sender='proj@manager',
+            to='agent',
+            subject='nudge',
+            body='.',
+            kind='message',
+            priority='normal',
+            re=None,
+        )
+
+
+def test_send_to_a_bare_persona_still_delivers(tmpdir: TempDir) -> None:
+    # A captain's address is a bare persona name — only role tokens refuse.
+    ws = tmpdir.path
+    send(
+        ws,
+        sender='proj@manager',
+        to='bellerophon',
+        subject='escalating',
+        body='.',
+        kind='escalation',
+        priority='normal',
+        re=None,
+    )
+    assert [m.subject for m in mail(ws).inbox('bellerophon')] == ['escalating']
+
+
 def test_send_rejects_an_unknown_kind(tmpdir: TempDir) -> None:
     with ShouldRaise(
         UserError("unknown kind 'bogus'; one of message, request, escalation, notice")
