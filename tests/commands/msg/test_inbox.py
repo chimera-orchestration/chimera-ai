@@ -34,6 +34,13 @@ def test_inbox_unread_only_excludes_drained(tmpdir: TempDir) -> None:
     assert [m.subject for m in inbox(ws, 'me@g@agent', unread_only=True)] == ['fresh']
 
 
+def test_inbox_on_a_bare_role_mailbox_stays_readable(tmpdir: TempDir) -> None:
+    # send refuses bare roles, but a mailbox stranded before that fence must stay readable.
+    ws = tmpdir.path
+    _seed(ws, 'manager', '01', 'stranded')
+    assert [m.subject for m in inbox(ws, 'manager', unread_only=False)] == ['stranded']
+
+
 def test_msg_inbox_cli_lists(tmpdir: TempDir, command: Command, replace: Replacer) -> None:
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     ws = tmpdir.path / 'ws'

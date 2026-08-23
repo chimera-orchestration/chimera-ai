@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import NoReturn
 
@@ -17,6 +18,7 @@ from chimera.commands.doctor.checks import (
     CaptainCheck,
     ChimeraUpToDateCheck,
     ClaudeHooksCheck,
+    DeadLetterMailCheck,
     FblogCheck,
     GitignoreCheck,
     InertBranchCheck,
@@ -35,6 +37,7 @@ from chimera.commands.doctor.checks import (
 )
 from chimera.commands.doctor.core import Check, Exclusions, Finding
 from chimera.commands.hook import install as hook_install
+from chimera.comms import Comms, Message
 from chimera.commands.init import TEMPLATE
 from chimera.worktrees import is_dirty, registered_worktrees
 
@@ -364,6 +367,70 @@ class TestStateDir:
             ],
         )
         assert (ws / 'comms').is_dir()
+
+
+def _dead_letter(ws: Path, address: str, id: str = 'm1') -> None:
+    Comms(ws / 'state' / 'mail').send(
+        Message(
+            id=id,
+            sender='p@g@agent',
+            to=address,
+            kind='message',
+            subject='done',
+            body='.',
+            ts=datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc),
+        )
+    )
+
+
+def _dead_letter_finding(ws: Path, role: str, count: int) -> Finding:
+    plural = 's' if count != 1 else ''
+    return Finding(
+        'dead-letter-mail',
+        f'{ws / "state" / "mail" / role} holds {count} undisposed message{plural} '
+        f'addressed to bare role {role!r} — '
+        f'ch msg inbox {role} to read, re-send qualified, then ack',
+        resolved=False,
+        fixable=False,
+    )
+
+
+class TestDeadLetterMail:
+    def test_stranded_mail_reported_even_under_fix(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        _dead_letter(ws, 'manager')
+        compare(
+            _run(DeadLetterMailCheck(), ws, fix=True),
+            expected=[_dead_letter_finding(ws, 'manager', 1)],
+        )
+
+    def test_each_role_mailbox_reported_with_its_count(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        _dead_letter(ws, 'manager')
+        _dead_letter(ws, 'agent', id='m2')
+        _dead_letter(ws, 'agent', id='m3')
+        compare(
+            _run(DeadLetterMailCheck(), ws),
+            expected=[
+                _dead_letter_finding(ws, 'manager', 1),
+                _dead_letter_finding(ws, 'agent', 2),
+            ],
+        )
+
+    def test_drained_but_undisposed_still_reported(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        _dead_letter(ws, 'manager')
+        Comms(ws / 'state' / 'mail').drain('manager')  # claimed, never disposed
+        compare(_run(DeadLetterMailCheck(), ws), expected=[_dead_letter_finding(ws, 'manager', 1)])
+
+    def test_disposed_dead_letters_are_silent(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        _dead_letter(ws, 'manager')
+        Comms(ws / 'state' / 'mail').dispose('manager', 'm1')
+        compare(_run(DeadLetterMailCheck(), ws), expected=[])
+
+    def test_no_mail_at_all_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(DeadLetterMailCheck(), _ws(tmpdir)), expected=[])
 
 
 class TestWorkspaceEnv:
