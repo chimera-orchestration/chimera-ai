@@ -71,6 +71,7 @@ ROLE_COMMANDS: dict[str, frozenset[str]] = {
             'agent start',
             'agent resume',
             'agent stop',
+            'wake',
             'review',
             'errand',
             'dump',

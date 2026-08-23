@@ -1,9 +1,11 @@
 import os
+import signal
 import subprocess
+import time
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, cast
 
 import pytest
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
@@ -15,6 +17,7 @@ from chimera.agents.claude import (
     ENDED_STATES,
     READONLY_TOOLS,
     Claude,
+    _dismiss,
     _print_args,
     _session_args,
     _warn_missing_binary,
@@ -577,6 +580,101 @@ class TestStop:
         )
         Claude().stop(session)
         compare(Popen.all_calls[0].args[0], expected=['claude', 'stop', '1ff2c8e3'])
+
+
+def _parked_session() -> Session:
+    return Session(
+        id='ab12cd34-e776-4059-b67f-b3b9bb70b85e',
+        name='proj@g@agent',
+        status='parked',
+        cwd=Path('/work'),
+        summary=None,
+        kind='background',
+        parked=True,
+    )
+
+
+ATTACH = 'script -q /dev/null claude attach ab12cd34'
+
+
+class TestWake:
+    # `claude attach` revives the SAME session (daemon respawn from respawnFlags);
+    # `--resume` would mint a new one — see knowledge/parked-sessions-rc-wake.md
+
+    def _kills(self, replace: Replacer) -> list[tuple[int, int]]:
+        kills: list[tuple[int, int]] = []
+        replace(
+            target=os.killpg,
+            container=os,
+            name='killpg',
+            replacement=lambda pgid, sig: kills.append((pgid, sig)),
+        )
+        replace(target=time.sleep, container=time, name='sleep', replacement=lambda s: None)
+        return kills
+
+    def test_wake_attaches_then_verifies_the_respawn(
+        self, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(ATTACH)
+        respawned = (
+            '[{"id": "ab12cd34", "sessionId": "ab12cd34-e776-4059-b67f-b3b9bb70b85e",'
+            ' "state": "working", "pid": 4242, "kind": "background",'
+            ' "name": "proj@g@agent", "cwd": "/work"}]'
+        )
+        Popen.set_command('claude agents --json --cwd /work', stdout=respawned.encode())
+        kills = self._kills(replace)
+        woken = Claude().wake(_parked_session())
+        compare(woken.pid, expected=4242)
+        # the client ran under a pty (script) in its own process group…
+        client = Popen.all_calls[0]
+        compare(client.args[0], expected=ATTACH.split())
+        assert client.kwargs['start_new_session'] is True
+        assert client.kwargs['stdin'] == subprocess.PIPE  # EOF would read as detach
+        # …and was dismissed once the pid was back; the worker is daemon-owned
+        ((_, sig),) = kills
+        compare(sig, expected=signal.SIGTERM)
+        full_logs.check_present(
+            {
+                'level': 'INFO',
+                'message': 'agent wake',
+                'session': 'proj@g@agent',
+                'id': 'ab12cd34',
+                'pid': 4242,
+            }
+        )
+
+    def test_dismiss_escalates_to_sigkill_on_a_stubborn_client(self, replace: Replacer) -> None:
+        class Stubborn:
+            pid = 4242
+
+            def wait(self, timeout: float | None = None) -> int:
+                raise subprocess.TimeoutExpired(cmd='script', timeout=timeout or 0)
+
+        kills: list[tuple[int, int]] = []
+        replace(
+            target=os.killpg,
+            container=os,
+            name='killpg',
+            replacement=lambda pgid, sig: kills.append((pgid, sig)),
+        )
+        _dismiss(cast('subprocess.Popen[bytes]', Stubborn()))
+        compare(kills, expected=[(4242, signal.SIGTERM), (4242, signal.SIGKILL)])
+
+    def test_wake_raises_when_the_respawn_never_lands(self, replace: Replacer) -> None:
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_command(ATTACH)
+        kills = self._kills(replace)
+        with ShouldRaise(
+            UserError(
+                'proj@g@agent (job ab12cd34) did not respawn within 0s — '
+                'try `claude attach ab12cd34` in a terminal'
+            )
+        ):
+            Claude().wake(_parked_session(), timeout=0)
+        assert kills  # the client is dismissed even on failure
 
 
 def test_print_args_defaults() -> None:

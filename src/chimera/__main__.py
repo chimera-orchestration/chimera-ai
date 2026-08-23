@@ -24,6 +24,7 @@ from chimera.agent_env import (
     ROLE_MANAGER,
     ROLE_SCOPE_ENV_VAR,
     ai_session,
+    fenced_project,
     refuse_cross_scope,
     role_env,
     role_scope_for,
@@ -83,6 +84,7 @@ from chimera.commands.prompt.edit import edit as _prompt_edit
 from chimera.commands.prompt.init import init as _prompt_init
 from chimera.commands.prompt.ls import prompts as _prompts
 from chimera.commands.review import review as _review
+from chimera.commands.wake import wake as _wake
 from chimera.commands.worktree.add import add as _worktree_add
 from chimera.commands.worktree.ls import ls as _worktree_ls
 from chimera.commands.worktree.rm import remove as _worktree_remove
@@ -941,6 +943,51 @@ def review(
                 env,
                 sources=sources,
             )
+
+
+WakeDryOpt = Annotated[
+    bool,
+    typer.Option('--dry', help='Preview which parked session would be woken; change nothing'),
+]
+WakeTargetArg = Annotated[
+    str | None,
+    typer.Argument(
+        help='Goal name (its worktree wins), or a parked session name/id; default: cwd goal',
+        autocompletion=complete_goal,
+    ),
+]
+
+
+@app.command(
+    cls=LoggingCommand,
+    help='Wake a parked agent session — the same session, revived losslessly via its harness.',
+)
+@logs(_wake)
+def wake(
+    ctx: typer.Context,
+    target: WakeTargetArg = None,
+    goal: GoalOpt = None,
+    actor: ActorOpt = None,
+    dry: WakeDryOpt = False,
+    project: ProjectOpt = None,
+) -> None:
+    overrides = _overrides(ctx)
+    a = require_valid_actor(actor or overrides.actor or AGENT)
+    requested = target if target is not None else (goal if goal is not None else overrides.goal)
+    worktree: Path | None = None
+    try:
+        p = _project(ctx, project)
+        worktree = worktree_path(p.worktrees, resolve_goal(Path.cwd(), p, requested), a)
+    except UserError:
+        # a target that isn't a resolvable goal may name a session instead — but only
+        # for an unfenced session: a scoped manager wakes by goal, inside its fence
+        if target is None or fenced_project() is not None:
+            raise
+    dry_run = Dry(dry)
+    session = _wake(worktree, target, dry_run)
+    typer.echo(
+        f'{dry_run.verb("Woke", "Would wake")} {session.name} ({session.short}) in {session.cwd}'
+    )
 
 
 @app.command(

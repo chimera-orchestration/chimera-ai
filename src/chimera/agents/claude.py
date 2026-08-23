@@ -3,8 +3,11 @@
 import json
 import os
 import re
+import signal
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from functools import cache
 from dataclasses import replace
 from datetime import datetime
@@ -278,6 +281,45 @@ class Claude(Agent):
             )
         logger.bind(session=session.name, id=session.short).info('agent stop')
 
+    def wake(self, session: Session, timeout: float = 30.0) -> Session:
+        """Respawn the parked ``session``'s worker, keeping its identity — verified, never assumed.
+
+        ``claude attach <job>`` is the one verb that revives the SAME session (and any
+        remote bridge riding it): the daemon relaunches the worker from the job's
+        ``respawnFlags``. A ``--resume`` would mint a fresh session instead — the
+        orphaning this verb exists to avoid. attach needs a tty, so the throwaway
+        client runs under ``script(1)`` (BSD spelling — the darwin-verified recipe) in
+        its own process group, stdin held open (EOF reads as detach, possibly before
+        the respawn lands). The worker is daemon-owned and survives the client, which
+        is dismissed once the respawn is verified: the job back in the registry with a
+        pid, polled for up to ``timeout`` seconds — the returned session. No pid by
+        the deadline raises, naming the by-hand attach.
+        """
+        job = session.short
+        client = subprocess.Popen(
+            ['script', '-q', '/dev/null', 'claude', 'attach', job],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                time.sleep(1.0)
+                for candidate in self.reported(session.cwd):
+                    if candidate.pid is not None and candidate.short == job:
+                        logger.bind(session=session.name, id=job, pid=candidate.pid).info(
+                            'agent wake'
+                        )
+                        return candidate
+            raise UserError(
+                f'{session.name} (job {job}) did not respawn within {timeout:g}s — '
+                f'try `claude attach {job}` in a terminal'
+            )
+        finally:
+            _dismiss(client)
+
     def _enriched(self, session: Session) -> Session:
         if session.cwd == Path('.'):  # registry entry had no cwd — no transcript folder to read
             return session
@@ -303,6 +345,22 @@ class Claude(Agent):
         return subprocess.run(
             ['claude', *args], cwd=cwd, check=True, env={**os.environ, **env} if env else None
         )
+
+
+def _dismiss(client: 'subprocess.Popen[bytes]') -> None:
+    """End the throwaway attach client (and its pty children) — never the worker.
+
+    The client's whole group gets SIGTERM (``script`` doesn't reliably forward a
+    signal to its pty child); the daemon-owned worker is in neither. A client that
+    ignores the term is SIGKILLed — it's ours and holds nothing.
+    """
+    with suppress(ProcessLookupError):
+        os.killpg(client.pid, signal.SIGTERM)
+    try:
+        client.wait(5)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(client.pid, signal.SIGKILL)
 
 
 @cache

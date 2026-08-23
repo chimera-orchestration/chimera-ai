@@ -54,6 +54,8 @@ The loop:
 - `ch goal start <goal> "<prompt>"` — set an agent working on a goal;
   `ch goal adopt <branch>` brings an existing branch under management.
 - `ch agent resume -g <goal>` — talk to a goal's agent.
+- `ch wake <goal>` — revive a goal's *parked* agent (status `parked` in `ch agent ls`);
+  resume refuses those — it would orphan the parked session.
 - `ch review <PR>` — stand up a pre-human review of a pull request.
 - `ch errand <project> "<question>"` — fetch a one-shot read-only report from another project.
 - `ch goal sync <goal>` — bring the human branch up to the agent's work.
