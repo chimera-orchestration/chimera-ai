@@ -561,6 +561,23 @@ class TestStop:
         Claude().stop(session)
         compare(calls, expected=[session])
 
+    def test_parked_session_stops_via_the_daemon_despite_no_pid(self, replace: Replacer) -> None:
+        # parked = worker reaped: nothing to SIGTERM, but `claude stop` acts on the job record
+        Popen = MockPopen()
+        replace.in_module(subprocess.Popen, Popen)
+        Popen.set_default(returncode=0)
+        session = Session(
+            id='1ff2c8e3-54c6-4afe-9b24-f1c40d360770',
+            name='proj@g@agent',
+            status='parked',
+            cwd=Path('/wt'),
+            summary=None,
+            kind='background',
+            parked=True,
+        )
+        Claude().stop(session)
+        compare(Popen.all_calls[0].args[0], expected=['claude', 'stop', '1ff2c8e3'])
+
 
 def test_print_args_defaults() -> None:
     compare(

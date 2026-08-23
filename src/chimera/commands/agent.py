@@ -25,9 +25,11 @@ def agents() -> list[Session]:
 def shown(listing: list[Session], verbose: bool) -> tuple[list[Session], int]:
     """The rows a listing shows, and how many stale sessions it withheld.
 
-    The default view keeps today's row set — live sessions only — counting the stale
-    entries it withheld so the caller can end with the ``-v`` hint (terse defaults
-    signpost their depth); ``verbose`` shows everything, so nothing is ever withheld.
+    The default view keeps every unmarked session — live and parked alike; a parked
+    one still owns its worktree, so hiding it is how it gets resumed over — counting
+    the stale entries it withheld so the caller can end with the ``-v`` hint (terse
+    defaults signpost their depth); ``verbose`` shows everything, so nothing is ever
+    withheld.
     """
     if verbose:
         return listing, 0
@@ -40,7 +42,9 @@ def live(worktree: Path) -> list[Session]:
 
     The cleanup/refusal question is "is *any* agent live here", never "is a claude
     live here" — consumers (worktree rm, goal finish/rename) must go through this,
-    not a single harness's listing.
+    not a single harness's listing. A parked session counts: no process, but it still
+    owns the worktree and is revivable (``ch wake``), so a sweep or relaunch over it
+    would orphan real work.
     """
     return [session for harness in AGENTS.values() for session in harness.live(worktree)]
 
@@ -52,7 +56,9 @@ def stop(worktree: Path, dry: Dry = Dry(), timeout: float = 10.0) -> list[Sessio
     branch, and anything uncommitted was the caller's to check *before* stopping. Refuses
     when the worktree itself doesn't exist (a mistyped goal or actor must never read as
     "nothing running") or when a session reports no pid (nothing to signal — a
-    server-backed harness needs its own stop). Each session is stopped by the harness
+    server-backed harness needs its own stop) — unless it's parked: parked means the
+    harness's daemon owns the session, so its stop must go through the daemon and
+    needs no pid (claude's ``claude stop``). Each session is stopped by the harness
     that reported it (:meth:`chimera.agents.Agent.stop`) — the harness-agnostic default
     is SIGTERM-and-wait, but a harness whose sessions need their own graceful shutdown
     (claude's background jobs — see :meth:`chimera.agents.claude.Claude.stop`) overrides
@@ -66,7 +72,7 @@ def stop(worktree: Path, dry: Dry = Dry(), timeout: float = 10.0) -> list[Sessio
         (harness, session) for harness in AGENTS.values() for session in harness.live(worktree)
     ]
     for harness, session in pairs:
-        if session.pid is None:
+        if session.pid is None and not session.parked:
             raise UserError(
                 f'{session.name} reports no pid — stop it from its own harness, then re-run'
             )
@@ -155,11 +161,28 @@ def resume(
     env: Mapping[str, str] = {},
     dry: Dry = Dry(),
     id: str | None = None,
-) -> None:
+) -> str | None:
     """Revive ``spec``'s agent session — by archived ``id`` when the caller resolved
     one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``); ``env`` as
-    on :func:`agent`."""
+    on :func:`agent`.
+
+    A *parked* session in the worktree refuses first, pointing at ``ch wake``: parked
+    is not dead — a resume would mint a fresh session and silently orphan the parked
+    identity (and any remote bridge riding it), which is exactly the mistake that
+    burnt a production agent. Under ``dry`` the refusal degrades to the returned
+    ``note:`` line (echoed with the preview), matching chat's live guard — a preview
+    mutates nothing, so it reports rather than blocks.
+    """
     refuse_restricted(spec, extra)
+    if parked := next((s for s in spec.agent.live(worktree) if s.parked), None):
+        message = (
+            f'{parked.name} ({parked.short}) is parked, not dead — '
+            f'ch wake revives it; a resume would orphan it'
+        )
+        if not dry.on:
+            raise UserError(message)
+        logger.bind(session=parked.name).warning('agent resume: target is parked')
+        return f'note: {message}'
     dry(
         spec.agent.resume,
         worktree,

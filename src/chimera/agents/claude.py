@@ -263,9 +263,11 @@ class Claude(Agent):
         ``stop`` subcommand — keyed by :attr:`Session.short`, the job id ``claude
         stop`` expects (the full ``sessionId`` UUID is *not* accepted). An interactive
         session has no such supervisor and stops cleanly on a plain SIGTERM, so it
-        keeps the base behaviour.
+        keeps the base behaviour. A *parked* session has no pid to signal at all, but
+        ``claude stop`` acts on the daemon's job record, not the worker — so it ends a
+        parked job the same way (and only ever parks ``--bg`` jobs anyway).
         """
-        if session.kind != 'background':
+        if session.kind != 'background' and not session.parked:
             super().stop(session, timeout)
             return
         result = subprocess.run(['claude', 'stop', session.short], capture_output=True, text=True)
@@ -295,6 +297,8 @@ class Claude(Agent):
             raise FileNotFoundError(cwd)
         if exclusive and (running := self.live(cwd)):
             ids = ', '.join(f'{s.id} ({s.status})' for s in running)
+            if all(s.parked for s in running):
+                raise RuntimeError(f'a parked session owns {cwd}: {ids} — ch wake revives it')
             raise RuntimeError(f'an agent is already live in {cwd}: {ids} — attach or stop it')
         return subprocess.run(
             ['claude', *args], cwd=cwd, check=True, env={**os.environ, **env} if env else None

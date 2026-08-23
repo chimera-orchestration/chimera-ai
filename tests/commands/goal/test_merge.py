@@ -340,6 +340,25 @@ def test_refuses_a_pidless_session_before_anything_moves(
     compare(_full(git_repo.path, 'main'), expected=main_before)
 
 
+def test_a_parked_session_passes_the_pidless_preflight_and_is_stopped(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    # parked reports no pid, but its harness's daemon stop ends it — merge proceeds
+    worktrees = _goal(tmpdir, git_repo.path)
+    agent_worktree = worktrees / 'g@agent'
+    Repo(agent_worktree).commit_content('work')
+    session = Session(
+        'x', 'p@g@agent', 'parked', agent_worktree, None, kind='background', parked=True
+    )
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
+    stops: list[Session] = []
+    replace.on_class(Claude.stop, lambda self, s, timeout=10.0: stops.append(s), name='stop')
+    result = merge(git_repo.path, worktrees, 'g')
+    compare(result.stopped, expected=(session,))
+    # twice: merge's own stop, then the forced sweep's — the stub keeps reporting it live
+    compare(stops, expected=[session, session])
+
+
 def test_refuses_a_goal_branch_as_base(tmpdir: TempDir, git_repo: Repo) -> None:
     worktrees = _goal(tmpdir, git_repo.path)
     with ShouldRaise(UserError("g/agent is one of g's own branches — name a base like main")):

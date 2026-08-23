@@ -1717,11 +1717,13 @@ def agent_resume(
     )
     env = role_env(ROLE_AGENT, role_scope_for(p.name, g))
     native = resume_target(Path.cwd(), spec.agent.platform, p.name, g, actor)
-    _resume(
+    note = _resume(
         worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, env, dry_run, native
     )
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
+        if note:
+            typer.echo(note)
         typer.echo(f'session: {native}' if native else 'session: (no archived id — by name)')
         _dry_preview(spec, prompt, _passthrough(ctx), context, env, sources=sources)
 

@@ -101,6 +101,34 @@ def test_remove_force_stops_the_live_agent(
     compare(Git(git_repo.path).branches(), expected=['main'])
 
 
+def test_remove_refuses_while_a_parked_session_owns_the_worktree(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    # parked (worker reaped, revivable) blocks a sweep exactly as live does — removing
+    # the worktree would orphan the session the daemon can still respawn into it
+    worktrees = _goal(tmpdir, git_repo)
+    session = Session(
+        id='ab12cd34-e776-4059',
+        name='sybil@g@agent',
+        status='parked',
+        cwd=worktrees / 'g@agent',
+        summary=None,
+        kind='background',
+        parked=True,
+    )
+    replace.on_class(Claude.live, lambda self, cwd=None: [session], name='live')
+    with ShouldRaise(
+        UserError(
+            'refusing to clean up:\n'
+            f'  an agent is parked in {worktrees / "g@agent"}: '
+            'background  parked  sybil@g@agent — ch wake revives it\n'
+            'use --force to stop the agents'
+        )
+    ):
+        remove(git_repo.path, worktrees, 'g')
+    tmpdir.compare(['g@agent'], path='worktrees', recursive=False)  # nothing removed
+
+
 def test_remove_force_refuses_a_session_it_cannot_stop(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:

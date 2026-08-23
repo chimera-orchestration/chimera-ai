@@ -110,9 +110,16 @@ def _clear_markers(git: Git, goal: str, dry: Dry) -> None:
 
 
 def live_problems(worktrees: Iterable[Path]) -> list[str]:
-    """One line per live session: the worktree it occupies and how to recognise it."""
+    """One line per occupying session: the worktree it holds and how to recognise it.
+
+    A parked session (worker reaped, revivable) blocks a sweep exactly as a live one
+    does — its line says so, and carries its own remedy since the generic
+    find-its-terminal hint can't apply to a session with no process.
+    """
     return [
-        f'an agent is live in {worktree}: {_describe(session)}'
+        f'an agent is parked in {worktree}: {_describe(session)} — ch wake revives it'
+        if session.parked
+        else f'an agent is live in {worktree}: {_describe(session)}'
         for worktree in worktrees
         for session in live(worktree)
     ]
@@ -124,7 +131,8 @@ def refuse_if_agents_running(worktrees: Iterable[Path]) -> None:
 
 
 def _describe(session: Session) -> str:
-    fields = [f'pid {session.pid if session.pid is not None else "?"}']
+    # a parked session has no pid by definition — its status already says 'parked'
+    fields = [] if session.parked else [f'pid {session.pid if session.pid is not None else "?"}']
     if session.kind:
         fields.append(session.kind)
     if session.status != '?':  # '?' is Session's absent-status fallback, not information
