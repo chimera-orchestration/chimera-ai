@@ -43,20 +43,45 @@ READONLY_TOOLS = (
 )
 
 
+# Daemon job states that mean the job is over — a pid-less entry in one of these is a
+# corpse however complete its state.json looks (a done job still carries respawnFlags).
+ENDED_STATES = frozenset({'stopped', 'done', 'failed'})
+
+
+def job_parked(jobs: Path, job_id: str) -> bool:
+    """Whether daemon job ``job_id`` is parked — worker reaped but revivable.
+
+    After long idleness claude's daemon parks a ``--bg`` job: the worker process is
+    reaped (so the registry entry loses its pid, indistinguishable from a corpse
+    there) but ``jobs/<job_id>/state.json`` keeps the ``respawnFlags`` that ``claude
+    attach`` relaunches the *same* session from (verified against binary 2.1.239).
+    Parked is exactly: that file present and parseable, ``respawnFlags`` non-empty,
+    and a ``state`` outside :data:`ENDED_STATES`. Anything else — dir swept, file
+    unreadable, no respawn recipe, job over — is dead.
+    """
+    try:
+        state = json.loads((jobs / job_id / 'state.json').read_text())
+    except (OSError, ValueError):
+        return False
+    return bool(state.get('respawnFlags')) and state.get('state') not in ENDED_STATES
+
+
 class Claude(Agent):
     """The claude-code harness (the ``claude`` CLI).
 
     ``projects`` is where claude keeps its per-cwd transcript folders (default
-    ``~/.claude/projects``) — session summaries are read from there; tests point it
-    at a scratch tree.
+    ``~/.claude/projects``) — session summaries are read from there; ``jobs`` is the
+    daemon's per-job state (default ``~/.claude/jobs``) — parked-vs-dead classification
+    reads it (see :func:`job_parked`). Tests point both at scratch trees.
     """
 
     platform = 'claude'
 
     restricted = _BYPASS_FLAGS
 
-    def __init__(self, projects: Path | None = None) -> None:
+    def __init__(self, projects: Path | None = None, jobs: Path | None = None) -> None:
         self.projects = projects
+        self.jobs = jobs if jobs is not None else Path.home() / '.claude' / 'jobs'
 
     def start(
         self,
@@ -182,10 +207,13 @@ class Claude(Agent):
     def reported(self, cwd: Path | None = None) -> list[Session]:
         """What claude's own registry (``claude agents --json``) claims is live.
 
-        One piece of claude-registry knowledge applies here rather than in the shared
-        ``checked()``: after a session dies, the registry can briefly keep a *degraded*
-        entry with pid and status stripped. Such an entry isn't "a session with no pid
-        to claim" — it's a remnant, so it's marked stale (and logged) at the source.
+        Two pieces of claude-registry knowledge apply here rather than in the shared
+        ``checked()``. A pid-less entry whose daemon job is still revivable (see
+        :func:`job_parked`) is *parked*, not dead — marked ``parked`` with status
+        ``parked`` (the registry's own claim, e.g. ``blocked``, describes a worker
+        that no longer exists). Otherwise: after a session dies, the registry can
+        briefly keep a *degraded* entry with pid and status stripped — a remnant, so
+        it's marked stale (and logged) at the source.
 
         A machine with no ``claude`` binary at all answers with no sessions — nothing
         the harness runs can be live there — so every liveness consumer (worktree rm,
@@ -207,8 +235,16 @@ class Claude(Agent):
         for raw in json.loads(result.stdout):
             session = _parse(raw)
             if session.pid is None:
-                logger.bind(session=raw).warning('agent: session has no pid, treating as stale')
-                session = replace(session, stale='no pid in the registry entry (degraded remnant)')
+                # the daemon job id is claude's short handle, not the session UUID —
+                # though the two agree today (`stop` already leans on that)
+                if job_parked(self.jobs, str(raw.get('id') or session.short)):
+                    logger.bind(session=raw).info('agent: session is parked (ch wake revives it)')
+                    session = replace(session, status='parked', parked=True)
+                else:
+                    logger.bind(session=raw).warning('agent: session has no pid, treating as stale')
+                    session = replace(
+                        session, stale='no pid in the registry entry (degraded remnant)'
+                    )
             claims.append(session)
         return claims
 

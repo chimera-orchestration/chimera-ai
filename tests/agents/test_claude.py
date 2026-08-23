@@ -12,11 +12,13 @@ from testfixtures.popen import MockPopen
 from chimera.agent_env import ROLE_CAPTAIN, role_env
 from chimera.agents import Agent, Session
 from chimera.agents.claude import (
+    ENDED_STATES,
     READONLY_TOOLS,
     Claude,
     _print_args,
     _session_args,
     _warn_missing_binary,
+    job_parked,
     session_summary,
 )
 from chimera.config import UserError
@@ -93,12 +95,15 @@ def test_reported_tolerates_missing_fields(replace: Replacer) -> None:
     )
 
 
-def test_reported_marks_the_degraded_pidless_remnant_stale(replace: Replacer) -> None:
+def test_reported_marks_the_degraded_pidless_remnant_stale(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
     # the degraded shape claude's registry reports briefly after a killed pid is pruned:
     # marked at the source (claude-registry knowledge), never silently dropped
     _registry(replace, '[{"kind": "background", "startedAt": 1781247747055, "name": "x"}]')
+    jobs = tmpdir.makedir('jobs')
     compare(
-        Claude().reported(),
+        Claude(jobs=jobs).reported(),
         expected=[
             Session(
                 id='?',
@@ -112,7 +117,83 @@ def test_reported_marks_the_degraded_pidless_remnant_stale(replace: Replacer) ->
             )
         ],
     )
-    compare(Claude().live(), expected=[])  # …and live() is what filters it
+    compare(Claude(jobs=jobs).live(), expected=[])  # …and live() is what filters it
+
+
+# A parked entry as claude's registry reports it: pid gone, the daemon's stale claim left.
+PARKED_RECORD = (
+    '[{"id": "ab12cd34", "sessionId": "ab12cd34-e776-4059-b67f-b3b9bb70b85e",'
+    ' "state": "blocked", "kind": "background", "name": "proj@g@agent", "cwd": "/work"}]'
+)
+
+
+def _job(tmpdir: TempDir, state: dict[str, object], job_id: str = 'ab12cd34') -> Path:
+    """A daemon jobs tree holding one job's ``state.json``; returns the jobs root."""
+    tmpdir.dump(f'jobs/{job_id}/state.json', state)
+    return tmpdir / 'jobs'
+
+
+def test_reported_marks_a_revivable_pidless_job_parked(tmpdir: TempDir, replace: Replacer) -> None:
+    _registry(replace, PARKED_RECORD)
+    jobs = _job(tmpdir, {'state': 'blocked', 'respawnFlags': ['--name', 'proj@g@agent']})
+    harness = Claude(jobs=jobs)
+    compare(
+        harness.reported(),
+        expected=[
+            Session(
+                id='ab12cd34-e776-4059-b67f-b3b9bb70b85e',
+                name='proj@g@agent',
+                # the registry's own 'blocked' describes a worker that no longer exists
+                status='parked',
+                cwd=Path('/work'),
+                summary=None,
+                kind='background',
+                parked=True,
+            )
+        ],
+    )
+    # parked still owns its worktree: live() keeps it, so launch guards and sweeps see it
+    compare([session.parked for session in harness.live()], expected=[True])
+
+
+def test_reported_ended_job_is_stale_not_parked(tmpdir: TempDir, replace: Replacer) -> None:
+    # a done/stopped/failed job still carries respawnFlags — the state is what ends it
+    _registry(replace, PARKED_RECORD)
+    jobs = _job(tmpdir, {'state': 'done', 'respawnFlags': ['--name', 'proj@g@agent']})
+    (session,) = Claude(jobs=jobs).reported()
+    assert not session.parked
+    compare(session.stale, expected='no pid in the registry entry (degraded remnant)')
+
+
+def test_reported_job_without_a_respawn_recipe_is_stale(tmpdir: TempDir, replace: Replacer) -> None:
+    _registry(replace, PARKED_RECORD)
+    (session,) = Claude(jobs=_job(tmpdir, {'state': 'blocked'})).reported()
+    assert not session.parked
+    assert session.stale is not None
+
+
+class TestJobParked:
+    def test_parked(self, tmpdir: TempDir) -> None:
+        assert job_parked(_job(tmpdir, {'state': 'blocked', 'respawnFlags': ['-x']}), 'ab12cd34')
+
+    def test_working_job_also_counts(self, tmpdir: TempDir) -> None:
+        # classification is only consulted for pid-less registry entries, so a 'working'
+        # state here means the worker was reaped mid-flight — still revivable
+        assert job_parked(_job(tmpdir, {'state': 'working', 'respawnFlags': ['-x']}), 'ab12cd34')
+
+    @pytest.mark.parametrize('state', sorted(ENDED_STATES))
+    def test_ended_states_are_dead(self, tmpdir: TempDir, state: str) -> None:
+        assert not job_parked(_job(tmpdir, {'state': state, 'respawnFlags': ['-x']}), 'ab12cd34')
+
+    def test_empty_respawn_recipe_is_dead(self, tmpdir: TempDir) -> None:
+        assert not job_parked(_job(tmpdir, {'state': 'blocked', 'respawnFlags': []}), 'ab12cd34')
+
+    def test_missing_job_dir_is_dead(self, tmpdir: TempDir) -> None:
+        assert not job_parked(tmpdir.makedir('jobs'), 'ab12cd34')
+
+    def test_unparseable_state_file_is_dead(self, tmpdir: TempDir) -> None:
+        tmpdir.write('jobs/ab12cd34/state.json', 'not json')
+        assert not job_parked(tmpdir / 'jobs', 'ab12cd34')
 
 
 def _raising(error: Exception):
