@@ -16,8 +16,10 @@ from chimera.commands.doctor.core import (
     read_raw,
     write_config,
 )
+from chimera.agent_env import ROLE_AGENT, ROLE_MANAGER
 from chimera.commands.hook import install as hook_install
 from chimera.commands.init import TEMPLATE
+from chimera.commands.msg.store import mail as mail_store
 from chimera.git import Git
 from chimera.worktrees import (
     AGENT,
@@ -286,6 +288,34 @@ class RuntimeStateDirCheck:
                     state.mkdir(parents=True, exist_ok=True)
                     legacy_mail.rename(mail)
                 yield Finding(self.name, message, resolved=fixing, fixable=True)
+
+
+class DeadLetterMailCheck:
+    """No bare-role mailbox (``state/mail/manager``, ``state/mail/agent``) holds live mail.
+
+    A bare role token is never a session's address, so mail sent there sits undrained
+    forever. ``ch msg send`` refuses those addresses now, but strandings from before that
+    fence — or mail written around it — still need surfacing. Report-only: the mail needs a
+    human (or the captain) to read it, re-send to the qualified address and dispose it —
+    routing it automatically would guess the recipient. Disposed dead letters are silent:
+    they've been dealt with and stay readable for forensics.
+    """
+
+    name = 'dead-letter-mail'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        store = mail_store(workspace)
+        for role in (ROLE_MANAGER, ROLE_AGENT):
+            if count := len(store.inbox(role)):
+                plural = 's' if count != 1 else ''
+                yield Finding(
+                    self.name,
+                    f'{workspace / "state" / "mail" / role} holds {count} undisposed '
+                    f'message{plural} addressed to bare role {role!r} — '
+                    f'ch msg inbox {role} to read, re-send qualified, then ack',
+                    resolved=False,
+                    fixable=False,
+                )
 
 
 class StaleHumanWorktreeCheck:
@@ -1007,6 +1037,7 @@ CHECKS: tuple[Check, ...] = (
     OccupancyWarningCheck(),
     ProjectConfigCheck(),
     RuntimeStateDirCheck(),
+    DeadLetterMailCheck(),
     StaleHumanWorktreeCheck(),
     InertBranchCheck(),
     LegacyWorktreeSeparatorCheck(),

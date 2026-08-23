@@ -299,6 +299,12 @@ add/retire via the `CHECKS` tuple). Current checks:
   lives under one gitignored `state/`; `--fix` migrates the legacy layout, renaming `logs/` →
   `state/` (its `chimera.jsonl` → `state/log.jsonl`) and `comms/` → `state/mail/`. Clean-only: a
   collision (the target already exists) is reported for a human to merge, never clobbered
+- **dead-letter-mail** — no bare-role mailbox (`state/mail/manager`, `state/mail/agent`) holds
+  undisposed mail. A bare role token is never a session's address, so mail there sits undrained
+  forever; `ch msg send` refuses those addresses now, but strandings from before that fence still
+  need surfacing. Report-only — the mail needs a human (or the captain) to read, re-send to the
+  qualified address and dispose; auto-routing would guess the recipient. Disposed dead letters
+  are silent: dealt with, kept readable for forensics
 - **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **inert-branches** — delete a known goal's non-agent actor branch (`{goal}/human`, `reviewer`, `pr`,
