@@ -428,7 +428,7 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
                 'sources': context_sources(ws, 'captain'),
                 'message': 'context: rendered',
             },
-            launching(claude_cmd, ws),
+            # no `agent: launching` — a resume records no launch to be claimed
             launched(claude_cmd, ws),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],

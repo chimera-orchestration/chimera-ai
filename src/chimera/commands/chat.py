@@ -79,7 +79,8 @@ def chat(
     # cast, not an annotation: ty narrows the local back to the start|resume union at the
     # call site, and the union's ParamSpec join trips over resume's extra kw-only `id`
     launch = cast(Launch, spec.agent.resume if resume else spec.agent.start)
-    dry(record_launch, cwd, name, spec)
+    if not resume:  # a resume takes nothing new — see chimera.commands.agent.resume
+        dry(record_launch, cwd, name, spec)
     dry(
         launch,
         cwd,
