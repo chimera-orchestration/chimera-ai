@@ -32,7 +32,7 @@ lexicographically, so keep them in a single zone (UTC) for a correct timeline.
 
 import sqlite3
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Self
 
@@ -597,6 +597,27 @@ def needs_migration(path: Path) -> bool:
         return bool(LEGACY_COLUMNS & _columns(db, 'sessions'))
 
 
+def back_up(path: Path) -> Path:
+    """Copy the archive aside before a rebuild; return where the copy went.
+
+    Through SQLite's own ``VACUUM INTO`` rather than a file copy. The archive runs in WAL
+    mode, so committed transactions can still be sitting in ``<path>-wal`` — copying the
+    ``.db`` alone yields a backup silently missing the newest history, which is worse than
+    having none.
+
+    A rebuild is the one mutation nothing else can undo. Every git ref chimera moves is
+    restorable from the before/after shas on its log line (``agent-docs/logging.md``'s ref
+    safety); a rebuilt database has no shas to record, so it gets a file instead — the same
+    obligation met the only way this mutation can meet it. The name carries the moment, so
+    a second rebuild never lands on the first one's copy.
+    """
+    backup = path.with_name(f'{path.name}.backup-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}')
+    with Database.open(path) as db:
+        db.execute('back_up', 'VACUUM INTO ?', (str(backup),))
+    logger.bind(path=str(backup), bytes=backup.stat().st_size).info('archive: backed up')
+    return backup
+
+
 def events_orphaned(path: Path) -> bool:
     """Whether ``events`` references a table that no longer exists.
 
@@ -628,9 +649,10 @@ def repair_events(path: Path) -> int:
     Same shape as :func:`migrate`'s rebuild and the same two pragmas, for the same two
     reasons — the drop must not cascade, and the rename must not rewrite anything.
     """
+    if not events_orphaned(path):
+        return 0
+    back_up(path)
     with Database.open(path) as db:
-        if not events_orphaned(path):
-            return 0
         db.executescript(
             'repair: rebuild events',
             f"""
@@ -683,9 +705,10 @@ def migrate(path: Path) -> int:
     entitled a session to an address: those are nulled, applying the rule retroactively
     instead of grandfathering claims the current code would refuse to make.
     """
+    if not needs_migration(path):
+        return 0
+    back_up(path)
     with Database.open(path) as db:
-        if not (LEGACY_COLUMNS & _columns(db, 'sessions')):
-            return 0
         db.executescript(
             'migrate: drop legacy search',
             """

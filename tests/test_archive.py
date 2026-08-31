@@ -13,6 +13,7 @@ from chimera.archive import (
     Archive,
     ArchiveSession,
     Event,
+    LEGACY_COLUMNS,
     migrate,
     needs_migration,
     repair_events,
@@ -747,6 +748,45 @@ class TestMigration:
         with Archive.open(db_path) as store:
             store.record_event(Event(at=NOON, kind=ACTIVE, platform='claude', native_id='a'))
             compare([e.kind for e in store.events()], expected=[ACTIVE])
+
+    def test_the_pre_migration_archive_is_kept(self, db_path: Path) -> None:
+        # the one mutation nothing else can undo: a moved git ref is restorable from the
+        # shas on its log line, a rebuilt database has none to record
+        legacy_archive(db_path, [legacy_row('a')])
+        migrate(db_path)
+        [backup] = db_path.parent.glob(f'{db_path.name}.backup-*')
+        connection = sqlite3.connect(backup)
+        try:
+            columns = {row[1] for row in connection.execute('PRAGMA table_info(sessions)')}
+            kept = connection.execute('SELECT native_id FROM sessions').fetchall()
+        finally:
+            connection.close()
+        assert LEGACY_COLUMNS <= columns  # still the schema we migrated away from
+        compare(kept, expected=[('a',)])
+
+    def test_the_backup_carries_writes_still_in_the_wal(self, db_path: Path) -> None:
+        # a plain file copy would miss these: the archive runs in WAL mode, so a backup
+        # of the .db alone is one silently missing the newest history
+        legacy_archive(db_path, [legacy_row('a')])
+        connection = sqlite3.connect(db_path)
+        connection.execute('PRAGMA journal_mode=WAL')
+        connection.execute(
+            "INSERT INTO sessions (platform, native_id, status, started_at) "
+            "VALUES ('claude', 'late', 'startup', ?)",
+            (NOON.isoformat(),),
+        )
+        connection.commit()
+        assert db_path.with_name(f'{db_path.name}-wal').exists()  # uncheckpointed
+        migrate(db_path)
+        [backup] = db_path.parent.glob(f'{db_path.name}.backup-*')
+        saved = sqlite3.connect(backup)
+        try:
+            compare(
+                sorted(row[0] for row in saved.execute('SELECT native_id FROM sessions')),
+                expected=['a', 'late'],
+            )
+        finally:
+            saved.close()
 
     def test_repairing_a_healthy_archive_does_nothing(self, db_path: Path) -> None:
         Archive.open(db_path).close()
