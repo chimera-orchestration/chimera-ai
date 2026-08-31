@@ -34,7 +34,7 @@ The loop:
 
 Mail: incoming messages are injected at each turn start until acked — `ch msg ack <id>`
 when handled. `ch msg send <address> "<subject>" "<body>"` reaches any actor
-(`{persona}`, `<project>@manager`, `<project>@<goal>@agent`). While idle, keep
+(`@@captain`, `<project>@@manager`, `<project>@<goal>@agent`). While idle, keep
 `ch msg watch` running under a background monitor so an arriving message wakes you —
 it is read-only and claims nothing.
 

@@ -3,11 +3,12 @@ import re
 from pathlib import Path
 from typing import cast
 
-from testfixtures import Replacer, TempDir, compare
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 from typer._click.core import Command as ClickCommand
 from typer.main import get_command
 
 from chimera.__main__ import _strip_restricted_commands, _strip_to_role, app
+from chimera.addresses import Address
 from chimera.agent_env import ROLE_AGENT, ROLE_CAPTAIN, ROLE_COMMANDS, ROLE_MANAGER
 from chimera.config import ProjectConfig
 from chimera.context import Project, Scope
@@ -16,6 +17,15 @@ from tests.cli import Command, action_logs
 
 CITED = re.compile(r'`ch ([^`]+)`')
 WORD = re.compile(r'[a-z][a-z-]*')
+
+
+CITED_ADDRESS = re.compile(r'`([^`]*@[^`]*)`')
+PLACEHOLDER = re.compile(r'<[a-z-]+>')
+
+
+def _cited_addresses(text: str) -> set[str]:
+    """Every backtick-cited address, with its ``<placeholders>`` filled by a plain name."""
+    return {PLACEHOLDER.sub('x', cited) for cited in CITED_ADDRESS.findall(text)}
 
 
 def _citations(text: str) -> set[tuple[str, ...]]:
@@ -84,6 +94,22 @@ class TestCitationsPinToTheRoleTree:
     def test_every_role_signposts_help(self) -> None:
         for role in PRIMES:
             assert '`ch help`' in prime(role), role
+
+    def test_every_cited_address_parses(self) -> None:
+        # the commands were pinned to a live tree from the start; the addresses beside
+        # them were not, and the captain spent this branch teaching a grammar its own
+        # `ch msg send` refuses — a fresh captain following its launch context verbatim
+        for role in PRIMES:
+            text = prime(role, workspace='lycia', project='proj', goal='g')
+            for cited in _cited_addresses(text):
+                Address.parse(cited)  # raises, naming the role, if a template drifts
+
+    def test_the_address_pin_rejects_the_grammar_it_replaced(self) -> None:
+        # the pin only works if these are the shapes it would have caught
+        compare(_cited_addresses('`<project>@manager` and `pegasus`'), expected={'x@manager'})
+        for stale in ('x@manager', 'pegasus'):
+            with ShouldRaise(ValueError):
+                Address.parse(stale)
 
     def test_the_pin_itself_accepts_args_and_rejects_ghosts(self) -> None:
         # the resolver the pin rides on: word tokens past a leaf are its args, and a
