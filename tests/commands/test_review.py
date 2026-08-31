@@ -1,6 +1,6 @@
 import os
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from string import Template
 
@@ -117,10 +117,9 @@ def _stub_agent(replace: Replacer) -> list[object]:
         dangerous: bool = False,
         spec: AgentSpec = AgentSpec(),
         context: Path | None = None,
-        env: Mapping[str, str] = {},
         dry: Dry = Dry(),
     ) -> None:
-        calls.append((worktree, name, prompt, extra, dangerous, spec, context, env))
+        calls.append((worktree, name, prompt, extra, dangerous, spec, context, dry))
 
     replace.in_module(agent, record, module=review_mod)
     return calls
@@ -402,7 +401,7 @@ class TestReviewStep:
                     False,
                     AgentSpec(),
                     None,
-                    {},
+                    Dry(),
                 )
             ],
         )
@@ -816,12 +815,10 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
         review_step: str | None = None,
         spec: AgentSpec = AgentSpec(),
         context: Callable[[str, str], Path | None] | None = None,
-        env: Callable[[str, str], Mapping[str, str]] | None = None,
         dry: Dry = Dry(),
     ) -> Path:
         rendered = context('project@pr-1@agent', 'pr-1') if context is not None else None
-        stamp = env('project@pr-1@agent', 'pr-1') if env is not None else None
-        calls.append((project, pr, list(extra), dangerous, into, launch, spec, rendered, stamp))
+        calls.append((project, pr, list(extra), dangerous, into, launch, spec, rendered))
         return worktrees / 'pr-1@agent'
 
     replace(target=review, container=main, name='_review', replacement=record)
@@ -854,7 +851,6 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
                 Path.cwd(),
                 True,
                 AgentSpec(),
-                None,
                 None,
             )
         ],
@@ -890,7 +886,6 @@ def test_review_cli(tmpdir: TempDir, git_repo: Repo, replace: Replacer, command:
                 Path.cwd(),
                 False,
                 AgentSpec(),
-                None,
                 None,
             )
         ],
