@@ -196,11 +196,21 @@ the second stays unaddressed, which is the safe way to be wrong. An unclaimed re
 hand its address to whatever started there next.
 
 **Location is not identity.** cwd survives every transition, which makes it the right source
-for *axes* (workspace/project/goal/actor) and a legitimate basis for *restricting* a session —
-but never for granting it an address. The axes and the address are separate columns for exactly
-this reason. A raw `claude` in a goal worktree gets the axes and no address: no mail, no board
-slot, no resume handle — but it *is* fenced as that goal's agent, and it *does* count as an
-occupant.
+for *axes* (workspace/project/goal/actor), but never for granting an address. The axes and the
+address are separate columns for exactly this reason. A raw `claude` in a goal worktree gets
+the axes and no address: no mail, no board slot, no resume handle — and **no fence**, because
+role and scope are read off the address and nothing else.
+
+That last part is deliberate, and the plan that built this said the opposite. A stopgap that
+inferred the fence from the worktree cwd was going to survive as the raw-session fallback; it
+didn't, because a fence granted by location is the very thing this design set out to abolish
+— entitlement from geography, wearing a different hat. What *does* still come from cwd is
+occupancy: a hand-launched session counts as an occupant, since that question is about who is
+writing in a directory, which is a fact about the directory.
+
+So an unaddressed session is unfenced, and the wall is the harness permission layer, not us.
+The fence's value was never containment of a determined session — it is not advertising
+footguns to a session that would otherwise reach for them.
 
 **The address is the only thing that crosses a bridge.** No id survives one, and the fork
 payload doesn't name its parent, so a `branched` session inherits from the newest session still
