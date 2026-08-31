@@ -12,7 +12,14 @@ from testfixtures.loguru import LoguruSource
 from testfixtures.popen import MockPopen, shell_join
 
 from chimera.commands.doctor import checks as doctor_checks
-from chimera.archive import Archive, ArchiveSession, Event, needs_migration
+from chimera.archive import (
+    ACTIVE,
+    Archive,
+    ArchiveSession,
+    Event,
+    events_orphaned,
+    needs_migration,
+)
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
     ArchiveSchemaCheck,
@@ -41,7 +48,7 @@ from chimera.commands.doctor.checks import (
 from chimera.commands.doctor.core import Check, Exclusions, Finding
 from chimera.commands.hook import install as hook_install
 from chimera.commands.init import TEMPLATE
-from tests.test_archive import legacy_archive, legacy_row
+from tests.test_archive import legacy_archive, legacy_row, orphan_events
 from chimera.worktrees import is_dirty, registered_worktrees
 
 
@@ -401,9 +408,50 @@ class TestArchiveSchema:
         full_logs.check_present(
             {
                 'level': 'INFO',
-                'message': 'doctor: archive migrated',
+                'message': 'doctor: archive rebuilt',
                 'path': str(path),
                 'sessions': 1,
+            }
+        )
+        # the migration must leave the timeline writable, not merely intact
+        with Archive.open(path) as store:
+            store.record_event(Event(at=NOON, kind=ACTIVE, platform='claude', native_id='a'))
+
+    def test_events_pointing_at_a_dropped_table_are_reported(self, tmpdir: TempDir) -> None:
+        ws = _ws(tmpdir)
+        path = ws / 'state' / 'archive.db'
+        path.parent.mkdir(parents=True)
+        orphan_events(path)
+        compare(
+            _run(ArchiveSchemaCheck(), ws),
+            expected=[
+                Finding(
+                    'archive-schema',
+                    f'{path} has events pointing at a dropped table',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+        assert events_orphaned(path)  # reported only — nothing touched without --fix
+
+    def test_fix_rebuilds_orphaned_events(self, tmpdir: TempDir, full_logs: LogCapture) -> None:
+        ws = _ws(tmpdir)
+        path = ws / 'state' / 'archive.db'
+        path.parent.mkdir(parents=True)
+        orphan_events(path)
+        [finding] = _run(ArchiveSchemaCheck(), ws, fix=True)
+        assert finding.resolved
+        assert not events_orphaned(path)
+        with Archive.open(path) as store:
+            compare([e.kind for e in store.events()], expected=['startup'])
+            store.record_event(Event(at=NOON, kind=ACTIVE, platform='claude', native_id='a'))
+        full_logs.check_present(
+            {
+                'level': 'INFO',
+                'message': 'doctor: archive rebuilt',
+                'path': str(path),
+                'events': 1,
             }
         )
 

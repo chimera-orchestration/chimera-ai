@@ -597,6 +597,58 @@ def needs_migration(path: Path) -> bool:
         return bool(LEGACY_COLUMNS & _columns(db, 'sessions'))
 
 
+def events_orphaned(path: Path) -> bool:
+    """Whether ``events`` references a table that no longer exists.
+
+    The wreckage a rebuild leaves when ``ALTER TABLE … RENAME`` rewrites the foreign key
+    to follow the rename and the renamed table is then dropped. It is invisible to
+    :func:`needs_migration` — the ``sessions`` columns look entirely current — and fatal:
+    every append to the timeline fails, so hooks, heartbeats and reconciliation all stop
+    while the archive reports itself healthy.
+
+    Asked of the reference rather than of a remembered table name, so it still holds if a
+    future rebuild breaks the same way under a different name.
+    """
+    if not path.exists():
+        return False
+    with Database.open(path) as db:
+        tables = {
+            row['name']
+            for row in db.execute(
+                'tables', "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        keys = db.execute('events keys', 'PRAGMA foreign_key_list(events)').fetchall()
+    return any(row['table'] not in tables for row in keys)
+
+
+def repair_events(path: Path) -> int:
+    """Rebuild ``events`` onto a resolving foreign key; return the events carried over.
+
+    Same shape as :func:`migrate`'s rebuild and the same two pragmas, for the same two
+    reasons — the drop must not cascade, and the rename must not rewrite anything.
+    """
+    with Database.open(path) as db:
+        if not events_orphaned(path):
+            return 0
+        db.executescript(
+            'repair: rebuild events',
+            f"""
+            PRAGMA foreign_keys=OFF;
+            PRAGMA legacy_alter_table=ON;
+            ALTER TABLE events RENAME TO events_legacy;
+            {SCHEMA}
+            INSERT INTO events (at, kind, detail, platform, native_id)
+            SELECT at, kind, detail, platform, native_id FROM events_legacy;
+            DROP TABLE events_legacy;
+            PRAGMA legacy_alter_table=OFF;
+            PRAGMA foreign_keys=ON;
+            """,
+        )
+        counted = db.execute('repair: count', 'SELECT COUNT(*) AS n FROM events')
+        return int(counted.fetchone()['n'])
+
+
 def migrate(path: Path) -> int:
     """Rebuild a pre-trim archive onto the current schema; return the rows carried over.
 
@@ -605,12 +657,23 @@ def migrate(path: Path) -> int:
     triggers and the ``sessions_fts`` virtual table go first, then a fresh table takes
     the surviving columns and is renamed into place.
 
-    **Foreign keys are off across the rebuild, and that is load-bearing.** ``ALTER TABLE
-    … RENAME`` rewrites referencing keys to follow the rename, so ``events`` would come
-    to point at ``sessions_legacy`` — and dropping that, with keys enforced, cascade-
-    deletes every event. Caught against a real 247-session archive, which lost all 262 of
-    its events before this pragma existed. The events are the append-only history this
-    whole design exists to keep; nothing in a schema migration may touch them.
+    **Two pragmas guard the rename, and both are load-bearing.** ``ALTER TABLE … RENAME``
+    rewrites referencing keys to follow the rename, so ``events`` comes to point at
+    ``sessions_legacy``. That single mechanism breaks the history twice over, and each
+    half needs its own pragma:
+
+    - ``foreign_keys=OFF`` stops the ``DROP`` cascade-deleting every event. Caught against
+      a real 247-session archive, which lost all 262 of its events.
+    - ``legacy_alter_table=ON`` stops the rewrite happening at all, so ``events`` keeps
+      pointing at ``sessions`` — the table ``SCHEMA`` recreates. Without it the rebuild
+      succeeds, the events survive the drop, and the archive is left referencing a table
+      that no longer exists: every later ``INSERT INTO events`` fails with ``no such
+      table: main.sessions_legacy``, so hooks, heartbeats and reconciliation all die the
+      moment the migration is declared a success.
+
+    The second was missed because reasoning stopped at the cascade, and because every test
+    here read after migrating and none wrote. The events are the append-only history this
+    whole design exists to keep; a migration must leave them writable, not merely present.
 
     The dying ``manager`` column earns its keep on the way out. It recorded whether a
     *launcher* stamped the session, which is exactly the evidence the new ``address``
@@ -637,6 +700,7 @@ def migrate(path: Path) -> int:
             'migrate: rebuild sessions',
             f"""
             PRAGMA foreign_keys=OFF;
+            PRAGMA legacy_alter_table=ON;
             ALTER TABLE sessions RENAME TO sessions_legacy;
             {SCHEMA}
             INSERT INTO sessions
@@ -648,6 +712,7 @@ def migrate(path: Path) -> int:
                    1, NULL, ended_at, cwd, transcript, workspace, project, goal, actor
             FROM sessions_legacy;
             DROP TABLE sessions_legacy;
+            PRAGMA legacy_alter_table=OFF;
             PRAGMA foreign_keys=ON;
             """,
         )

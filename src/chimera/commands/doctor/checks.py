@@ -8,7 +8,13 @@ from giterator import GitError
 from loguru import logger
 
 from chimera.agents import BRANCHED
-from chimera.archive import Archive, migrate, needs_migration
+from chimera.archive import (
+    Archive,
+    events_orphaned,
+    migrate,
+    needs_migration,
+    repair_events,
+)
 from chimera.commands.doctor.core import (
     Check,
     Exclusions,
@@ -303,19 +309,32 @@ class ArchiveSchemaCheck:
     goal worktree. Claims inferred from geography alone are dropped — geography never
     entitled a session to an address, and grandfathering them would leave rows the current
     code would refuse to write.
+
+    The check also catches an archive a *previous* rebuild left with an ``events`` table
+    referencing a table that is gone. That state is silent — the ``sessions`` columns look
+    current, so the schema itself reports healthy — while every append to the timeline
+    fails, which takes the hooks, the heartbeat and reconciliation down with it. Asking
+    the question is a schema read, so it costs nothing to keep asking long after the
+    rebuild that could cause it was fixed.
     """
 
     name = 'archive-schema'
 
     def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         path = workspace / 'state' / 'archive.db'
-        if not needs_migration(path):
-            return
-        message = f'{path} predates the trimmed session schema'
-        fixing = fix and not exclude.matches(self.name, message)
-        if fixing:
-            logger.bind(path=str(path), sessions=migrate(path)).info('doctor: archive migrated')
-        yield Finding(self.name, message, resolved=fixing, fixable=True)
+        for broken, message, repair, counting in (
+            (needs_migration, 'predates the trimmed session schema', migrate, 'sessions'),
+            (events_orphaned, 'has events pointing at a dropped table', repair_events, 'events'),
+        ):
+            if not broken(path):
+                continue
+            detail = f'{path} {message}'
+            fixing = fix and not exclude.matches(self.name, detail)
+            if fixing:
+                logger.bind(path=str(path), **{counting: repair(path)}).info(
+                    'doctor: archive rebuilt'
+                )
+            yield Finding(self.name, detail, resolved=fixing, fixable=True)
 
 
 class HarnessContractCheck:

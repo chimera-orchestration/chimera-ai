@@ -7,7 +7,16 @@ from threading import Barrier, Thread
 import pytest
 from testfixtures import ShouldRaise, TempDir, compare
 
-from chimera.archive import Archive, ArchiveSession, Event, migrate, needs_migration
+from chimera.archive import (
+    ACTIVE,
+    SCHEMA,
+    Archive,
+    ArchiveSession,
+    Event,
+    migrate,
+    needs_migration,
+    repair_events,
+)
 from chimera.config import UserError
 
 NOON = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
@@ -581,6 +590,31 @@ _LEGACY_ROW = (
 )
 
 
+def orphan_events(path: Path) -> None:
+    """An archive whose ``events`` reference a table that has been dropped.
+
+    Built the way the breakage actually happened — a rename that rewrites the referencing
+    key, then a drop — rather than by hand-writing the wrecked schema, so the fixture
+    still reproduces the state if SQLite's rename semantics change again.
+    """
+    with Archive.open(path) as store:
+        store.record_session(make_session(native_id='a'))
+        store.record_event(Event(at=NOON, kind='startup', platform='claude', native_id='a'))
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            f"""
+            PRAGMA foreign_keys=OFF;
+            ALTER TABLE sessions RENAME TO sessions_legacy;
+            {SCHEMA}
+            INSERT INTO sessions SELECT * FROM sessions_legacy;
+            DROP TABLE sessions_legacy;
+            """
+        )
+    finally:
+        connection.close()
+
+
 def legacy_archive(path: Path, rows: Sequence[tuple[object, ...]] = ()) -> None:
     """A database on the pre-trim schema, carrying ``rows`` of legacy sessions."""
     connection = sqlite3.connect(path)
@@ -703,6 +737,34 @@ class TestMigration:
         migrate(db_path)
         with Archive.open(db_path) as store:
             compare([e.kind for e in store.events()], expected=['startup'])
+
+    def test_a_migrated_archive_can_still_be_written_to(self, db_path: Path) -> None:
+        # the events must survive the rebuild *writable*, not merely present: the rename
+        # rewrites their foreign key to follow it, and an archive left pointing at the
+        # dropped table takes every hook, heartbeat and reconcile down with it
+        legacy_archive(db_path, [legacy_row('a')])
+        migrate(db_path)
+        with Archive.open(db_path) as store:
+            store.record_event(Event(at=NOON, kind=ACTIVE, platform='claude', native_id='a'))
+            compare([e.kind for e in store.events()], expected=[ACTIVE])
+
+    def test_repairing_a_healthy_archive_does_nothing(self, db_path: Path) -> None:
+        Archive.open(db_path).close()
+        compare(repair_events(db_path), expected=0)
+
+    def test_no_reference_to_the_dropped_table_survives(self, db_path: Path) -> None:
+        # what made the break invisible: the sessions columns look current, so the schema
+        # check sees nothing while events still name a table that is gone
+        legacy_archive(db_path, [legacy_row('a')])
+        migrate(db_path)
+        connection = sqlite3.connect(db_path)
+        try:
+            schema = ' '.join(
+                row[0] for row in connection.execute('SELECT sql FROM sqlite_master') if row[0]
+            )
+        finally:
+            connection.close()
+        assert 'sessions_legacy' not in schema
 
     def test_the_search_machinery_is_gone(self, db_path: Path) -> None:
         legacy_archive(db_path)
