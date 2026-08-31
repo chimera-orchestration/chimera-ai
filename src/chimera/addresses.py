@@ -116,6 +116,11 @@ class Actor(Address):
     actor: str
 
     def __post_init__(self) -> None:
+        # in the constructor rather than in `parse`, so a programmatic Actor is refused
+        # too — this is the one shape whose third segment isn't a fixed literal, and so
+        # the only one nothing else was checking
+        if not self.actor:
+            raise ValueError('an actor address needs an actor')
         if self.actor in RESERVED_ACTORS:
             raise ValueError(f'{self.actor!r} is a reserved role name, not a valid actor')
 

@@ -62,12 +62,23 @@ class TestParse:
             with ShouldRaise(ValueError(f'{actor!r} is a reserved role name, not a valid actor')):
                 Address.parse(f'chimera@fix-tests@{actor}')
 
+    def test_rejects_a_missing_actor(self) -> None:
+        # the actor arm is the only one whose last segment isn't a fixed literal, so it
+        # was the only one nothing checked — `chimera@fix-tests@` parsed and round-tripped,
+        # which is enough for `ch msg send` to mint a mailbox no session can ever read
+        with ShouldRaise(ValueError('an actor address needs an actor')):
+            Address.parse('chimera@fix-tests@')
+
 
 class TestActorConstruction:
     def test_rejects_a_reserved_actor_name(self) -> None:
         for actor in ('manager', 'captain'):
             with ShouldRaise(ValueError(f'{actor!r} is a reserved role name, not a valid actor')):
                 Actor('chimera', 'fix-tests', actor)
+
+    def test_rejects_a_missing_actor(self) -> None:
+        with ShouldRaise(ValueError('an actor address needs an actor')):
+            Actor('chimera', 'fix-tests', '')
 
 
 class TestFromScope:
