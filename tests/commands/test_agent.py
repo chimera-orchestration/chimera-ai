@@ -181,6 +181,22 @@ def test_resume_runs_claude_resume_in_the_foreground_by_default(
     compare(calls, expected=[(expected, worktree)])
 
 
+def test_resume_records_no_launch_for_a_passer_by_to_claim(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # a resume takes nothing new — the address is already on the session's own row. An
+    # unconsumed launch record is not inert: it waits out its window for whatever cold
+    # starts in the directory next, handing that stranger this agent's address and mail
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    worktree = tmpdir.makedir('ws/proj/worktrees/g@agent')
+    _stub(replace)
+    resume(worktree, 'proj@g@agent')
+    with Archive.open(ws / 'state' / 'archive.db') as store:
+        assert store.claim_launch('claude', worktree, now=datetime.now(timezone.utc)) is None
+
+
 def test_resume_makes_bypass_reachable_when_dangerous(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
@@ -588,7 +604,7 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
                 'actor': 'agent',
                 'message': 'agent resume: archived session',
             },
-            {**launching(claude_cmd, expected), 'goal': 'g'},
+            # no `agent: launching` — a resume records no launch to be claimed
             {**launched(claude_cmd, expected), 'goal': 'g'},
             {'level': 'INFO', 'command': 'agent resume', 'goal': 'g', 'phase': 'end'},
         ],
@@ -1644,25 +1660,25 @@ class TestOccupants:
         replace.in_environ('CHIMERA_WORKSPACE', str(ws))
         return ws
 
-    def _archived(self, ws: Path, native_id: str, cwd: Path, **kw: Any) -> None:
+    def _archived(self, ws: Path, native_id: str, cwd: Path, hour: int = 12, **kw: Any) -> None:
         with Archive.open(ws / 'state' / 'archive.db') as store:
             store.record_session(
                 ArchiveSession(
                     platform='claude',
                     native_id=native_id,
                     status='startup',
-                    started_at=datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc),
+                    started_at=datetime(2026, 6, 15, hour, 0, tzinfo=timezone.utc),
                     cwd=cwd,
                     workspace=ws.name,
                     **kw,
                 )
             )
 
-    def _branch(self, ws: Path, native_id: str) -> None:
+    def _branch(self, ws: Path, native_id: str, hour: int = 13) -> None:
         with Archive.open(ws / 'state' / 'archive.db') as store:
             store.record_event(
                 Event(
-                    at=datetime(2026, 6, 15, 13, 0, tzinfo=timezone.utc),
+                    at=datetime(2026, 6, 15, hour, 0, tzinfo=timezone.utc),
                     kind='branched',
                     platform='claude',
                     native_id=native_id,
@@ -1706,6 +1722,42 @@ class TestOccupants:
             Claude.live, lambda self, cwd=None: [_agent_at(wt, 'husk'), _agent_at(wt, 'fork')]
         )
         compare([s.id for s in occupants(wt)], expected=['fork'])  # the fork is the live one
+
+    def test_a_dead_forks_husk_never_excuses_a_later_session(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # the guard's whole point: one backgrounded chat, long since over, must not leave
+        # the worktree permanently unguarded for every session that follows
+        ws = self._workspace(tmpdir, replace)
+        wt = tmpdir.makedir('ws/wt')
+        ended = datetime(2026, 6, 15, 14, 0, tzinfo=timezone.utc)
+        self._archived(ws, 'husk', wt, ended_at=ended)
+        self._archived(ws, 'fork', wt, hour=13, ended_at=ended)
+        self._branch(ws, 'fork')
+        self._archived(ws, 'later', wt, hour=15)
+        replace.on_class(Claude.live, lambda self, cwd=None: [_agent_at(wt, 'later')])
+        compare([s.id for s in occupants(wt)], expected=['later'])
+
+    def test_a_session_started_after_the_fork_is_not_its_husk(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # the husk is the fork's own presumed parent — the newest session open when it
+        # forked — never simply the newest session in the directory now
+        ws = self._workspace(tmpdir, replace)
+        wt = tmpdir.makedir('ws/wt')
+        self._archived(ws, 'husk', wt)
+        self._archived(ws, 'fork', wt, hour=13)
+        self._branch(ws, 'fork')
+        self._archived(ws, 'newcomer', wt, hour=14)
+        replace.on_class(
+            Claude.live,
+            lambda self, cwd=None: [
+                _agent_at(wt, 'husk'),
+                _agent_at(wt, 'fork'),
+                _agent_at(wt, 'newcomer'),
+            ],
+        )
+        compare(sorted(s.id for s in occupants(wt)), expected=['fork', 'newcomer'])
 
     def test_a_session_never_finds_itself(self, tmpdir: TempDir, replace: Replacer) -> None:
         ws = self._workspace(tmpdir, replace)

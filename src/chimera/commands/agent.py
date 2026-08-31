@@ -91,6 +91,30 @@ def refuse_restricted(cwd: Path, spec: AgentSpec, extra: Sequence[str]) -> None:
         raise UserError(f'{", ".join(hit)}: not available when chimera is driven by an AI agent')
 
 
+def _husks(open_rows: dict[str, ArchiveSession], forks: Sequence[str | None]) -> set[str]:
+    """The still-open sessions each still-open fork left frozen behind it.
+
+    The same presumption ``hook.capture.inherited`` makes when an address crosses a bridge
+    — the newest session open in that cwd — but evaluated at the fork's own start rather
+    than now, so a session that arrived *after* the fork is never mistaken for what it
+    forked from. Both sides must still be open: a fork and husk that are long dead say
+    nothing about who is working in the directory today.
+    """
+    husks: set[str] = set()
+    for native_id in forks:
+        fork = open_rows[native_id or '']
+        parents = [
+            row
+            for row in open_rows.values()
+            if row.cwd == fork.cwd
+            and row.native_id != fork.native_id
+            and row.started_at <= fork.started_at
+        ]
+        if parents:
+            husks.add(max(parents, key=lambda row: row.started_at).native_id)
+    return husks
+
+
 def occupants(worktree: Path, excluding: str | None = None) -> list[AgentSession]:
     """Who is really *working* in ``worktree`` — the one definition, for every consumer.
 
@@ -103,8 +127,11 @@ def occupants(worktree: Path, excluding: str | None = None) -> list[AgentSession
       that is what's consulted — not a re-derivation here.
     - **husks.** Backgrounding a session leaves the parent alive but conversationally
       frozen, registry-``busy`` until its terminal wrapper exits — observed for as long as
-      35 hours. A later ``branched`` session in the same cwd is the marker that a fork
-      happened, and the husk it left is nobody's occupant.
+      35 hours. A ``branched`` session is the marker that a fork happened, and the husk it
+      left is nobody's occupant — but the husk is *that fork's own presumed parent*, never
+      merely a neighbour. Asking only whether the directory had ever seen a fork excused
+      every later session in it forever, which silently disarmed the guard for any worktree
+      a chat had ever been backgrounded in.
     - **me.** A session asking whether the worktree is free must not find itself.
 
     Anything unrecognised counts, deliberately: refusing to launch beside a session that
@@ -120,12 +147,15 @@ def occupants(worktree: Path, excluding: str | None = None) -> list[AgentSession
         return [s for s in sessions if s.id != excluding]
     with archive(workspace) as store:
         rows = {row.native_id: row for row in store.sessions(workspace=workspace.name)}
-        branched = {
+        open_rows = {
+            row.native_id: row for row in store.sessions(workspace=workspace.name, active=True)
+        }
+        forks = [
             event.native_id
             for event in store.events()
-            if event.kind == BRANCHED and rows.get(event.native_id or '') is not None
-        }
-    forked_from = {row.cwd for native_id in branched if (row := rows.get(native_id)) is not None}
+            if event.kind == BRANCHED and event.native_id in open_rows
+        ]
+    husks = _husks(open_rows, forks)
     keep: list[AgentSession] = []
     for session in sessions:
         if session.id == excluding:
@@ -136,7 +166,7 @@ def occupants(worktree: Path, excluding: str | None = None) -> list[AgentSession
                 'agent: not a conversation, not an occupant'
             )
             continue
-        if row is not None and row.cwd in forked_from and session.id not in branched:
+        if session.id in husks:
             logger.bind(session=session.id, cwd=str(worktree)).debug(
                 'agent: husk of a backgrounded session, not an occupant'
             )
@@ -302,10 +332,17 @@ def resume(
     id: str | None = None,
 ) -> None:
     """Revive ``spec``'s agent session — by archived ``id`` when the caller resolved
-    one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``)."""
+    one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``).
+
+    Deliberately records no launch. A resume takes nothing new: the address is already on
+    the session's own row and ``record_session`` coalesces it forward, which is why the
+    start hook's resume branch claims nothing either. A launch record written here would
+    simply go unconsumed — and an unconsumed claim is not inert, it waits out its window
+    for whatever cold-starts in the directory next, which is how a passer-by would come
+    to hold this agent's address and take its mail.
+    """
     refuse_restricted(worktree, spec, extra)
     refuse_occupied(worktree, dry)
-    dry(record_launch, worktree, name, spec)
     dry(
         spec.agent.resume,
         worktree,
