@@ -47,9 +47,14 @@ def _targets(path: Path) -> list[tuple[str, str, str | None]]:
 def _resolves(target: str, home: str, cls: str | None) -> bool:
     """Whether ``target`` names something that exists, the way a reader would read it.
 
-    Three ways, in the order Sphinx would try them: an absolute dotted path through any
-    importable module (ours or the stdlib's), then the enclosing class, then the module
-    the docstring lives in.
+    Three ways: an absolute dotted path through any importable module (ours or the
+    stdlib's), then the enclosing class, then the module the docstring lives in.
+
+    **Deliberately not what Sphinx would do.** Sphinx resolves against the *documented*
+    object inventory — a target resolves only if something documented it — so against a
+    project that autodocs nothing, a nitpicky build would reject all 150 of these rather
+    than the three that are wrong. This asks the weaker question that is actually useful
+    while nothing renders them: does the name refer to something that exists?
     """
     parts = target.lstrip('~').lstrip('.').split('.')
     for cut in range(len(parts), 0, -1):
@@ -80,7 +85,8 @@ def test_every_docstring_reference_resolves() -> None:
     # `sphinx.ext.autodoc` is enabled but no document uses it, so nothing renders these
     # docstrings and nothing has ever resolved a role in one — they read as links and are
     # decorative. This is what makes them true: it found `chimera.archive.Session` still
-    # named after the rename to ArchiveSession, and `_source` after it became source_branch.
+    # named after the rename to ArchiveSession, and `_source` after it became
+    # source_branch. It checks existence, not renderability — see `_resolves`.
     broken = [
         (str(path.relative_to(ROOT)), target)
         for path in sorted(ROOT.rglob('*.py'))
