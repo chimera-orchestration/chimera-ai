@@ -161,6 +161,17 @@ both are positional rather than trusting configuration:
 Clearing `$CHIMERA_WORKSPACE` does not cover this: identity resolution reads the archive on
 every `ch` invocation, and the walk-up finds the live workspace with the variable unset.
 
+**Nothing about the machine may decide a test's outcome.** The git-config pin in `happy.sh`
+was the first instance; the second was `Agent.available()`, which really does consult the
+PATH — so a developer's box (the suite often runs *inside* claude) answered *available* and
+CI, with nothing installed, answered *unavailable*. `reconcile` closes no rows and warns when
+a harness can't be consulted, so twenty-one lister tests passed locally and failed on push.
+`_stub_harness_binaries` (autouse) prepends a dir holding an inert stub per registered
+harness, pinning the answer to *available* everywhere — through the real `shutil.which`,
+not around it. A test wanting the other answer says so (`replace.in_environ('PATH', '')`).
+The stubs are only ever found, never run: `_no_real_harness` refuses the spawn. Anything
+else consulted off the PATH (`fblog`, `brew`) is stubbed at `shutil.which` by its own tests.
+
 **Loguru's default `extra` is process-global and nothing else resets it.**
 `chimera.logging.configure` binds `caller`/`seat` with `logger.configure(extra=…)`, which
 `LogCapture` does *not* restore — its loguru source saves and restores the handlers and the

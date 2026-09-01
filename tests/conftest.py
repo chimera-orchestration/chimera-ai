@@ -1,3 +1,4 @@
+import os
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -55,6 +56,36 @@ def _no_real_harness(replace: Replacer) -> None:
     # would otherwise be sent looking for tests.conftest.guarded
     guarded.__module__, guarded.__name__ = real.__module__, real.__name__
     replace.in_module(subprocess.Popen, guarded)
+
+
+@pytest.fixture(scope='session')
+def _harness_stubs() -> Iterator[Path]:
+    with TempDir() as d:
+        for name in AGENTS:
+            d.write(name, '#!/bin/sh\necho "the suite must never run a harness" >&2\nexit 1\n')
+            (d / name).chmod(0o755)
+        yield d.path
+
+
+@pytest.fixture(autouse=True)
+def _stub_harness_binaries(_harness_stubs: Path, replace: Replacer) -> None:
+    """Decide for the suite whether a harness binary exists, rather than asking the machine.
+
+    ``Agent.available`` really does consult the PATH, so without this every test that
+    reaches it answers differently on a developer's box (``claude`` installed — the suite
+    often runs *inside* it) than in CI (nothing installed). That difference is not
+    cosmetic: :func:`chimera.commands.agent.reconcile` refuses to close a single row when a
+    harness can't be consulted, and says so at WARNING, so a whole family of lister tests
+    passed locally and failed on a machine that had never seen claude.
+
+    Prepending a stub dir pins the answer to *available* in both places — the assumption
+    the suite is written against — and does it through the mechanism under test rather than
+    around it, so ``available`` keeps running its real ``shutil.which``. A test wanting the
+    other answer still says so (``replace.in_environ('PATH', '')``). The stubs are only ever
+    *found*, never run: :func:`_no_real_harness` refuses the spawn, and they exit non-zero
+    if anything ever gets past it.
+    """
+    replace.in_environ('PATH', os.pathsep.join([str(_harness_stubs), os.environ['PATH']]))
 
 
 @pytest.fixture(autouse=True)

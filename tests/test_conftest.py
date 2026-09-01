@@ -1,8 +1,10 @@
+import shutil
 import subprocess
 from pathlib import Path
 
-from testfixtures import ShouldRaise, TempDir, compare
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
+from chimera.agents.claude import Claude
 from chimera.archive import Archive
 
 
@@ -40,3 +42,20 @@ class TestNoLiveArchive:
 
     def test_allows_this_tests_own(self, tmpdir: TempDir) -> None:
         Archive.open(tmpdir.path / 'state' / 'archive.db').close()
+
+
+class TestStubHarnessBinaries:
+    # the third containment: whether a harness is installed is the suite's decision, not the
+    # machine's. See agent-docs/unit-and-functional-testing.md.
+
+    def test_a_harness_is_available_wherever_the_suite_runs(self) -> None:
+        assert Claude().available()
+
+    def test_the_machine_s_own_binary_is_never_the_one_found(self, _harness_stubs: Path) -> None:
+        found = shutil.which('claude')
+        assert found is not None
+        compare(Path(found).parent, expected=_harness_stubs)
+
+    def test_a_test_can_still_take_the_harness_away(self, replace: Replacer) -> None:
+        replace.in_environ('PATH', '')
+        assert not Claude().available()
