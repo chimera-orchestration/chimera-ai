@@ -524,12 +524,23 @@ class Archive:
         both take the same address — the second finds nothing and stays unaddressed,
         which is the safe way to be wrong.
 
+        **One statement is what makes that true.** Selecting the row and then deleting it
+        left a window between the two in which another session could select the same row,
+        and both would come away holding it — the connection is in autocommit, so nothing
+        spanned the pair, and WAL plus a busy timeout serialise individual statements
+        only. ``DELETE … RETURNING`` decides and consumes in a single write, so a claim is
+        exactly-once by construction rather than by luck. The race is an ordinary one:
+        sessions cluster in a directory, a bridge arriving alongside the browser session
+        that accompanies it and whatever was being launched.
+
         Only launches within :data:`LAUNCH_WINDOW` of ``now`` count. A launch that never
         produced a session (the harness binary was missing, the user hit Ctrl-C) would
         otherwise sit there indefinitely, waiting to hand its address to whatever started
         in that directory next — granting a claim on no evidence, which is the one thing
         this design exists to prevent. Stale records are swept on the way past.
         """
+        # the sweep stays separate: it removes only records already past LAUNCH_WINDOW,
+        # which no correct claimant would take, so losing this race costs nothing
         self._db.execute(
             'sweep_launches',
             'DELETE FROM pending_launches WHERE platform=? AND cwd=? AND at < ?',
@@ -537,15 +548,14 @@ class Archive:
         )
         row = self._db.execute(
             'claim_launch',
-            'SELECT rowid, * FROM pending_launches WHERE platform=? AND cwd=? '
-            'ORDER BY at DESC, rowid DESC LIMIT 1',
+            'DELETE FROM pending_launches WHERE rowid = ('
+            '    SELECT rowid FROM pending_launches WHERE platform=? AND cwd=?'
+            '    ORDER BY at DESC, rowid DESC LIMIT 1'
+            ') RETURNING *',
             (platform, str(cwd)),
         ).fetchone()
         if row is None:
             return None
-        self._db.execute(
-            'claim_launch: consume', 'DELETE FROM pending_launches WHERE rowid=?', (row['rowid'],)
-        )
         return PendingLaunch(
             at=datetime.fromisoformat(row['at']),
             platform=row['platform'],

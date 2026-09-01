@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import Barrier, Thread
 
 import pytest
-from testfixtures import ShouldRaise, TempDir, compare
+from testfixtures import Replacer, ShouldRaise, TempDir, compare
 
 from chimera.addresses import Address, Captain
 from chimera.archive import (
@@ -14,7 +14,9 @@ from chimera.archive import (
     Archive,
     ArchiveSession,
     Event,
+    LAUNCH_WINDOW,
     LEGACY_COLUMNS,
+    PendingLaunch,
     back_up,
     events_orphaned,
     migrate,
@@ -22,6 +24,7 @@ from chimera.archive import (
     repair_events,
 )
 from chimera.config import UserError
+from chimera.sqlite import Database, Params
 
 NOON = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
 
@@ -533,6 +536,63 @@ def test_many_agents_write_the_same_archive_concurrently(db_path: Path) -> None:
 
     with Archive.open(db_path) as archive:
         assert len(archive.sessions(goal='shared')) == count  # every write landed, none lost
+
+
+def _pending(cwd: Path, at: datetime = NOON, address: str = 'proj@g@agent') -> PendingLaunch:
+    return PendingLaunch(at=at, platform='claude', cwd=cwd, address=address, model=None)
+
+
+class TestClaimLaunch:
+    # the launch record is the whole of a session's entitlement to an address, so claiming
+    # one must be exactly-once — see `chimera.commands.hook.capture`
+
+    def test_the_pending_launch_comes_back_and_is_consumed(self, archive: Archive) -> None:
+        archive.record_launch(_pending(Path('/w')))
+        claimed = archive.claim_launch('claude', Path('/w'), now=NOON)
+        compare(claimed, expected=_pending(Path('/w')))
+        assert archive.claim_launch('claude', Path('/w'), now=NOON) is None  # consumed
+
+    def test_the_newest_launch_wins(self, archive: Archive) -> None:
+        archive.record_launch(_pending(Path('/w'), address='older@g@agent'))
+        archive.record_launch(_pending(Path('/w'), at=NOON + timedelta(seconds=30)))
+        claimed = archive.claim_launch('claude', Path('/w'), now=NOON + timedelta(seconds=30))
+        assert claimed is not None
+        compare(claimed.address, expected='proj@g@agent')
+
+    def test_a_launch_that_never_produced_a_session_expires(self, archive: Archive) -> None:
+        # else it lies in wait to hand its address to whatever starts there next
+        archive.record_launch(_pending(Path('/w')))
+        past_it = NOON + LAUNCH_WINDOW + timedelta(seconds=1)  # the window's edge is exclusive
+        assert archive.claim_launch('claude', Path('/w'), now=past_it) is None
+
+    def test_a_launch_in_another_directory_is_not_claimed(self, archive: Archive) -> None:
+        archive.record_launch(_pending(Path('/w')))
+        assert archive.claim_launch('claude', Path('/elsewhere'), now=NOON) is None
+
+    def test_the_claim_is_a_single_statement(self, archive: Archive, replace: Replacer) -> None:
+        """No window exists in which a second session could take the same row.
+
+        Asserted as the *shape* of the claim rather than by racing two connections,
+        because the mechanism is the guarantee: selecting a row and then deleting it left
+        a gap between two statements, and the connection is in autocommit, so nothing
+        spanned it. One statement cannot be interleaved.
+
+        Racing it for real is not merely flaky, it deadlocks — a second claim issued while
+        the first is in flight blocks on the write lock the single statement now holds,
+        which is the same fact from the other side.
+        """
+        archive.record_launch(_pending(Path('/w')))
+        issued: list[str] = []
+        real = Database.execute
+
+        def recording(self: Database, op: str, sql: str, params: Params = ()) -> sqlite3.Cursor:
+            issued.append(op)
+            return real(self, op, sql, params)
+
+        replace.on_class(Database.execute, recording)
+        assert archive.claim_launch('claude', Path('/w'), now=NOON) is not None
+        # a sweep of the expired, then one statement that decides *and* consumes
+        compare(issued, expected=['sweep_launches', 'claim_launch'])
 
 
 # --- migration off the pre-trim schema ----------------------------------------------
