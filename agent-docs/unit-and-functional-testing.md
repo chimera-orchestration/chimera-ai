@@ -8,7 +8,61 @@
   `hooks/`, so the hook never fires and the test quietly asserts nothing
 - `happy.sh` runs pytest with `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null` — a repo
   built or cloned in a test must never depend on the machine's own git identity/config (a dev
-  machine has one, CI doesn't); use `Repo.make`/`Repo.clone` below, which always configure one
+  machine has one, CI doesn't); use `Repo.make`/`Repo.clone` below, which always configure one.
+  The first instance of *The machine never decides a test* (next section), which is the rule
+
+## The machine never decides a test
+
+A test's outcome must come from what the test set up. Whatever the *host* contributes — what
+is installed, what is configured, who is logged in, what the interpreter seeded — is not an
+input the test chose. And the box we develop on is the least representative machine there is:
+the suite runs *inside* claude, with the user's git identity, their `~/.claude/settings.json`
+and their PATH. CI is what an empty machine looks like, which makes it the oracle. Green
+locally proves nothing until it is green there.
+
+This is the failure this project keeps repeating. Three of the four CI breaks on `main` were
+this and nothing else, plus a standing set held off by hand — each fixed where it was found,
+each lesson written into a different corner, the class never named, which is why the latest
+one looked new:
+
+| when | what the host decided | fix |
+|---|---|---|
+| 2026-07-16 | the machine's **git identity** — a dev box has one, CI has none, so `git commit` exited 128 | `happy.sh` pins `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` to `/dev/null`; `Repo.make`/`Repo.clone` always configure a user |
+| 2026-07-31 | **`PYTHONHASHSEED`** — a set-vs-frozenset `compare` fell back to the order-sensitive comparer, so it passed or failed on the seed | coerce both sides to one container type (see *Assertions*) |
+| 2026-09-01 | **`claude` on the PATH** — `Agent.available()` really consults it, and `reconcile` warns and closes nothing when a harness can't be asked, so 21 lister tests passed locally and failed on push | `_stub_harness_binaries`, `_no_host_lookups` |
+| ongoing | **`fblog`, this repo's own git state and network, `~/.claude/settings.json`** | a hand-kept `_no_chimera_checkout` fixture in `tests/commands/doctor/test_doctor.py` |
+| 2026-09-01 | the host's **bash version** — typer probes it before emitting a completion script and branches on it (this box ships 3.2, a runner 5.x). Found by `_no_host_lookups` on the run that introduced it, not by CI | the test neutralises typer's probe |
+
+The table is the point, and it is append-only: a new instance goes in a **new row here**,
+never in a fresh paragraph elsewhere. Four write-ups in four corners is what let the class
+stay invisible while every individual instance was understood perfectly well.
+
+The test to apply while writing one: **would this answer differently on a machine with
+nothing installed and nobody logged in?** If yes, the test must supply the answer itself.
+
+**A new host dependency earns a positional guard in `tests/conftest.py`, never a stub in the
+one test file that noticed.** That last row is how the third instance got through: the
+awareness existed — as a comment, in one file, neutralising four host facts by hand — and
+everything outside that file stayed exposed. `Agent.available()` was outside it. A guard in
+conftest cannot be walked past; a local stub protects only its own file.
+
+**Guarded today** (all autouse in `tests/conftest.py` unless noted):
+
+- `_no_host_lookups` — `shutil.which` refuses any name the suite has not decided about, so
+  "is X installed" can never be answered by the machine. A test that means to decide it
+  stubs `shutil.which` itself, as the `fblog`/`brew` tests do.
+- `_stub_harness_binaries` — prepends a dir holding an inert stub per registered harness, so
+  `available()` answers *available* everywhere, through the real `shutil.which` rather than
+  around it. A test wanting the other answer says so: `replace.in_environ('PATH', '')`. The
+  stubs are only ever found, never run — `_no_real_harness` refuses the spawn, and they exit
+  non-zero if anything ever gets past it.
+- `_no_real_harness`, `_no_live_archive`, `_clear_workspace_env` — see *Mocking* below.
+- git config — pinned by `happy.sh`, not a fixture, because it is the environment pytest
+  inherits rather than anything a fixture can reach.
+
+**Not guarded, and so still live hazards**: `Path.home()` and anything read out of it, and
+the network. Both are neutralised by hand in the doctor tests and nowhere else — which is
+precisely the shape the row above describes, recorded here rather than presumed safe.
 
 ## Bugs and regressions: the test comes first
 
@@ -60,7 +114,8 @@ Two tools, split by what the check *is*:
     `frozenset` share none, so it falls back to the *order-sensitive* generator comparer — and
     since pydantic is installed (it registers `ignore_eq`, which blocks the `x == y`
     shortcut for containers), that fallback is always reached. Two sets with identical members
-    then pass or fail on `PYTHONHASHSEED` alone. Coerce one side: `expected=set(FROZEN_CONST)`.
+    then pass or fail on `PYTHONHASHSEED` alone — the machine deciding a test (above). Coerce
+    one side: `expected=set(FROZEN_CONST)`.
 - **A boolean fact → plain `assert`**: membership, existence, identity, inequality and
   predicates — `assert 'x' in text`, `assert not path.exists()`, `assert result is None`,
   `assert a != b`, `assert is_merged(git, ref, base)`.
@@ -148,7 +203,8 @@ attribute, a later `in_module` resolves to the *stand-in's* defining module and 
 a conftest guard — sets `stand_in.__module__, stand_in.__name__ = real.__module__, real.__name__`.
 
 **Never reach the user's live workspace.** Two autouse guards in `tests/conftest.py`, and
-both are positional rather than trusting configuration:
+both are positional rather than trusting configuration (the host-state guards above are the
+same bargain, for a different question):
 
 - `_no_real_harness` refuses any `Popen` naming a registered harness (below).
 - `_no_live_archive` refuses any `Archive.open` outside *this test's own* `tmpdir`. It depends
@@ -160,17 +216,6 @@ both are positional rather than trusting configuration:
 
 Clearing `$CHIMERA_WORKSPACE` does not cover this: identity resolution reads the archive on
 every `ch` invocation, and the walk-up finds the live workspace with the variable unset.
-
-**Nothing about the machine may decide a test's outcome.** The git-config pin in `happy.sh`
-was the first instance; the second was `Agent.available()`, which really does consult the
-PATH — so a developer's box (the suite often runs *inside* claude) answered *available* and
-CI, with nothing installed, answered *unavailable*. `reconcile` closes no rows and warns when
-a harness can't be consulted, so twenty-one lister tests passed locally and failed on push.
-`_stub_harness_binaries` (autouse) prepends a dir holding an inert stub per registered
-harness, pinning the answer to *available* everywhere — through the real `shutil.which`,
-not around it. A test wanting the other answer says so (`replace.in_environ('PATH', '')`).
-The stubs are only ever found, never run: `_no_real_harness` refuses the spawn. Anything
-else consulted off the PATH (`fblog`, `brew`) is stubbed at `shutil.which` by its own tests.
 
 **Loguru's default `extra` is process-global and nothing else resets it.**
 `chimera.logging.configure` binds `caller`/`seat` with `logger.configure(extra=…)`, which

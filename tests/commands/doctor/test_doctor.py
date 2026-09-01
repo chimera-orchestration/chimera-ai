@@ -37,7 +37,7 @@ def _no_chimera_checkout(replace: Replacer) -> None:
     """
     replace.in_module(doctor_checks.chimera_repo, lambda: None)
     # same deal for the fblog check: whether the binary is on this machine's PATH is
-    # not these tests' business
+    # not these tests' business (the conftest guard refuses the lookup; this decides it)
     replace.in_module(doctor_checks.fblog_installed, lambda: True)
     # and claude-hooks/bg-isolation read/write the user's global ~/.claude/settings.json —
     # likewise not these tests' business

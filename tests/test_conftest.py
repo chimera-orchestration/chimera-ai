@@ -59,3 +59,22 @@ class TestStubHarnessBinaries:
     def test_a_test_can_still_take_the_harness_away(self, replace: Replacer) -> None:
         replace.in_environ('PATH', '')
         assert not Claude().available()
+
+
+class TestNoHostLookups:
+    # the class the three containments above all serve: what the machine has installed is
+    # never an input. See agent-docs/unit-and-functional-testing.md.
+
+    def test_refuses_a_lookup_the_suite_has_not_decided(self) -> None:
+        with ShouldRaise(AssertionError) as raised:
+            shutil.which('fblog')
+        assert 'asked the machine what it has installed' in str(raised.raised)
+
+    def test_says_how_to_decide_it_instead(self) -> None:
+        with ShouldRaise(AssertionError) as raised:
+            shutil.which('brew')
+        assert 'replace.in_module(shutil.which' in str(raised.raised)
+
+    def test_a_test_may_still_decide_it_itself(self, replace: Replacer) -> None:
+        replace.in_module(shutil.which, lambda name: f'/opt/{name}')
+        compare(shutil.which('fblog'), expected='/opt/fblog')

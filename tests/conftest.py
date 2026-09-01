@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -56,6 +57,39 @@ def _no_real_harness(replace: Replacer) -> None:
     # would otherwise be sent looking for tests.conftest.guarded
     guarded.__module__, guarded.__name__ = real.__module__, real.__name__
     replace.in_module(subprocess.Popen, guarded)
+
+
+@pytest.fixture(autouse=True)
+def _no_host_lookups(replace: Replacer) -> None:
+    """Refuse to let a test ask the machine what is installed on it.
+
+    ``shutil.which`` is the one chokepoint for "does this box have X", and the answer differs
+    between a developer's machine and CI by construction — so a test that consults it has
+    handed its outcome to the host (see ``agent-docs/unit-and-functional-testing.md``, *The
+    machine never decides a test*). That class has broken CI three times, each time found
+    after the push, because the rule lived in prose and in a stub local to whichever file had
+    last been bitten by it.
+
+    A registered harness is the one name the suite has decided about — :func:`_harness_stubs`
+    puts it on the PATH — so it passes through to the real lookup. Every other name raises
+    here, at the call, naming what to do instead: a test that means to decide the answer
+    replaces ``shutil.which`` itself, as the ``fblog``/``brew`` tests do.
+    """
+    real = shutil.which
+
+    def guarded(cmd: Any, *rest: Any, **kw: Any) -> Any:
+        if str(cmd) not in AGENTS:
+            raise AssertionError(
+                f'a test asked the machine what it has installed: shutil.which({cmd!r})\n'
+                'the host is not an input a test may take — decide the answer in the test '
+                "(replace.in_module(shutil.which, ...)), or, if every test needs it decided, "
+                'guard it in conftest beside this one'
+            )
+        return real(cmd, *rest, **kw)
+
+    # the stand-in must answer to the name it replaces, or a later in_module can't find it
+    guarded.__module__, guarded.__name__ = real.__module__, real.__name__
+    replace.in_module(shutil.which, guarded)
 
 
 @pytest.fixture(scope='session')

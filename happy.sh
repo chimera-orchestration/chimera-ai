@@ -5,7 +5,8 @@ uv run ruff check src tests
 uv run ruff format --check src tests
 uv run ty check src tests
 
-# tests must not depend on this machine's git config — CI has none
+# tests must not depend on this machine's git config — CI has none. The first instance of
+# AGENTS.md's 'The machine never decides a test'; the rest are guarded in tests/conftest.py
 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
     uv run pytest --cov --cov-fail-under=100 tests/ docs/ agent-docs/
 
