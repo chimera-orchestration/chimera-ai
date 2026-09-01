@@ -11,12 +11,14 @@ from loguru import logger
 from chimera.agents import BRANCHED
 
 from chimera.archive import (
+    archive,
     Archive,
     events_orphaned,
     migrate,
     needs_migration,
     repair_events,
 )
+from chimera.commands.agent import agents, reconcile
 from chimera.commands.doctor.core import (
     Check,
     Exclusions,
@@ -363,6 +365,46 @@ class ArchiveSchemaCheck:
                     'doctor: archive rebuilt'
                 )
             yield Finding(self.name, detail, resolved=fixing, fixable=True)
+
+
+class OpenSessionCheck:
+    """Sessions the archive still shows open that no harness reports running.
+
+    A session that dies without its end hook firing — killed, crashed, its machine
+    rebooted — stays open forever, and an open row outranks the closed ones a resume
+    chooses between. :func:`~chimera.commands.agent.reconcile` fixes exactly this, but
+    only ever ran as a side effect of a *lister*: undiscoverable, and silently skipped by
+    anyone who reaches for ``ch doctor`` when something looks wrong. On a real workspace
+    that left 57 rows of 271 open, 50 of them long dead. Repair belongs in the repair
+    command.
+
+    ``--fix`` closes them, through the same machinery and with the same refusal: a
+    harness that cannot be consulted is not a harness reporting nothing, so with
+    ``claude`` off the PATH this closes nothing rather than declaring the machine empty.
+    Reported but never fixed alongside them are rows whose transcript the harness has
+    since pruned — unresumable, but that is claude's retention talking, not damage, and
+    nothing here can or should undo it.
+    """
+
+    name = 'open-sessions'
+
+    def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
+        path = workspace / 'state' / 'archive.db'
+        if not path.exists() or needs_migration(path) or events_orphaned(path):
+            return  # the schema checks above own this; nothing here can read it yet
+        listing = agents()
+        with archive(workspace) as store:
+            live = {session.id for session in listing}
+            open_rows = [row for row in store.sessions(active=True) if row.native_id not in live]
+        if not open_rows:
+            return
+        message = f'{len(open_rows)} archived sessions are open that no harness reports'
+        fixing = fix and not exclude.matches(self.name, message)
+        # resolved by what reconcile *did*, never by having called it: it declines when a
+        # harness cannot be consulted, and a check reporting a repair it did not make is
+        # worse than one reporting none
+        closed = reconcile(workspace, listing) if fixing else []
+        yield Finding(self.name, message, resolved=len(closed) == len(open_rows), fixable=True)
 
 
 class HarnessContractCheck:
@@ -1148,6 +1190,7 @@ CHECKS: tuple[Check, ...] = (
     RuntimeStateDirCheck(),
     ArchiveSchemaCheck(),
     HarnessContractCheck(),
+    OpenSessionCheck(),
     StaleHumanWorktreeCheck(),
     InertBranchCheck(),
     LegacyWorktreeSeparatorCheck(),

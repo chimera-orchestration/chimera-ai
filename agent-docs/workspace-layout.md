@@ -347,6 +347,16 @@ add/retire via the `CHECKS` tuple). Current checks:
   fixable — each finding says a harness changed under us, which is a human's to read. Each run
   logs how many sessions it checked and every harness version seen, so a build this doc has
   never validated is visible too
+- **open-sessions** — no archived session is still marked open that no harness reports
+  running. A session killed, crashed or cut off with its machine never fires its end hook,
+  and an open row outranks the closed ones a resume chooses between; `reconcile` has always
+  fixed this, but only ever as a side effect of running a *lister*, which is both
+  undiscoverable and skipped by anyone who reaches for `ch doctor` when something looks
+  wrong (a real workspace carried 57 open rows of 271, 50 of them long dead). `--fix` closes
+  them through that same machinery, and inherits its refusal: a harness that can't be
+  consulted is not a harness reporting nothing, so with `claude` off the PATH it closes
+  nothing rather than declaring the machine empty. Skipped entirely while the archive still
+  needs a schema repair — those checks own that, and nothing here can read it yet
 - **human-worktrees** — remove leftover `{goal}-human` worktrees from the old per-actor layout when
   clean (no uncommitted changes, no unmerged commits); the bare `{goal}/human` branch survives
 - **inert-branches** — delete a known goal's non-agent actor branch (`{goal}/human`, `reviewer`, `pr`,

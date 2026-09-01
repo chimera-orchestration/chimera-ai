@@ -12,6 +12,8 @@ from testfixtures.loguru import LoguruSource
 from testfixtures.popen import MockPopen, shell_join
 
 from chimera.commands.doctor import checks as doctor_checks
+from chimera.agents import AgentSession
+from chimera.agents.claude import Claude
 from chimera.archive import (
     ACTIVE,
     Archive,
@@ -22,6 +24,7 @@ from chimera.archive import (
 )
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
+    OpenSessionCheck,
     _persona,
     ArchiveSchemaCheck,
     HarnessContractCheck,
@@ -463,6 +466,85 @@ class TestArchiveSchema:
                 'events': 1,
             }
         )
+
+
+class TestOpenSessions:
+    # repair belongs in the repair command: reconciliation only ever ran as a side effect
+    # of a lister, so anyone reaching for `ch doctor` when something looked wrong skipped
+    # it. A real workspace carried 57 open rows of 271, 50 of them long dead.
+
+    def _archived(self, ws: Path, native_id: str) -> None:
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            store.record_session(
+                ArchiveSession(
+                    platform='claude',
+                    native_id=native_id,
+                    status='startup',
+                    started_at=NOON,
+                    workspace=ws.name,
+                )
+            )
+
+    def test_no_archive_is_silent(self, tmpdir: TempDir) -> None:
+        compare(_run(OpenSessionCheck(), _ws(tmpdir)), expected=[])
+
+    def test_an_open_session_no_harness_reports_is_reported(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        ws = _ws(tmpdir)
+        self._archived(ws, 'ghost')
+        replace.on_class(Claude.sessions, lambda self: [])
+        compare(
+            _run(OpenSessionCheck(), ws),
+            expected=[
+                Finding(
+                    'open-sessions',
+                    '1 archived sessions are open that no harness reports',
+                    resolved=False,
+                    fixable=True,
+                )
+            ],
+        )
+
+    def test_fix_closes_it(self, tmpdir: TempDir, replace: Replacer) -> None:
+        ws = _ws(tmpdir)
+        self._archived(ws, 'ghost')
+        replace.on_class(Claude.sessions, lambda self: [])
+        [finding] = _run(OpenSessionCheck(), ws, fix=True)
+        assert finding.resolved
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            compare([s.status for s in store.sessions()], expected=['reconciled'])
+
+    def test_a_live_session_is_left_alone(self, tmpdir: TempDir, replace: Replacer) -> None:
+        ws = _ws(tmpdir)
+        self._archived(ws, 'working')
+        replace.on_class(
+            Claude.sessions, lambda self: [AgentSession('working', 'n', 'idle', ws, None)]
+        )
+        compare(_run(OpenSessionCheck(), ws, fix=True), expected=[])
+
+    def test_an_unavailable_harness_closes_nothing(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # inherited from reconcile: an empty registry we could not consult is not an
+        # empty machine, and this check must not be the thing that forgets that
+        ws = _ws(tmpdir)
+        self._archived(ws, 'ghost')
+        replace.on_class(Claude.sessions, lambda self: [])
+        replace.in_environ('PATH', '')
+        [finding] = _run(OpenSessionCheck(), ws, fix=True)
+        assert not finding.resolved
+        with Archive.open(ws / 'state' / 'archive.db') as store:
+            compare([s.status for s in store.sessions()], expected=['startup'])
+
+    def test_an_archive_awaiting_migration_is_left_to_the_schema_check(
+        self, tmpdir: TempDir
+    ) -> None:
+        ws = _ws(tmpdir)
+        path = ws / 'state' / 'archive.db'
+        path.parent.mkdir(parents=True)
+        legacy_archive(path, [legacy_row('a')])
+        compare(_run(OpenSessionCheck(), ws), expected=[])  # cannot even be read yet
 
 
 class TestStateDir:
