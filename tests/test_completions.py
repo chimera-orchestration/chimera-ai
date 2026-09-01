@@ -2,8 +2,9 @@ import os
 from pathlib import Path
 
 from giterator.testing import Repo
-from testfixtures import TempDir, compare
+from testfixtures import Replacer, TempDir, compare
 from typer._click.shell_completion import get_completion_class
+from typer._completion_classes import BashComplete
 from typer.completion import completion_init
 from typer.main import get_command
 
@@ -106,7 +107,10 @@ def test_synonym_prefix_filtered() -> None:
     compare(_complete(['goal'], 'clea'), expected=['cleanup'])
 
 
-def test_zsh_and_bash_scripts_emit() -> None:
+def test_zsh_and_bash_scripts_emit(replace: Replacer) -> None:
+    # typer probes the host's bash version before emitting, and branches on it — this box
+    # ships 3.2, a runner ships 5.x. What's under test is our tree rendering a script
+    replace.on_class(BashComplete._check_version, staticmethod(lambda: None))
     for shell_name in ('zsh', 'bash'):
         shell = get_completion_class(shell_name)
         assert shell is not None
