@@ -23,6 +23,23 @@ SESSION_ID_VAR = 'CLAUDE_CODE_SESSION_ID'
 env overlay cannot (a pooled background worker, a fork). Observed reliable in all five
 start modes — but absent from the documented hook environment, so never trusted alone."""
 
+ENV_FILE_VAR = 'CLAUDE_ENV_FILE'
+"""The per-session shell file a SessionStart hook is handed, whose *parent directory* is
+the session id (``~/.claude/session-env/<id>/sessionstart-hook-1.sh``).
+
+Read only as a fourth witness in :meth:`Claude.identity`, never written to and never
+depended on: the channel is undocumented and the official hooks page says the opposite of
+what it does (see ``agent-docs/sessions.md``). Absent, it is simply not consulted.
+"""
+
+ENV_FILE_PARENT = 'session-env'
+"""The directory the observed layout puts session-id folders in.
+
+The shape is checked rather than assumed, because ``Path('/tmp/x.sh').parent.name`` is
+``tmp`` — a plausible-looking id that is nothing of the sort. A bogus witness would fire
+the disagreement warning, and that warning's whole worth is meaning "the harness changed".
+"""
+
 ENTRYPOINT_VAR = 'CLAUDE_CODE_ENTRYPOINT'
 
 PRINT_ENTRYPOINT = 'sdk-cli'
@@ -71,6 +88,18 @@ READONLY_TOOLS = (
     'Bash(git blame:*)',
     'Bash(git status:*)',
 )
+
+
+def _env_file_id(env: Mapping[str, str]) -> str | None:
+    """The session id ``$CLAUDE_ENV_FILE`` names, or ``None`` when it names none.
+
+    Only the observed layout counts (:data:`ENV_FILE_PARENT`): anything else is treated as
+    no witness at all rather than as a witness disagreeing, so a relocated file goes quiet
+    instead of crying wolf.
+    """
+    path = Path(env.get(ENV_FILE_VAR) or '')
+    parent = path.parent
+    return parent.name if parent.parent.name == ENV_FILE_PARENT and parent.name else None
 
 
 class Claude(Agent):
@@ -216,18 +245,23 @@ class Claude(Agent):
         """
         return os.environ.get(SESSION_ID_VAR) or None
 
-    def identity(self, payload: Mapping[str, object]) -> str:
+    def identity(self, payload: Mapping[str, object], env: Mapping[str, str]) -> str:
         """The session id a SessionStart payload names: its transcript's filename stem.
 
-        Three ids are in play and they are not equally trustworthy. The **transcript
-        stem** is documented *and* definitionally the resumable id — claude finds a
-        session by its transcript file — so it anchors. The payload's ``session_id`` is
-        the documented identity channel but has been seen to diverge on a background job
+        Four ids are in play and they are not equally trustworthy. The **transcript stem**
+        is documented *and* definitionally the resumable id — claude finds a session by
+        its transcript file — so it anchors. The payload's ``session_id`` is the
+        documented identity channel but has been seen to diverge on a background job
         (2.1.212, chimera issue #41); ``$CLAUDE_CODE_SESSION_ID`` is empirically reliable
-        but undocumented. Both are cross-checked against the anchor and any disagreement
-        is logged loudly, because a harness changing which id is authoritative must never
-        pass silently. The anchor still wins: picking a different one on the strength of
-        a disagreement would be guessing.
+        but undocumented; ``$CLAUDE_ENV_FILE``'s parent directory names the session too,
+        and is undocumented twice over (see :data:`ENV_FILE_VAR`). Each is cross-checked
+        against the anchor and any disagreement is logged loudly, because a harness
+        changing which id is authoritative must never pass silently. The anchor still
+        wins: picking a different one on the strength of a disagreement would be guessing.
+
+        Witnesses corroborate; they never carry the answer. One that is absent — as the
+        env file is everywhere but SessionStart — costs nothing and says nothing, which is
+        what lets an undocumented channel be used here at all without being built upon.
         """
         stem = Path(str(payload.get('transcript_path') or '')).stem
         if not stem:  # no transcript to anchor on — the payload's own id is all there is
@@ -235,6 +269,7 @@ class Claude(Agent):
         for source, other in (
             ('payload', payload.get('session_id')),
             ('env', self.session_id_from_env()),
+            ('env-file', _env_file_id(env)),
         ):
             if other and str(other) != stem:
                 logger.bind(transcript_stem=stem, source=source, id=str(other)).warning(

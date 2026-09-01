@@ -205,7 +205,7 @@ class Agent(ABC):
         ...
 
     @abstractmethod
-    def identity(self, payload: Mapping[str, object]) -> str:
+    def identity(self, payload: Mapping[str, object], env: Mapping[str, str]) -> str:
         """The native id of the session a start event names.
 
         The adapter reconciles whatever ids its payload and environment carry, and is
@@ -213,6 +213,9 @@ class Agent(ABC):
         sees the alternatives, only the verdict. Disagreement is logged there, loudly:
         a harness quietly changing which id is authoritative is exactly the drift that
         must not pass silently (see ``agent-docs/sessions.md``).
+
+        ``env`` is the session's environment, for adapters whose ids also arrive that
+        way. An adapter with nothing to read there ignores it.
         """
         ...
 

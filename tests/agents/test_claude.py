@@ -13,6 +13,7 @@ from testfixtures.popen import MockPopen
 from chimera import agents
 from chimera.agents import Agent, AgentSession
 from chimera.agents.claude import (
+    ENV_FILE_VAR,
     READONLY_TOOLS,
     Claude,
     _print_args,
@@ -645,6 +646,11 @@ def test_sessions_skips_enrichment_when_the_registry_had_no_cwd(replace: Replace
     compare(Claude().sessions(), expected=[lonely])
 
 
+def _warnings(logs: LogCapture) -> list[str]:
+    """The warning messages captured, so an absence assertion fails readably."""
+    return [r['message'] for r in logs.actual() if r['level'] == 'WARNING']
+
+
 class TestIdentity:
     # three ids are in play and they disagree in real failures; the transcript stem is the
     # documented one *and* the resumable one, so it anchors — see agent-docs/sessions.md
@@ -653,12 +659,12 @@ class TestIdentity:
         return {'transcript_path': '/t/uuid-1.jsonl', 'session_id': 'uuid-1', **kw}
 
     def test_anchors_on_the_transcript_stem(self) -> None:
-        compare(Claude().identity(self._payload()), expected='uuid-1')
+        compare(Claude().identity(self._payload(), {}), expected='uuid-1')
 
     def test_a_payload_id_that_disagrees_is_logged_and_overruled(
         self, full_logs: LogCapture
     ) -> None:
-        compare(Claude().identity(self._payload(session_id='other')), expected='uuid-1')
+        compare(Claude().identity(self._payload(session_id='other'), {}), expected='uuid-1')
         full_logs.check_present(
             {
                 'level': 'WARNING',
@@ -674,7 +680,7 @@ class TestIdentity:
         self, replace: Replacer, full_logs: LogCapture
     ) -> None:
         replace.in_environ('CLAUDE_CODE_SESSION_ID', 'other')
-        compare(Claude().identity(self._payload()), expected='uuid-1')
+        compare(Claude().identity(self._payload(), {}), expected='uuid-1')
         full_logs.check_present(
             {
                 'level': 'WARNING',
@@ -687,7 +693,47 @@ class TestIdentity:
         )
 
     def test_without_a_transcript_the_payload_id_is_all_there_is(self) -> None:
-        compare(Claude().identity({'session_id': 'uuid-1'}), expected='uuid-1')
+        compare(Claude().identity({'session_id': 'uuid-1'}, {}), expected='uuid-1')
+
+    def _env_file(self, session_id: str) -> dict[str, str]:
+        """The path a SessionStart hook is handed — the id is the parent directory."""
+        return {ENV_FILE_VAR: f'/Users/x/.claude/session-env/{session_id}/sessionstart-hook-1.sh'}
+
+    def test_an_agreeing_env_file_says_nothing(self, full_logs: LogCapture) -> None:
+        compare(Claude().identity(self._payload(), self._env_file('uuid-1')), expected='uuid-1')
+        compare(_warnings(full_logs), expected=[])
+
+    def test_an_env_file_that_disagrees_is_logged_and_overruled(
+        self, full_logs: LogCapture
+    ) -> None:
+        # the fourth witness, and the point of having it: #41 was a payload id diverging
+        # on a background job, and one more independent channel makes that louder
+        compare(Claude().identity(self._payload(), self._env_file('other')), expected='uuid-1')
+        full_logs.check_present(
+            {
+                'level': 'WARNING',
+                'message': 'agent: session id disagrees with its transcript, '
+                'anchoring on the transcript',
+                'transcript_stem': 'uuid-1',
+                'source': 'env-file',
+                'id': 'other',
+            }
+        )
+
+    def test_an_absent_env_file_is_simply_not_a_witness(self, full_logs: LogCapture) -> None:
+        # the channel is undocumented and contradicted by the official hooks page, so its
+        # disappearance must cost nothing: same answer, no warning, no trace
+        compare(Claude().identity(self._payload(), {}), expected='uuid-1')
+        compare(Claude().identity(self._payload(), {ENV_FILE_VAR: ''}), expected='uuid-1')
+        compare(_warnings(full_logs), expected=[])
+
+    def test_a_path_of_an_unexpected_shape_is_not_a_witness(self, full_logs: LogCapture) -> None:
+        # `/tmp/x.sh`'s parent is `tmp` — a plausible-looking id that is nothing of the
+        # sort. A false alarm here would blunt the one signal that means "the harness
+        # changed under us", so an unrecognised layout yields no witness rather than a bad one
+        for odd in ('/tmp/x.sh', '/', 'sessionstart-hook-1.sh', '/a/b/c/d.sh'):
+            compare(Claude().identity(self._payload(), {ENV_FILE_VAR: odd}), expected='uuid-1')
+        compare(_warnings(full_logs), expected=[])
 
     def test_session_id_from_env(self, replace: Replacer) -> None:
         assert Claude().session_id_from_env() is None

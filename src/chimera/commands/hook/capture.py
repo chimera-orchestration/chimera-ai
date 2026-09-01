@@ -134,7 +134,7 @@ def session_start(agent: Agent, payload: Mapping[str, object], env: Mapping[str,
     presumed parent's address (:func:`inherited`). Anything else gets whatever address a
     launcher already recorded for it, and none if there wasn't one.
     """
-    native_id = agent.identity(payload)
+    native_id = agent.identity(payload, env)
     unmodeled(
         'session-start', native_id, {k: v for k, v in payload.items() if k not in KNOWN_START_KEYS}
     )

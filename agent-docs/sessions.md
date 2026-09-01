@@ -131,6 +131,15 @@ the session", their only outputs being `additionalContext`, `initialUserMessage`
 docs can disappear without a deprecation. Use the archive row (documented surfaces only) as
 the source of truth; this may be an optimisation on top, never the foundation under it.
 
+**Its path is also a fourth witness to identity**, and that use survives the objection above.
+The session id is the file's *parent directory*, so reading it corroborates the transcript
+stem for free — and a witness that vanishes simply stops being consulted, where an injection
+that vanishes breaks whatever depended on it. `Claude.identity` therefore folds it into the
+same disagreement warning as the payload and env ids (`_env_file_id`), and only for the
+observed `session-env/<id>/` layout: `Path('/tmp/x.sh').parent.name` is `tmp`, a
+plausible-looking id that is nothing of the sort, and a false alarm would blunt the one
+signal that means *the harness changed under us*.
+
 ### What is actually documented
 
 The hooks page guarantees only these env vars to hook commands: `CLAUDE_PROJECT_DIR`,
@@ -255,7 +264,9 @@ what makes a launch background, so the unattended agents were the unfenced ones.
 
 **`$CLAUDE_ENV_FILE` injection was deliberately not built.** It works, but the archive row
 answers the same question over documented surfaces, and an optimisation is not worth a
-dependency the docs contradict.
+dependency the docs contradict. Reading it as a **cross-check** is a different bargain and
+was built: an absent witness costs nothing, so an undocumented channel can corroborate
+identity without anything resting on it.
 
 **Liveness needs the `(pid, create_time)` pair**, captured at SessionStart and matched later —
 never an inequality. `Agent.stop` re-verifies immediately before signalling, since that is the
@@ -282,7 +293,7 @@ lives *inside* `Claude` and appears nowhere in the interface:
 |---|---|---|
 | `start(…) -> native id \| None` | launch a session and tell me its id, if you can | foreground: mints a uuid and passes `--session-id`; `--bg` refuses that flag, so it answers `None` and the hook binds the id |
 | `session_id_from_env()` | am I running inside one of your sessions — which? | `CLAUDE_CODE_SESSION_ID` |
-| `identity(payload)` | which session does this start event name? | the transcript stem, cross-checked against payload and env |
+| `identity(payload, env)` | which session does this start event name? | the transcript stem, cross-checked against the payload id, `$CLAUDE_CODE_SESSION_ID` and `$CLAUDE_ENV_FILE`'s directory |
 | `addressable(payload, env)` | may this session hold an address? | no `agent_type`, entrypoint ≠ `sdk-cli` |
 | `lifecycle(payload)` | started, resumed, or branched from another? | `source`, mapping `fork` → branched |
 | `stop(session)` | end it | `claude stop <id>` for background, SIGTERM otherwise |
