@@ -4,7 +4,10 @@
 # You can set these variables from the command line, and also
 # from the environment for the first two.
 SPHINXOPTS    ?=
-SPHINXBUILD   ?= uv run sphinx-build
+# --group docs, not a bare `uv run`: sphinx lives in the docs dependency group, which
+# `uv sync` does not install by default — so the build resolves what it needs itself
+# rather than depending on what a previous command happened to leave in the environment.
+SPHINXBUILD   ?= uv run --group docs sphinx-build
 SOURCEDIR     = .
 BUILDDIR      = _build
 

@@ -152,6 +152,7 @@ fills, each with the value it renders as — so a default is something you can
 read rather than something buried in the code:
 
 .. code-block:: console
+    :force:
 
     $ ch prompt show review
     source: .../chimera/prompts/review.md (packaged)
