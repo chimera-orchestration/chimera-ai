@@ -10,6 +10,33 @@
   built or cloned in a test must never depend on the machine's own git identity/config (a dev
   machine has one, CI doesn't); use `Repo.make`/`Repo.clone` below, which always configure one
 
+## Bugs and regressions: the test comes first
+
+A fix without a test that was *seen to fail* is a claim, not a repair. The order is fixed:
+
+1. **Reproduce it as a test**, before touching `src/`. Run it. Watch it fail — and check the
+   failure is the *reported* one, not an unrelated error (a typo in the fixture also goes red).
+2. **Then** fix.
+3. Re-run: green.
+
+**A test written after the fix is not finished until you have seen it red.** If the fix is
+already in, take it back out and confirm the test fails, then restore it. Copy the file aside
+(`cp x.py $SCRATCH/x.keep`) — **never `git stash`**: the stash stack is shared with every other
+worktree and session on this machine, and a dropped entry is a lost afternoon.
+
+**Assert the mechanism, not the surface.** The test should fail if the *cause* returns, not
+merely if today's symptom does. A migration that dropped every index needed a test comparing
+the rebuilt index set against a freshly-built one — counting rows would have passed throughout.
+
+**A hand-check is not a test.** Anything proved by running something at the console — a
+rehearsal against a copy of real data, a one-off script, a REPL poke — protects nothing after
+today. Either it becomes a test or it did not happen. Every claim in `TestUpgradeRehearsal`
+was a manual check first, and every one of them was true when checked and untrue a week later.
+
+**Cover the guard, not just the guarded.** When a defence is added (a refusal, a fallback, a
+fence), test that it *fires*, and test what happens when the thing it depends on is missing —
+that is where the destructive cases live (a harness that cannot be consulted answering "empty").
+
 ## Grouping
 
 Group related tests into a class-based suite (`class TestResolveScope: ...`), never with

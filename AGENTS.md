@@ -59,6 +59,8 @@ Read `agent-docs/lessons.md` at session start (may not exist yet, gitignored —
 
 **Fix bugs autonomously.** When given a bug report, just fix it. Find root causes — no temporary patches, no hand-holding required.
 
+**Red before green.** For a bug or a regression, the test that proves it comes *before* the fix — write it, run it, watch it fail for the reported reason. A test written afterwards has never been seen to fail, so it is not yet known to test anything. Read @agent-docs/unit-and-functional-testing.md, *Bugs and regressions*.
+
 **Git discipline.** Read @agent-docs/git-commits.md — covers commits, branching, and rebasing.
 
 ## Context File Hygiene
