@@ -83,3 +83,19 @@ class TestExecutor:
         worktree = workspace / 'proj' / 'worktrees' / 'g@agent'
         worktree.mkdir(parents=True)
         compare(executor(worktree), expected=HUMAN)
+
+
+def test_identity_is_resolved_once_per_process(workspace: Path, replace: Replacer) -> None:
+    # a single `ch` invocation asks four times over — the role strip, the AI-session
+    # test, the log's identity binding, the project fence — and each ask opened the
+    # archive twice, once to check the schema and once to re-run the whole DDL
+    replace.in_environ('CLAUDE_CODE_SESSION_ID', 'uuid-1')
+    _record(workspace, 'uuid-1')
+    for _ in range(4):
+        session = current_session(workspace)
+        assert session is not None
+        compare(session.native_id, expected='uuid-1')
+    # one real resolution, three free — the archive is opened once, not once per asker
+    compare(
+        (current_session.cache_info().misses, current_session.cache_info().hits), expected=(1, 3)
+    )

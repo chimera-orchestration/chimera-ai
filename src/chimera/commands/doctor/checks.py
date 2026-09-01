@@ -395,7 +395,7 @@ class HarnessContractCheck:
             return  # nothing to check, or the schema check has the floor
         with Archive.open(path) as store:
             sessions = store.sessions()
-            branched = {event.native_id for event in store.events() if event.kind == BRANCHED}
+            branched = {event.native_id for event in store.events(kind=BRANCHED)}
         by_cwd: dict[Path, int] = {}
         for session in sessions:
             if session.cwd is not None:

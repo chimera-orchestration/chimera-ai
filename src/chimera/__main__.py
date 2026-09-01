@@ -752,8 +752,13 @@ def dump(
 @logs(board)
 def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
-    rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
-    reconcile(scope.workspace, rows)  # …and sessions that died unheard stop looking open
+    listing = agents()
+    # reconcile sees the *whole* listing, the display only the live half: a stale-marked
+    # entry is one the registry still claims, so closing its row would contradict the
+    # authority reconciliation rests on — and would depend on which lister you happened
+    # to run, since `agent ls` passes the unfiltered listing
+    reconcile(scope.workspace, listing)  # sessions that died unheard stop looking open
+    rows, _ = shown(listing, verbose=False)  # live-only: ghosts are agent ls -v's surface
     with archive(scope.workspace) as store:
         _render_board(board(scope, rows, store, mail(scope.workspace)))
 
@@ -766,8 +771,9 @@ def ls(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> 
 @logs(board)
 def dashboard_cmd(ctx: typer.Context, project: ProjectOpt = None, goal: GoalOpt = None) -> None:
     scope = _scope(ctx, project, goal, infer=False)  # a bad -p refuses before the registry is hit
-    rows, _ = shown(agents(), verbose=False)  # live-only: ghosts are agent ls -v's surface
-    reconcile(scope.workspace, rows)
+    listing = agents()
+    reconcile(scope.workspace, listing)  # the whole listing, as in `ls` above
+    rows, _ = shown(listing, verbose=False)  # live-only: ghosts are agent ls -v's surface
     with archive(scope.workspace) as store:
         # color=True: this command exists to run under `watch`, which pipes our stdout
         # (no tty) — Click would otherwise auto-strip the ANSI codes before watch sees them.

@@ -1654,6 +1654,16 @@ class TestReconcile:
             }
         )
 
+    def test_a_stale_but_still_claimed_session_stays_open(self, tmpdir: TempDir) -> None:
+        # the registry is the authority reconciliation rests on, so anything it still
+        # claims — stale-marked or not — keeps its row. Passing the display-filtered
+        # listing made the outcome depend on which lister you happened to run
+        ws = tmpdir.makedir('ws')
+        self._archived(ws, 'ghost')
+        stale = AgentSession('ghost', 'n', 'idle', ws, None, stale='no process')
+        compare(reconcile(ws, [stale]), expected=[])
+        compare(self._rows(ws), expected={'ghost': 'startup'})
+
     def test_closes_a_session_no_harness_reports(self, tmpdir: TempDir) -> None:
         ws = tmpdir.makedir('ws')
         self._archived(ws, 'gone')

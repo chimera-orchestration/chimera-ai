@@ -152,9 +152,7 @@ def occupants(worktree: Path, excluding: str | None = None) -> list[AgentSession
             row.native_id: row for row in store.sessions(workspace=workspace.name, active=True)
         }
         forks = [
-            event.native_id
-            for event in store.events()
-            if event.kind == BRANCHED and event.native_id in open_rows
+            event.native_id for event in store.events(kind=BRANCHED) if event.native_id in open_rows
         ]
     husks = _husks(open_rows, forks)
     keep: list[AgentSession] = []

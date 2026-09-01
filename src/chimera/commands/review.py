@@ -77,9 +77,7 @@ def review(
     *resolved* ``<project>@pr-<N>@agent`` and ``pr-<N>`` — the number is only known
     here, once ``gh`` has resolved ``pr``, so a URL argument still lands its context
     artifact (and the ``context: rendered`` log line) under the real session name.
-    Never called without ``launch``: no session, nothing to render for. ``env`` — the
-    role stamp overlaid on the session's environment — is a factory keyed the same
-    way, for the same reason: its scope carries a goal only this function resolves.
+    Never called without ``launch``: no session, nothing to render for.
 
     ``launch=False`` (CLI ``--no-agent``) stops after the checkout: branches, worktree and
     upstream all stand, but no agent runs — kick one off later with ``ch agent start``. The

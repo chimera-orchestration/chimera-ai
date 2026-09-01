@@ -562,11 +562,23 @@ class Archive:
             (event.at.isoformat(), event.kind, event.detail, event.platform, event.native_id),
         )
 
-    def events(self, *, platform: str | None = None, native_id: str | None = None) -> list[Event]:
-        """The timeline, oldest first — every event, or only those for one session."""
+    def events(
+        self,
+        *,
+        platform: str | None = None,
+        native_id: str | None = None,
+        kind: str | None = None,
+    ) -> list[Event]:
+        """The timeline, oldest first — every event, or those matching each filter given.
+
+        ``kind`` narrows in SQL rather than in the caller. The table is append-only and
+        one row lands per turn, so it is the fastest-growing thing here; a caller after
+        the handful of ``branched`` rows should not be materialising every event on the
+        machine to find them, least of all on a launch path.
+        """
         clauses: list[str] = []
         params: list[str] = []
-        for column, value in (('platform', platform), ('native_id', native_id)):
+        for column, value in (('platform', platform), ('native_id', native_id), ('kind', kind)):
             if value is not None:
                 clauses.append(f'{column}=?')
                 params.append(value)

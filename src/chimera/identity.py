@@ -24,6 +24,7 @@ Anything else — a human's shell, a hand-launched session, one whose claim expi
 another agent's mail.
 """
 
+from functools import cache
 from pathlib import Path
 
 from chimera.agents.registry import AGENTS
@@ -36,6 +37,7 @@ HUMAN = 'human'
 routes to it, and it is never a claim about *which* human."""
 
 
+@cache
 def current_session(cwd: Path) -> ArchiveSession | None:
     """The archived session this process is running inside, or ``None`` if it isn't one.
 
@@ -43,6 +45,14 @@ def current_session(cwd: Path) -> ArchiveSession | None:
     answer up. Best-effort about the *lookup* — no workspace, no archive, nothing
     recorded — but never about the *evidence*: a session that can't be found stays
     unidentified rather than being guessed at from where it happens to be.
+
+    **Cached for the life of the process**, because the answer cannot change within one:
+    a process is one session, or none, for as long as it runs. Uncached, a single ``ch``
+    invocation resolved it four times over — the role strip, the AI-session test, the
+    log's identity binding and the project fence — and each of those opened the archive
+    twice, once to check the schema and once to re-run every ``CREATE TABLE`` and
+    ``CREATE INDEX``. Tab completion paid it too. Tests clear the cache between them (see
+    ``tests/conftest.py``), since each builds its own workspace at its own path.
     """
     try:
         workspace = resolve_workspace(cwd)

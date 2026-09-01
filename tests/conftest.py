@@ -12,6 +12,7 @@ from testfixtures import LogCapture, Replacer, TempDir, not_there
 from chimera.__main__ import app
 from chimera.agents.registry import AGENTS
 from chimera.archive import Archive
+from chimera.identity import current_session
 from chimera.commands.init import init
 from tests.cli import Command, Run, full_capture
 
@@ -54,6 +55,19 @@ def _no_real_harness(replace: Replacer) -> None:
     # would otherwise be sent looking for tests.conftest.guarded
     guarded.__module__, guarded.__name__ = real.__module__, real.__name__
     replace.in_module(subprocess.Popen, guarded)
+
+
+@pytest.fixture(autouse=True)
+def _clear_identity_cache() -> Iterator[None]:
+    """``current_session`` is cached for a process's life; a test suite is one process.
+
+    Each test builds its own workspace, so the keys differ and nothing leaks across —
+    except when a test records a session *after* something already asked, which is
+    exactly what an identity test does.
+    """
+    current_session.cache_clear()
+    yield
+    current_session.cache_clear()
 
 
 @pytest.fixture(autouse=True)
