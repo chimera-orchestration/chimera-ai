@@ -257,12 +257,21 @@ a leaf's own flag beats any earlier one.
 
 ## Listing: scope model
 
+**The listers are not quite read-only.** `ch ls`, `ch dashboard` and `ch agent ls` each
+reconcile on the way past (`chimera.commands.agent.reconcile`): a session the harness no
+longer reports gets its archive row closed, because an open row outranks the closed ones a
+resume chooses between, and a lister is the moment that answer is about to be read. It is
+idempotent, costs a registry query already made, and declines entirely when a harness can't
+be consulted — but it is a write, so `ch ls` can close the very row you ran it to look at,
+and it needs a writable workspace. `ch doctor`'s `open-sessions` check does the same repair
+where a human would look for it.
+
 The `ls` family (`chimera.context.resolve_scope` → `Scope(workspace, project|None, goal|None)`)
 separates **inference** from **enumeration**: cwd/flags *infer* the axis values (reusing the
 action resolvers), but enumeration always reads the workspace's managed dirs and is bounded by
 the workspace. Two rules:
 
-- **Listing widens; actions stay exact.** A read-only lister that can't pin a single project
+- **Listing widens; actions stay exact.** A lister that can't pin a single project
   broadens to all of them (`CannotIdentifyProjectError` → `project=None`). The goal is pinned for
   listing only by an explicit `-g` or by *physically standing in* a managed worktree
   (`resolve_scope` uses `goal_from_worktree`, not the branch): a human checkout that merely shares

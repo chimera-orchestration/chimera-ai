@@ -205,7 +205,7 @@ Thread `chimera.dry.Dry` through the pure function and route each mutation throu
 (`dry(git, 'branch', '-D', ref)`, `dry(shutil.rmtree, path)`), so the preview shares the real
 code path and can't drift from it. `--dry` previews *under whatever other flags are given*, so
 it still reports a refusal on unsafe state and `--dry --force` previews a forced teardown.
-Report with `dry.verb('Removed', 'Would remove')`. Read-only commands never take `--dry`.
+Report with `dry.verb('Removed', 'Would remove')`. A command that mutates nothing never takes `--dry` — note that the listers do mutate (see `agent-docs/workspace-layout.md`, *Listing*), they just have nothing a preview would usefully show.
 
 **Launching commands preview with `--dry` too** (`agent start`/`resume`, `goal start`/`adopt`,
 `review`, `chat`): everything resolves for real — scope, spec cascade, rendered context (the
