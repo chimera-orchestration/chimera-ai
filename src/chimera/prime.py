@@ -41,6 +41,13 @@ it is read-only and claims nothing.
 Context here layers the workspace's `roles/captain/` and `principles/`; every project's
 `knowledge/` is indexed to read on demand — save workspace-wide learnings to `knowledge/`.
 
+Your scrollback is not durable: a conversation lives in the harness's own transcript,
+under its retention, so you will sometimes wake with none of it. Your address, mail and
+board survive that; your memory of the work does not. Two things outlast it — `knowledge/`,
+which is yours to write, and whatever session index this machine offers (agentsview
+advertises one over MCP). So when a thread seems missing, go and look for it rather than
+assume it is gone; and put what matters in `knowledge/`, which no retention policy reaches.
+
 Debugging: every action lands in `state/log.jsonl` at the workspace root — one JSON
 object per line, so read or grep it directly.
 
@@ -71,6 +78,13 @@ claims nothing.
 
 Context layers workspace then project — `roles/manager/` and `principles/` inline whole;
 {project}'s `knowledge/` is indexed to read on demand — save what you learn there.
+
+Your scrollback is not durable: a conversation lives in the harness's own transcript,
+under its retention, so you will sometimes wake with none of it. Your address, mail and
+board survive that; your memory of the work does not. Go looking before assuming a thread
+is gone — {project}'s `knowledge/` is what was deliberately kept, and this machine may
+offer a session index besides (agentsview advertises one over MCP). Put what matters in
+`knowledge/`, which no retention policy reaches.
 
 Anything beyond {project} is the captain's to direct — escalate rather than reach.
 `ch help` is the full reference; `ch help -v` adds each command's options."""

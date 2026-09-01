@@ -95,6 +95,21 @@ class TestCitationsPinToTheRoleTree:
         for role in PRIMES:
             assert '`ch help`' in prime(role), role
 
+    def test_the_chat_roles_are_told_their_scrollback_is_not_durable(self) -> None:
+        # a conversation lives in the harness's transcript, under its retention, so a
+        # captain or manager will sometimes wake with none of it — its address, mail and
+        # board survive, its memory does not. Nothing in chimera can change that, so the
+        # roles that own long-lived conversations are told where to look instead
+        for role in (ROLE_CAPTAIN, ROLE_MANAGER):
+            text = prime(role, workspace='lycia', project='proj')
+            assert 'retention' in text, role
+            assert 'knowledge/' in text, role
+
+    def test_the_agent_is_not(self) -> None:
+        # an agent's conversation is bounded by its goal; it has no long thread to lose,
+        # and pointing it at a machine-wide index invites it out of its own worktree
+        assert 'agentsview' not in prime(ROLE_AGENT, project='proj', goal='g')
+
     def test_every_cited_address_parses(self) -> None:
         # the commands were pinned to a live tree from the start; the addresses beside
         # them were not, and the captain spent this branch teaching a grammar its own
