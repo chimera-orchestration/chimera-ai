@@ -38,7 +38,7 @@ from chimera.commands.archive.backfill import backfill as _archive_backfill
 from chimera.commands.chat import chat as _chat
 from chimera.commands.dashboard import render as render_dashboard
 from chimera.commands.chat import chat_target
-from chimera.commands.doctor import REPAIR, Exclusions, Finding, resolve_root, select_checks
+from chimera.commands.doctor import Exclusions, Finding, resolve_root, select_checks
 from chimera.commands.doctor import checks as doctor_checks
 from chimera.commands.doctor import doctor as _doctor
 from chimera.commands.dump import dump as _dump
@@ -2080,7 +2080,7 @@ def main() -> None:
         # proceeds unidentified, and therefore unfenced, which is the same standing a
         # human has. Everything else says what is wrong and stops, here rather than
         # half-way through a command.
-        if REPAIR not in sys.argv[1:2]:
+        if 'doctor' not in sys.argv[1:2]:
             typer.echo(f'Error: {error}', err=True)
             raise SystemExit(1) from None
         role, driven_by_agent = None, False

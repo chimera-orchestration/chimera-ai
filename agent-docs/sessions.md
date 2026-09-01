@@ -221,7 +221,7 @@ asymmetry is on file, not as a suggestion.
 - Every launch is accompanied by more SessionStart firings than there are conversations —
   budget for it when reasoning about "how many sessions are in this directory".
 
-## What this means for chimera — and what was built
+## What this means for chimera
 
 **Identity comes from the launcher, but not from the environment.** A launcher records a
 `PendingLaunch` (cwd, address, model) *before* it spawns, and the session's own start hook
@@ -241,12 +241,9 @@ address are separate columns for exactly this reason. A raw `claude` in a goal w
 the axes and no address: no mail, no board slot, no resume handle — and **no fence**, because
 role and scope are read off the address and nothing else.
 
-That last part is deliberate, and the plan that built this said the opposite. A stopgap that
-inferred the fence from the worktree cwd was going to survive as the raw-session fallback; it
-didn't, because a fence granted by location is the very thing this design set out to abolish
-— entitlement from geography, wearing a different hat. What *does* still come from cwd is
-occupancy: a hand-launched session counts as an occupant, since that question is about who is
-writing in a directory, which is a fact about the directory.
+That is deliberate: a fence granted by location would be entitlement from geography wearing
+a different hat. What *does* still come from cwd is occupancy — a hand-launched session counts
+as an occupant, because who is writing in a directory really is a fact about the directory.
 
 So an unaddressed session is unfenced, and the wall is the harness permission layer, not us.
 The fence's value was never containment of a determined session — it is not advertising
@@ -257,10 +254,11 @@ payload doesn't name its parent, so a `branched` session inherits from the newes
 open in the same cwd — *presumed*, and logged as such. Without it, backgrounding a chat would
 silently orphan its mail.
 
-**The role and its fence come from the address**, not from a stamp: `@@captain` unfenced,
-`<project>@@manager` and `<project>@<goal>@<actor>` fenced to their project. `CHIMERA_ROLE` is
-gone, because it reached a foreground session and nothing else — and passing a prompt is exactly
-what makes a launch background, so the unattended agents were the unfenced ones.
+**The role and its fence come from the address**, never from the environment: `@@captain`
+unfenced, `<project>@@manager` and `<project>@<goal>@<actor>` fenced to their project. An
+environment stamp cannot do this job — it reaches a foreground session and nothing else (see
+*Environment inheritance*), and passing a prompt is exactly what makes a launch background, so
+the unattended agents would be the unfenced ones.
 
 **`$CLAUDE_ENV_FILE` injection was deliberately not built.** It works, but the archive row
 answers the same question over documented surfaces, and an optimisation is not worth a

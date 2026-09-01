@@ -4,7 +4,7 @@ The SQLite analogue of :class:`chimera.git.Git`: as ``Git`` traces every subproc
 runs, :class:`Database` traces every statement — the op and the db path, bound at DEBUG, never
 the parameters or rows — so a run is reconstructable from the log without a stored row's data
 ever being written to it. A SQLite-backed store (e.g. :mod:`chimera.archive`) opens one and
-issues every query through :meth:`execute`; nothing touches the raw connection.
+issues every query through :meth:`Database.execute`; nothing touches the raw connection.
 """
 
 import sqlite3

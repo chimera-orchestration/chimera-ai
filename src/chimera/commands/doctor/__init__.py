@@ -43,16 +43,6 @@ def select_checks(names: Sequence[str], checks: Sequence[Check] = CHECKS) -> tup
     return tuple(check for check in checks if check.name in wanted)
 
 
-REPAIR = 'doctor'
-"""The command that repairs a workspace, and so the one that must run in a broken one.
-
-``__main__.main()`` resolves the session's identity before anything parses, which reads
-the archive — so an archive awaiting migration would otherwise take down the very command
-that migrates it. Named here rather than in ``main`` so the exemption sits with the thing
-it describes.
-"""
-
-
 def doctor(
     workspace: Path,
     fix: bool = False,

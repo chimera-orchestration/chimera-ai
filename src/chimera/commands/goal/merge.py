@@ -53,7 +53,7 @@ def merge(
     """Land a finished goal on ``into`` (default: the repo's default branch), then clean up.
 
     The manager's finish-up in one command: pick the goal's **source** branch — the actor
-    branch containing every other actor's work (see :func:`_source`; actors that have
+    branch containing every other actor's work (see :func:`source_branch`; actors that have
     diverged refuse, pointing at ``goal sync``) — fast-forward ``into`` to its tip
     (:func:`_land`; a base with commits of its own refuses: rebase the goal first, in its
     worktree), move any plain checkout off the goal's branches onto the landed base so the

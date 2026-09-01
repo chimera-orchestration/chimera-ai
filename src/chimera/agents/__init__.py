@@ -34,7 +34,7 @@ class AgentSession:
     """A live agent session: its native id, name, status, working directory and summary.
 
     The *registry* view of a session — what a harness claims is running right now —
-    as opposed to :class:`chimera.archive.Session`, the durable record of one. The
+    as opposed to :class:`chimera.archive.ArchiveSession`, the durable record of one. The
     two are deliberately separate types: this one is rebuilt from scratch on every
     liveness check and holds only what a harness will vouch for.
 
