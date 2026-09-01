@@ -1,13 +1,15 @@
 import os
 import shutil
 import subprocess
-from collections.abc import Generator, Iterator
+from collections.abc import Generator, Iterator, Mapping
+from functools import partial
 from pathlib import Path
 
 from giterator import GitError
 from loguru import logger
 
 from chimera.agents import BRANCHED
+
 from chimera.archive import (
     Archive,
     events_orphaned,
@@ -296,6 +298,23 @@ class RuntimeStateDirCheck:
                 yield Finding(self.name, message, resolved=fixing, fixable=True)
 
 
+def _persona(raw: Mapping[str, object] | None) -> str | None:
+    """The captain's persona from a raw workspace config, tolerating any shape.
+
+    ``captain:`` is either a name or a mapping carrying one (see
+    :class:`~chimera.config.CaptainConfig`). Anything else answers ``None``: this feeds a
+    rename, and a config too odd to read simply means no chat row is recognised as the
+    captain's — never an exception out of the command that repairs the workspace.
+    """
+    captain = (raw or {}).get('captain')
+    if isinstance(captain, str):
+        return captain
+    if isinstance(captain, Mapping):
+        name = captain.get('name')
+        return name if isinstance(name, str) else None
+    return None
+
+
 class ArchiveSchemaCheck:
     """The session archive is on the current schema — migrating a pre-trim database.
 
@@ -322,8 +341,17 @@ class ArchiveSchemaCheck:
 
     def run(self, workspace: Path, fix: bool, exclude: Exclusions) -> Iterator[Finding]:
         path = workspace / 'state' / 'archive.db'
+        # the captain's persona is how a pre-grammar chat row is recognised as the
+        # captain's, so the rename can carry its address forward instead of dropping it.
+        # Read tolerantly: doctor runs on workspaces too broken to have a valid config
+        persona = _persona(read_raw(workspace))
         for broken, message, repair, counting in (
-            (needs_migration, 'predates the trimmed session schema', migrate, 'sessions'),
+            (
+                needs_migration,
+                'predates the trimmed session schema',
+                partial(migrate, captain=persona),
+                'sessions',
+            ),
             (events_orphaned, 'has events pointing at a dropped table', repair_events, 'events'),
         ):
             if not broken(path):

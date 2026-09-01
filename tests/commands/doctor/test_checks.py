@@ -22,6 +22,7 @@ from chimera.archive import (
 )
 from chimera.git import Git
 from chimera.commands.doctor.checks import (
+    _persona,
     ArchiveSchemaCheck,
     HarnessContractCheck,
     WorkspaceDirsCheck,
@@ -416,6 +417,14 @@ class TestArchiveSchema:
         # the migration must leave the timeline writable, not merely intact
         with Archive.open(path) as store:
             store.record_event(Event(at=NOON, kind=ACTIVE, platform='claude', native_id='a'))
+
+    def test_the_persona_is_read_from_either_config_shape(self) -> None:
+        # captain: is a name or a mapping carrying one; anything else means no chat row
+        # is recognised as the captain's — never an exception out of the repair command
+        compare(_persona({'captain': 'pegasus'}), expected='pegasus')
+        compare(_persona({'captain': {'name': 'pegasus', 'model': 'opus'}}), expected='pegasus')
+        for odd in ({'captain': {'model': 'opus'}}, {'captain': 42}, {}, None):
+            assert _persona(odd) is None
 
     def test_events_pointing_at_a_dropped_table_are_reported(self, tmpdir: TempDir) -> None:
         ws = _ws(tmpdir)

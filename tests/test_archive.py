@@ -7,6 +7,7 @@ from threading import Barrier, Thread
 import pytest
 from testfixtures import ShouldRaise, TempDir, compare
 
+from chimera.addresses import Address, Captain
 from chimera.archive import (
     ACTIVE,
     SCHEMA,
@@ -14,6 +15,8 @@ from chimera.archive import (
     ArchiveSession,
     Event,
     LEGACY_COLUMNS,
+    back_up,
+    events_orphaned,
     migrate,
     needs_migration,
     repair_events,
@@ -591,6 +594,26 @@ _LEGACY_ROW = (
 )
 
 
+def _indexes(path: Path) -> set[str]:
+    connection = sqlite3.connect(path)
+    try:
+        return {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL"
+            )
+        }
+    finally:
+        connection.close()
+
+
+def _indexes_of_a_fresh_archive(directory: Path) -> set[str]:
+    """What SCHEMA builds from scratch — the yardstick a rebuild must match."""
+    fresh = directory / 'fresh.db'
+    Archive.open(fresh).close()
+    return _indexes(fresh)
+
+
 def orphan_events(path: Path) -> None:
     """An archive whose ``events`` reference a table that has been dropped.
 
@@ -788,6 +811,66 @@ class TestMigration:
         finally:
             saved.close()
 
+    def test_a_captains_chat_is_renamed_not_dropped(self, db_path: Path) -> None:
+        # every chat predates the three-segment grammar, so without the rename a live
+        # captain is stranded at the upgrade: `ch chat --resume` looks for @@captain, a
+        # name no session has ever had, and fails the way this design exists to prevent
+        legacy_archive(db_path, [legacy_row('a', name='pegasus')])
+        migrate(db_path, captain='pegasus')
+        with Archive.open(db_path) as store:
+            compare([s.address for s in store.sessions()], expected=['@@captain'])
+
+    def test_a_managers_chat_is_renamed_not_dropped(self, db_path: Path) -> None:
+        legacy_archive(db_path, [legacy_row('a', name='chimera@manager')])
+        migrate(db_path)
+        with Archive.open(db_path) as store:
+            compare([s.address for s in store.sessions()], expected=['chimera@@manager'])
+
+    def test_every_carried_address_parses(self, db_path: Path) -> None:
+        # the point of the rename: what survives must be usable by the code that reads it
+        legacy_archive(
+            db_path,
+            [
+                legacy_row('a', name='pegasus'),
+                legacy_row('b', name='chimera@manager'),
+                legacy_row('c', name='chimera@g@agent', goal='g', actor='agent'),
+            ],
+        )
+        migrate(db_path, captain='pegasus')
+        with Archive.open(db_path) as store:
+            carried = [s.address for s in store.sessions() if s.address]
+        compare(len(carried), expected=3)
+        for address in carried:
+            Address.parse(address)  # raises if the rename left an unusable claim
+
+    def test_a_name_of_no_known_shape_carries_nothing(self, db_path: Path) -> None:
+        # a hand-launched claude's own name is not evidence of anything
+        legacy_archive(db_path, [legacy_row('a', name='something-a-human-typed')])
+        migrate(db_path, captain='pegasus')
+        with Archive.open(db_path) as store:
+            assert store.sessions()[0].address is None
+
+    def test_a_rebuild_keeps_every_index(self, db_path: Path) -> None:
+        # the rename carries the indexes off to the legacy table under their own names,
+        # so SCHEMA's CREATE INDEX IF NOT EXISTS silently no-ops and the DROP takes them
+        # with it — only a *new* index name survives, which is why this went unnoticed
+        legacy_archive(db_path, [legacy_row('a')])
+        migrate(db_path)
+        compare(_indexes(db_path), expected=_indexes_of_a_fresh_archive(db_path.parent))
+
+    def test_repairing_events_keeps_every_index(self, db_path: Path) -> None:
+        orphan_events(db_path)
+        repair_events(db_path)
+        compare(_indexes(db_path), expected=_indexes_of_a_fresh_archive(db_path.parent))
+
+    def test_two_rebuilds_in_one_second_keep_both_backups(self, db_path: Path) -> None:
+        # one `ch doctor --fix` can migrate and then repair events; VACUUM INTO refuses
+        # an existing file, so a merely-timestamped name takes the second rebuild down
+        legacy_archive(db_path, [legacy_row('a')])
+        first, second = back_up(db_path), back_up(db_path)
+        assert first != second
+        assert first.exists() and second.exists()
+
     def test_repairing_a_healthy_archive_does_nothing(self, db_path: Path) -> None:
         Archive.open(db_path).close()
         compare(repair_events(db_path), expected=0)
@@ -815,6 +898,66 @@ class TestMigration:
         finally:
             connection.close()
         assert not {n for n in names if n.startswith('sessions_fts') or n.startswith('sessions_a')}
+
+
+class TestUpgradeRehearsal:
+    # what a real `ch doctor --fix -c archive-schema` does to a real workspace's archive,
+    # asserted rather than rehearsed by hand against a copy. Every claim here was once a
+    # manual check, and a manual check proves nothing about tomorrow's code.
+
+    def test_an_upgrade_keeps_the_history_usable(self, db_path: Path) -> None:
+        legacy_archive(
+            db_path,
+            [
+                legacy_row('cap', name='pegasus'),  # a chat, pre-grammar
+                legacy_row('mgr', name='chimera@manager'),
+                legacy_row('agt', name='chimera@g@agent', goal='g', actor='agent'),
+                legacy_row('raw', name='a-name-a-human-chose'),  # no claim to anything
+            ],
+        )
+        connection = sqlite3.connect(db_path)
+        connection.execute(
+            'INSERT INTO events (at, kind, platform, native_id) VALUES (?, ?, ?, ?)',
+            (NOON.isoformat(), 'startup', 'claude', 'cap'),
+        )
+        connection.commit()
+        connection.close()
+
+        migrate(db_path, captain='pegasus')
+
+        with Archive.open(db_path) as store:
+            sessions = {s.native_id: s.address for s in store.sessions()}
+            # nothing is lost, and every surviving claim is one the code can act on
+            compare(
+                sessions,
+                expected={
+                    'cap': '@@captain',
+                    'mgr': 'chimera@@manager',
+                    'agt': 'chimera@g@agent',
+                    'raw': None,
+                },
+            )
+            for address in filter(None, sessions.values()):
+                Address.parse(address)
+            compare([e.kind for e in store.events()], expected=['startup'])
+            # …and the timeline is still writable, which counting rows never proves
+            store.record_event(Event(at=NOON, kind=ACTIVE, platform='claude', native_id='cap'))
+            compare(len(store.events()), expected=2)
+
+        assert not needs_migration(db_path)
+        assert not events_orphaned(db_path)
+        compare(_indexes(db_path), expected=_indexes_of_a_fresh_archive(db_path.parent))
+        [backup] = db_path.parent.glob(f'{db_path.name}.backup-*')
+        assert backup.exists()  # the one mutation nothing else can undo
+
+    def test_the_captains_chat_is_reachable_by_address_afterwards(self, db_path: Path) -> None:
+        # the point of the rename: `ch chat --resume` must find the session it left off
+        legacy_archive(db_path, [legacy_row('cap', name='pegasus')])
+        migrate(db_path, captain='pegasus')
+        with Archive.open(db_path) as store:
+            found = store.latest_session_for(None, address=str(Captain()))
+        assert found is not None
+        compare(found.native_id, expected='cap')
 
 
 class TestResumableSessions:

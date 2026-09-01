@@ -33,6 +33,7 @@ lexicographically, so keep them in a single zone (UTC) for a correct timeline.
 import sqlite3
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
+from itertools import count
 from pathlib import Path
 from typing import Self
 
@@ -40,6 +41,7 @@ from pydantic import BaseModel, ConfigDict
 
 from loguru import logger
 
+from chimera.addresses import SEP, Captain, Manager
 from chimera.config import UserError
 from chimera.sqlite import Database
 
@@ -611,7 +613,12 @@ def back_up(path: Path) -> Path:
     obligation met the only way this mutation can meet it. The name carries the moment, so
     a second rebuild never lands on the first one's copy.
     """
-    backup = path.with_name(f'{path.name}.backup-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}')
+    stamp = f'{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}'
+    backup = path.with_name(f'{path.name}.backup-{stamp}')
+    for attempt in count(1):  # one doctor run can both migrate and repair, within a second
+        if not backup.exists():
+            break
+        backup = path.with_name(f'{path.name}.backup-{stamp}-{attempt}')
     with Database.open(path) as db:
         db.execute('back_up', 'VACUUM INTO ?', (str(backup),))
     logger.bind(path=str(backup), bytes=backup.stat().st_size).info('archive: backed up')
@@ -658,6 +665,7 @@ def repair_events(path: Path) -> int:
             f"""
             PRAGMA foreign_keys=OFF;
             PRAGMA legacy_alter_table=ON;
+            {_drop_indexes(db, 'events')}
             ALTER TABLE events RENAME TO events_legacy;
             {SCHEMA}
             INSERT INTO events (at, kind, detail, platform, native_id)
@@ -671,7 +679,49 @@ def repair_events(path: Path) -> int:
         return int(counted.fetchone()['n'])
 
 
-def migrate(path: Path) -> int:
+LAUNCHER_STAMP = 'chimera'
+"""What the dying ``manager`` column held when a launcher, not a human, started the session."""
+
+
+def migrated_address(
+    name: str | None,
+    manager: str | None,
+    goal: str | None,
+    actor: str | None,
+    captain: str | None,
+) -> str | None:
+    """The address a pre-trim session carries forward, or ``None`` for no claim.
+
+    Two rules, and the second is a rename rather than a judgement.
+
+    **A current-grammar name keeps its claim only on evidence.** The dying ``manager``
+    column recorded whether a launcher stamped the session, which is exactly what the
+    address demands; failing that, axes naming a goal worktree follow the actor rather
+    than guessing. Anything else was inferred from geography alone, and geography never
+    entitled a session to an address.
+
+    **An old-grammar name is translated, not dropped.** Chats predate the three-segment
+    grammar: a captain was named for its persona (``pegasus``) and a manager
+    ``<project>@manager``, neither of which the current parser accepts. Dropping them
+    would strand every live chat at the upgrade — ``ch chat --resume`` would look for
+    ``@@captain``, a name no session has ever had, and fail exactly the way this design
+    exists to prevent. The name *is* the evidence here: chimera chose it at launch, and
+    these two shapes are its own, so a row wearing one is a chat chimera started.
+    """
+    if name is None:
+        return None
+    if name.count(SEP) == 2:  # already the current grammar
+        entitled = manager == LAUNCHER_STAMP or (goal is not None and actor is not None)
+        return name if entitled else None
+    if captain and name == captain:
+        return str(Captain())
+    project, separator, role = name.partition(SEP)
+    if separator and project and role == Manager.actor:
+        return str(Manager(project=project))
+    return None
+
+
+def migrate(path: Path, captain: str | None = None) -> int:
     """Rebuild a pre-trim archive onto the current schema; return the rows carried over.
 
     A rebuild rather than ``ALTER TABLE … DROP COLUMN``, because the FTS triggers
@@ -719,19 +769,31 @@ def migrate(path: Path) -> int:
             DROP INDEX IF EXISTS sessions_by_manager;
             """,
         )
+        carried = [
+            (row['platform'], row['native_id'], address)
+            for row in db.execute(
+                'migrate: read legacy',
+                'SELECT platform, native_id, name, manager, goal, actor FROM sessions',
+            ).fetchall()
+            if (
+                address := migrated_address(
+                    row['name'], row['manager'], row['goal'], row['actor'], captain
+                )
+            )
+            is not None
+        ]
         db.executescript(
             'migrate: rebuild sessions',
             f"""
             PRAGMA foreign_keys=OFF;
             PRAGMA legacy_alter_table=ON;
+            {_drop_indexes(db, 'sessions')}
             ALTER TABLE sessions RENAME TO sessions_legacy;
             {SCHEMA}
             INSERT INTO sessions
                 (platform, native_id, status, started_at, model, address, addressable,
                  harness_version, ended_at, cwd, transcript, workspace, project, goal, actor)
-            SELECT platform, native_id, status, started_at, model,
-                   CASE WHEN manager = 'chimera' OR (goal IS NOT NULL AND actor IS NOT NULL)
-                        THEN name ELSE NULL END,
+            SELECT platform, native_id, status, started_at, model, NULL,
                    1, NULL, ended_at, cwd, transcript, workspace, project, goal, actor
             FROM sessions_legacy;
             DROP TABLE sessions_legacy;
@@ -739,8 +801,36 @@ def migrate(path: Path) -> int:
             PRAGMA foreign_keys=ON;
             """,
         )
+        for platform, native_id, address in carried:
+            db.execute(
+                'migrate: address',
+                'UPDATE sessions SET address = ? WHERE platform = ? AND native_id = ?',
+                (address, platform, native_id),
+            )
+        logger.bind(sessions=len(carried)).info('migrate: addresses carried forward')
         counted = db.execute('migrate: count', 'SELECT COUNT(*) AS n FROM sessions')
         return int(counted.fetchone()['n'])
+
+
+def _drop_indexes(db: Database, table: str) -> str:
+    """``DROP INDEX`` for every index on ``table``, as a script fragment.
+
+    A rebuild renames the table aside, and its indexes go with it under their original
+    names. ``SCHEMA``'s ``CREATE INDEX IF NOT EXISTS`` then finds those names already
+    taken and does nothing, and dropping the renamed table takes the indexes with it —
+    leaving the rebuilt table indexless while the code reads as though it recreated them.
+    Only a *new* index name survives that, which is why ``sessions_by_address`` was the
+    one left standing. Dropping them first makes the ``IF NOT EXISTS`` meaningful.
+    """
+    names = [
+        row['name']
+        for row in db.execute(
+            'indexes',
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
+            (table,),
+        ).fetchall()
+    ]
+    return '\n'.join(f'DROP INDEX IF EXISTS {name};' for name in names)
 
 
 def _columns(db: Database, table: str) -> set[str]:
