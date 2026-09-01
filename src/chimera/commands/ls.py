@@ -115,11 +115,19 @@ def _actor_row(
 ) -> Row:
     """A goal actor's slot: any session physically in its ``<goal>@<actor>`` worktree fills
     it, chimera-launched or not (a worktree is a strong signal, unlike the captain/manager's
-    cwd-wide inference) — else the latest archived session at the address.
+    cwd-wide inference) — else the latest archived session **at the address**.
+
+    The history half asks by address rather than by axes deliberately. Every session
+    records the axes of wherever it sat, addressed or not, so a raw ``claude`` or a
+    one-shot ``claude -p`` run in the worktree matches the axes and would take the goal's
+    slot — and its mailbox with it, since the row is keyed by the address it fills. That
+    is geography entitling a session to a slot, which is the failure this design exists
+    to end; the live half above may read geography, because "who is writing here" really
+    is a question about the directory.
     """
     address = str(Actor(project, goal, actor))
     live = next((a for a in live_in_goal if worktree_actor(a.cwd, worktrees) == actor), None)
-    last = None if live is not None else archive.latest_session_for(project, goal, actor)
+    last = None if live is not None else archive.latest_session_for(project, address=address)
     return Row(address, live, last, mail_map.get(address, _NO_MAIL))
 
 

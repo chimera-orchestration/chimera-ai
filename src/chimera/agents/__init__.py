@@ -248,6 +248,18 @@ class Agent(ABC):
         """
         ...
 
+    def available(self) -> bool:
+        """Whether this harness can be consulted at all right now.
+
+        Distinct from "nothing is live". A harness that cannot answer returns an empty
+        listing, which is indistinguishable from an empty machine — and acting on that
+        mistake is destructive: :func:`~chimera.commands.agent.reconcile` would read it
+        as every session having died and close every open row. Anything that merely
+        *reads* a listing may treat unavailable as empty; anything that *writes* from one
+        must ask this first.
+        """
+        return True
+
     @abstractmethod
     def reported(self, cwd: Path | None = None) -> list[AgentSession]:
         """Every session the harness's *registry* claims is live in ``cwd`` (``None`` = anywhere).

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from chimera.addresses import Actor
 from chimera.agent_env import ai_session
 from chimera.agents import BRANCHED, AgentSession
 from chimera.agents.registry import AGENTS, AgentSpec
@@ -212,7 +213,18 @@ def reconcile(workspace: Path, listing: list[AgentSession]) -> list[ArchiveSessi
     correction costs nothing: pure SQL, a registry query and a pid check, no model turn
     (see AGENTS.md's *No tokens for admin*). ``listing`` is the live sessions the caller
     already gathered, so the reconciliation adds no work of its own.
+
+    **A harness that cannot be consulted is not a harness reporting nothing.** With
+    ``claude`` off the PATH — a cron shell, a stripped environment — its registry query
+    answers with an empty list, and closing every open row on that basis would declare
+    every agent on the machine dead from a read-only lister. So the listing is only
+    trusted while every harness can actually be asked.
     """
+    if unavailable := [name for name, harness in AGENTS.items() if not harness.available()]:
+        logger.bind(harnesses=unavailable).warning(
+            'agent: harness unavailable, leaving open sessions alone'
+        )
+        return []
     live = {(session.id) for session in listing}
     at = datetime.now(timezone.utc)
     with archive(workspace) as store:
@@ -295,7 +307,10 @@ def agent(
 def resume_target(cwd: Path, platform: str, project: str, goal: str, actor: str) -> str | None:
     """The archived native session id ``agent resume`` resumes by, else ``None``.
 
-    Session identity lives in the archive: the address ``(project, goal, actor)`` maps
+    Session identity lives in the archive, and is asked for **by address**, never by the
+    axes that happen to match it: a raw ``claude`` or an errand's one-shot run in the same
+    worktree records those axes too, and reviving a human's private conversation under the
+    agent's name is precisely what an address is for preventing. The address maps
     to its newest session — live or dead, resuming is how a dead one is revived — and
     that session's immutable native id is the resume target; the registry name is
     display-only (a rename in the harness's UI must not orphan the session). ``None`` —
@@ -311,7 +326,9 @@ def resume_target(cwd: Path, platform: str, project: str, goal: str, actor: str)
     except NotInWorkspaceError:
         return None
     with archive(workspace) as store:
-        session = store.latest_session_for(project, goal, actor, platform=platform, resumable=True)
+        session = store.latest_session_for(
+            project, address=str(Actor(project, goal, actor)), platform=platform, resumable=True
+        )
     if session is None:
         return None
     logger.bind(

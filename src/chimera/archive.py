@@ -402,14 +402,18 @@ class Archive:
         traceback — the failure that started all of this. Off by default: a *listing*
         wants the truth about what ran most recently, pruned or not.
         """
-        clauses = 'sessions.project IS ? AND sessions.goal IS ? AND sessions.actor IS ?'
-        params: list[str | None] = [project, goal, actor]
+        # An address identifies a session outright, so it matches on its own: the axes
+        # are where a session sat, and requiring them too would put geography back in the
+        # way of the very lookup that exists to stop consulting it. Without an address
+        # the axes are all there is, and they narrow as before.
+        if address is not None:
+            clauses, params = 'sessions.address=?', [address]
+        else:
+            clauses = 'sessions.project IS ? AND sessions.goal IS ? AND sessions.actor IS ?'
+            params = [project, goal, actor]
         if platform is not None:
             clauses += ' AND sessions.platform=?'
             params.append(platform)
-        if address is not None:
-            clauses += ' AND sessions.address=?'
-            params.append(address)
         rows = self._db.execute(
             'latest_session_for',
             f"""

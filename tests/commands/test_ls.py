@@ -165,6 +165,19 @@ class TestBoard:
         assert project.manager.last is not None
         assert project.manager.last.native_id == 's1'
 
+    def test_an_unaddressed_neighbour_never_fills_a_goal_slot(
+        self, tmpdir: TempDir, workspace: Path, store: Archive, mailbox: Comms
+    ) -> None:
+        # every session records the axes of wherever it sat, so a raw `claude` or a
+        # one-shot errand in the worktree matches them — and the row is keyed by the
+        # address it fills, so taking the slot takes the mailbox with it
+        _project(tmpdir, workspace, 'alpha', 'g')
+        _record(workspace, 'hand-launched', address=None, project='alpha', goal='g', actor='agent')
+        [project] = board(Scope(workspace, None, None), [], store, mailbox).projects
+        [goal] = project.goals
+        agent = next(row for row in goal.actors if row.address == 'alpha@g@agent')
+        assert agent.last is None  # the slot stays empty rather than borrowing a stranger
+
     def test_goal_actors_union_live_and_archived(
         self, tmpdir: TempDir, workspace: Path, store: Archive, mailbox: Comms
     ) -> None:

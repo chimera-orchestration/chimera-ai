@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from functools import cache
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from chimera.agents import BRANCHED, Agent, AgentSession
+from chimera.agents import BRANCHED, RESUME, STARTUP, Agent, AgentSession
 from chimera.config import UserError
 from chimera.processes import process_create_time
 
@@ -30,6 +31,16 @@ gets ``cli``). Undocumented but field-verified: claude stamps it into its own pr
 per-mode, so a ``-p`` spawned from inside a session never inherits the parent's value."""
 
 FORK_SOURCE = 'fork'
+
+CONTINUING_SOURCES = frozenset({'clear', 'compact'})
+"""Sources that continue an existing session rather than starting one.
+
+Claude fires SessionStart when a conversation is wiped (``/clear``) or condensed
+(``/compact``); the process, the id and the row are all the same one.
+"""
+
+KNOWN = frozenset({STARTUP, RESUME})
+"""The sources that already mean what chimera's contract means by them."""
 """SessionStart ``source`` when a running session is backgrounded. The fork gets a brand
 new id everywhere — env, registry and transcript — so no id survives a bridge; the payload
 doesn't name the parent either (five keys, and no ``model``)."""
@@ -248,9 +259,23 @@ class Claude(Agent):
         ``fork`` is claude's word for backgrounding a running session, which mints an
         entirely new id — no id survives a bridge — so it maps to ``branched``: the
         session is new, but its address is inherited rather than launched.
+
+        ``clear`` and ``compact`` are the same session continuing with its conversation
+        wiped or condensed, so they answer ``resume``: the row already exists, and — the
+        part that bit — nothing new should be *claimed*. Passing claude's own word
+        through instead put them down the cold-start path, where a ``/compact`` could
+        consume the launch record meant for a session genuinely starting in that
+        directory, leaving the real one unaddressed. Both are observed: a real archive
+        holds four ``compact`` events.
+
+        Anything unrecognised is treated as a cold start, which is the safe direction: a
+        launch that goes unclaimed costs an address, where a claim taken by the wrong
+        session costs someone else's mail.
         """
-        source = str(payload.get('source') or 'startup')
-        return BRANCHED if source == FORK_SOURCE else source
+        source = str(payload.get('source') or STARTUP)
+        if source == FORK_SOURCE:
+            return BRANCHED
+        return RESUME if source in CONTINUING_SOURCES else source if source in KNOWN else STARTUP
 
     def sessions(self) -> list[AgentSession]:
         """Every checked claude session, enriched with a one-line summary.
@@ -260,6 +285,10 @@ class Claude(Agent):
         read from its transcript under ``projects``.
         """
         return [self._enriched(session) for session in self.checked()]
+
+    def available(self) -> bool:
+        """Whether the ``claude`` binary is on the PATH to be asked."""
+        return shutil.which('claude') is not None
 
     def reported(self, cwd: Path | None = None) -> list[AgentSession]:
         """What claude's own registry (``claude agents --json``) claims is live.

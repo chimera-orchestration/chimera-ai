@@ -12,6 +12,7 @@ from typing import Any
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 
 from chimera import __main__ as chimera_main
+from chimera.addresses import Actor
 from chimera.agents import AgentSession
 from chimera.agents.claude import Claude
 from chimera.agents.registry import AgentSpec
@@ -254,10 +255,22 @@ def test_resume_by_archived_id_reasserts_the_canonical_name(
     compare(calls, expected=[(expected, worktree)])
 
 
+_CANONICAL = '<the address this session was launched under>'
+"""Sentinel: record the canonical address rather than an explicit (or absent) one."""
+
+
 def _address_archived(
-    workspace: Path, native_id: str, name: str, project: str = 'myproject'
+    workspace: Path,
+    native_id: str,
+    project: str = 'myproject',
+    address: str | None = _CANONICAL,
 ) -> None:
-    """A recorded session for ``<project>@g@agent`` — under whatever display name."""
+    """A recorded session holding the ``<project>@g@agent`` address, unless told otherwise.
+
+    The address is what chimera stamped at launch and is immutable; the registry's
+    display name is a separate, mutable thing this row does not carry at all — which is
+    the point of resolving a resume through here.
+    """
     with Archive.open(workspace / 'state' / 'archive.db') as store:
         store.record_session(
             ArchiveSession(
@@ -265,7 +278,7 @@ def _address_archived(
                 native_id=native_id,
                 status='other',
                 started_at=datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc),
-                address=name,
+                address=str(Actor(project, 'g', 'agent')) if address is _CANONICAL else address,
                 project=project,
                 goal='g',
                 actor='agent',
@@ -279,8 +292,21 @@ def test_resume_target_answers_from_the_archive_despite_a_rename(
     ws = tmpdir.makedir('ws')
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    _address_archived(ws, 'uuid-renamed', name='fun UI rename')  # canonical name long gone
+    _address_archived(ws, 'uuid-renamed')  # whatever the registry now calls it
     assert resume_target(ws, 'claude', 'myproject', 'g', 'agent') == 'uuid-renamed'
+
+
+def test_resume_target_ignores_an_unaddressed_session_sharing_the_worktree(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # a raw `claude` or a one-shot errand records the same axes; reviving a human's
+    # private conversation under the agent's name is what an address prevents
+    ws = tmpdir.makedir('ws')
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    _address_archived(ws, 'uuid-agent')
+    _address_archived(ws, 'uuid-a-human-opened-this', address=None)  # hand-launched
+    compare(resume_target(ws, 'claude', 'myproject', 'g', 'agent'), expected='uuid-agent')
 
 
 def test_resume_target_is_none_for_an_unseen_address(tmpdir: TempDir, replace: Replacer) -> None:
@@ -552,7 +578,7 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
     tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     os.chdir(project)
-    _address_archived(ws, 'uuid-1234', name='renamed in the UI', project='proj')
+    _address_archived(ws, 'uuid-1234', project='proj')
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
     digest = sha256(AGENT_ROLE_TEXT.encode()).hexdigest()
@@ -1608,6 +1634,25 @@ class TestReconcile:
     def _rows(self, ws: Path) -> dict[str, str]:
         with Archive.open(ws / 'state' / 'archive.db') as store:
             return {s.native_id: s.status for s in store.sessions()}
+
+    def test_an_unavailable_harness_closes_nothing(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        # `claude` off the PATH answers with an empty registry, which is indistinguishable
+        # from an empty machine — closing every open row on that would have a read-only
+        # lister declare every agent dead
+        ws = tmpdir.makedir('ws')
+        self._archived(ws, 'alive')
+        replace.in_environ('PATH', '')
+        compare(reconcile(ws, []), expected=[])
+        compare(self._rows(ws), expected={'alive': 'startup'})  # untouched
+        full_logs.check_present(
+            {
+                'level': 'WARNING',
+                'harnesses': ['claude'],
+                'message': 'agent: harness unavailable, leaving open sessions alone',
+            }
+        )
 
     def test_closes_a_session_no_harness_reports(self, tmpdir: TempDir) -> None:
         ws = tmpdir.makedir('ws')

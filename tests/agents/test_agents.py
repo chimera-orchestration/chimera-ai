@@ -6,7 +6,8 @@ from testfixtures import Replacer, compare
 import os
 
 from chimera import agents
-from chimera.agents import AgentSession, _distrusted
+from chimera.agents import Agent, AgentSession, _distrusted
+from chimera.agents.claude import Claude
 from chimera.processes import process_create_time
 
 
@@ -92,3 +93,9 @@ def test_an_already_marked_session_is_not_probed(replace: Replacer) -> None:
     replace.in_module(os.kill, _dead, module=os)
     session = AgentSession('i', 'n', 'idle', Path('/w'), None, pid=999999, stale='registry remnant')
     compare(_distrusted(session), expected=session)
+
+
+def test_a_harness_is_available_unless_its_adapter_says_otherwise() -> None:
+    # the base class's default, reached past Claude's override: an adapter with no way of
+    # being unreachable never blocks reconciliation, while one that knows better can
+    assert Agent.available(Claude())

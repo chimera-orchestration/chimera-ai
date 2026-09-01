@@ -712,9 +712,38 @@ class TestLifecycle:
         # claude's word for backgrounding a running session; the id is new, the address isn't
         compare(Claude().lifecycle({'source': 'fork'}), expected='branched')
 
-    def test_other_sources_pass_through(self) -> None:
+    def test_a_wiped_or_condensed_conversation_is_a_continuation(self) -> None:
+        # /clear and /compact are the same session, same id, same row. Passing claude's
+        # own word through put them on the cold-start path, where a compact could consume
+        # the launch record meant for a session genuinely starting in that directory —
+        # and compacts are real: a live archive holds four of them
+        for source in ('clear', 'compact'):
+            compare(Claude().lifecycle({'source': source}), expected='resume')
+
+    def test_known_sources_pass_through(self) -> None:
         compare(Claude().lifecycle({'source': 'resume'}), expected='resume')
         compare(Claude().lifecycle({}), expected='startup')
+
+    def test_an_unheard_of_source_is_a_cold_start(self) -> None:
+        # the safe direction: an unclaimed launch costs an address, a claim taken by the
+        # wrong session costs someone else's mail
+        compare(Claude().lifecycle({'source': 'something-claude-added'}), expected='startup')
+
+    def test_the_contract_admits_nothing_else(self) -> None:
+        for source in ('startup', 'resume', 'fork', 'clear', 'compact', 'brand-new'):
+            assert Claude().lifecycle({'source': source}) in {'startup', 'resume', 'branched'}
+
+
+class TestAvailability:
+    # "nothing is live" and "I cannot answer" are different, and reconcile writes from
+    # the difference — an unavailable harness must never read as an empty machine
+
+    def test_available_when_the_binary_is_on_the_path(self) -> None:
+        assert Claude().available()
+
+    def test_unavailable_without_it(self, replace: Replacer) -> None:
+        replace.in_environ('PATH', '')
+        assert not Claude().available()
 
 
 def test_a_foreground_start_supplies_and_reports_its_own_session_id(

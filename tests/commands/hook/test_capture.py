@@ -371,6 +371,21 @@ class TestAddressIsClaimedOnEvidence:
                 )
             )
 
+    def test_a_compact_claims_nothing(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # /compact and /clear fire SessionStart for a session that already exists. Treated
+        # as cold starts they consumed the launch record belonging to a session genuinely
+        # starting in that directory, leaving the real one unaddressed
+        worktree = self._worktree(tmpdir, replace)
+        ws = tmpdir.path / 'ws'
+        self._record_launch(ws, worktree, 'proj@g@agent')
+        _start(worktree, 'uuid-compacting', 'compact')
+        _start(worktree, 'uuid-the-real-launch', 'startup')
+        addressed = {s.native_id: s.address for s in _archived(ws)}
+        compare(
+            addressed,
+            expected={'uuid-compacting': None, 'uuid-the-real-launch': 'proj@g@agent'},
+        )
+
     def test_a_recorded_launch_is_claimed(self, tmpdir: TempDir, replace: Replacer) -> None:
         worktree = self._worktree(tmpdir, replace)
         ws = tmpdir.path / 'ws'
@@ -456,6 +471,64 @@ class TestAddressIsClaimedOnEvidence:
         _start(worktree, 'uuid-real', 'startup')
         addressed = {s.native_id: s.address for s in _archived(ws)}
         compare(addressed, expected={'uuid-draft': None, 'uuid-real': 'proj@g@agent'})
+
+
+class TestSessionEnd:
+    def test_an_end_that_finds_no_row_says_so(
+        self, tmpdir: TempDir, replace: Replacer, full_logs: LogCapture
+    ) -> None:
+        # the row is written under whatever `identity` anchored on — the transcript stem.
+        # An end keyed by the payload id instead was an UPDATE matching nothing: no
+        # warning, no event, and a row left open forever, outranking every real resume
+        # candidate. The divergence that motivates this is observed, not hypothetical
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+        session_end(ws, 'a-session-nobody-recorded', 'prompt_input_exit')
+        compare(_archived(ws), expected=[])
+        full_logs.check_present(
+            {
+                'level': 'WARNING',
+                'session': 'a-session-nobody-recorded',
+                'cwd': str(ws),
+                'message': 'hook session-end: no recorded session, nothing to close',
+            }
+        )
+
+    def test_an_end_closes_the_session_it_names(self, tmpdir: TempDir, replace: Replacer) -> None:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+        _start(ws, 'uuid-a', 'startup')
+        session_end(ws, 'uuid-a', 'prompt_input_exit')
+        [session] = _archived(ws)
+        assert session.ended_at is not None
+        compare(session.status, expected='prompt_input_exit')
+
+
+class TestTranscript:
+    def test_a_payload_naming_no_transcript_records_none(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # Path('') is Path('.') — truthy, and it *exists*. Stored, the row reads as
+        # resumable and gets handed to `claude --resume`, which is the "No conversation
+        # found" traceback this whole design started from; it also fails the harness
+        # contract check forever, since Path('.').stem can never be a session id
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+        _start(ws, 'uuid-a', 'startup', transcript='')
+        [session] = _archived(ws)
+        assert session.transcript is None
+        assert not session.transcript_missing  # nothing recorded, so nothing lost
+
+    def test_a_named_transcript_is_kept(self, tmpdir: TempDir, replace: Replacer) -> None:
+        tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+        ws = tmpdir.path / 'ws'
+        replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+        _start(ws, 'uuid-a', 'startup', transcript='/t/uuid-a.jsonl')
+        [session] = _archived(ws)
+        compare(session.transcript, expected=Path('/t/uuid-a.jsonl'))
 
 
 class TestCrowdingWarning:

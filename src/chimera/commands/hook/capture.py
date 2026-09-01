@@ -164,7 +164,7 @@ def session_start(agent: Agent, payload: Mapping[str, object], env: Mapping[str,
                 addressable=conversation,
                 harness_version=env.get(HARNESS_VERSION_VAR) or None,
                 cwd=cwd,
-                transcript=Path(str(payload.get('transcript_path') or '')),
+                transcript=_transcript(payload),
                 workspace=workspace.name,
                 project=project,
                 goal=goal,
@@ -175,6 +175,18 @@ def session_start(agent: Agent, payload: Mapping[str, object], env: Mapping[str,
             Event(at=now, kind=lifecycle, platform=agent.platform, native_id=native_id)
         )
     _warn_if_crowded(cwd, native_id, lifecycle, conversation)
+
+
+def _transcript(payload: Mapping[str, object]) -> Path | None:
+    """The payload's transcript path, or ``None`` when it names none.
+
+    Never ``Path('')``: that is ``Path('.')``, which is truthy and *exists*, so a session
+    with no transcript would read as resumable and be handed to ``claude --resume`` — the
+    "No conversation found" traceback this design started from. It would also fail the
+    harness contract check, whose stem comparison ``Path('.')`` can never satisfy.
+    """
+    raw = payload.get('transcript_path')
+    return Path(str(raw)) if raw else None
 
 
 def _warn_if_crowded(cwd: Path, native_id: str, lifecycle: str, conversation: bool) -> None:
@@ -198,24 +210,36 @@ def _warn_if_crowded(cwd: Path, native_id: str, lifecycle: str, conversation: bo
         )
 
 
-def session_end(cwd: Path, session_id: str, reason: str, extra: Mapping[str, object] = {}) -> None:
+def session_end(
+    cwd: Path, session_id: str, reason: str, extra: Mapping[str, object] | None = None
+) -> None:
     """Mark a session ended from a SessionEnd hook. No-op outside any workspace.
 
     Appends the ``end`` event (``reason`` as detail) — unless the session was never
     recorded (its start predated the hooks), where there is no row to stitch it to.
     ``extra`` is whatever else rode the payload — logged via :func:`unmodeled`.
     """
-    unmodeled('session-end', session_id, extra)
+    unmodeled('session-end', session_id, extra or {})
     axes = _axes(cwd)
     if axes is None:
         return
     at = datetime.now(timezone.utc)
     with archive(axes[0]) as store:
-        store.end_session('claude', session_id, at=at, status=reason)
-        if store.session('claude', session_id) is not None:
-            store.record_event(
-                Event(at=at, kind='end', detail=reason, platform='claude', native_id=session_id)
+        if store.session('claude', session_id) is None:
+            # the row was written under whatever `identity` anchored on at SessionStart,
+            # which is the transcript stem — documented, and the one channel that did not
+            # misbehave when the payload id diverged. An end that can't find its row is
+            # therefore either a session older than the hooks, or that divergence
+            # recurring; both are worth a line, and neither may pass silently, which is
+            # what an UPDATE matching nothing did.
+            logger.bind(session=session_id, cwd=str(cwd)).warning(
+                'hook session-end: no recorded session, nothing to close'
             )
+            return
+        store.end_session('claude', session_id, at=at, status=reason)
+        store.record_event(
+            Event(at=at, kind='end', detail=reason, platform='claude', native_id=session_id)
+        )
 
 
 def _axes(cwd: Path) -> _Axes | None:
