@@ -106,11 +106,15 @@ trails `ch help -v also lists…`; `ch doctor` reveals the count of passing chec
 ## Agent-restricted options
 
 An option too risky to trust to an AI agent's own judgement (`--force`, `--dangerous`) is named
-in `chimera.agent_env.RESTRICTED_OPTIONS`. When `chimera.agent_env.ai_session()` is true —
-either signal: a harness marker (`running_under_ai_agent()`, currently `CLAUDECODE`) *or* a
-the archive knowing this process to be a session it recorded (so a future harness with
-no marker of its own still can't hand the options back, provided chimera launched it) —
-`__main__.main()` builds the Click command tree via
+in `chimera.agent_env.RESTRICTED_OPTIONS`, and stripped whenever
+`chimera.agent_env.ai_session()` is true.
+
+That answers true on **either** of two signals, so neither has to be reliable alone:
+- the harness's own marker (`running_under_ai_agent()`, currently `CLAUDECODE`);
+- the archive knowing this process to be a session it recorded — which still catches a
+  future harness that sets no marker at all, provided chimera launched it.
+
+When it is true, `__main__.main()` builds the Click command tree via
 `typer.main.get_command(app)` and strips any parameter matching `RESTRICTED_OPTIONS` from every
 command's `.params` before invoking it (`_strip_restricted_options`) — not hidden, physically
 absent, so Click's own parser, `--help`, and `ch help`/`ch help -v`/`--json` (which all read
@@ -121,18 +125,21 @@ points point at `main()`, not `app` directly — `Typer.__call__` rebuilds an un
 scratch on every call, so stripping has to happen on a tree we build and invoke ourselves.
 
 `RESTRICTED_COMMANDS` (same module) is the identical strip one level up: a whole command
-that only makes sense at a human's terminal (`logtail`, which blocks following the live log
-until Ctrl-C) is deleted from **every** AI session's tree — captain included, unlike the
-per-role allowlists, which narrow further but never grant these back (a test keeps the two
-sets disjoint). Same trigger, same absence-not-admonition semantics; an agent wanting log
-content reads the JSONL directly.
+that only makes sense at a human's terminal is deleted from **every** AI session's tree —
+captain included, unlike the per-role allowlists, which narrow further but never grant these
+back (a test keeps the two sets disjoint). Same trigger, same absence-not-admonition
+semantics. Three today, each for a stated reason in the source beside them: `logtail` and
+`prompt edit` both *block* — one following the log until Ctrl-C, the other on `$EDITOR` —
+which is a dead end for an agent, and `dashboard` is `ls`'s colourised twin, whose ANSI is
+noise to something parsing text. In each case the capability isn't lost, only the human-shaped
+door to it: read the JSONL, write the template after `ch prompt init`, run `ch ls`.
 
 The `--` passthrough tail is the one place this strip can't reach — `PassthroughCommand`
 splits it off before Click parses. Its fence is per-harness: each `Agent` subclass declares
 its own bypass spellings (`Agent.restricted`, e.g. claude's `--dangerously-skip-permissions`),
 and `chimera.commands.agent.refuse_restricted` — called by every launcher once the spec is
 resolved — refuses them (never silently drops: a session launched *without* the bypass its
-caller asked for would just be confusing). It triggers on the same `ai_session()` pair.
+caller asked for would just be confusing). It triggers on the same `ai_session()` test, on either of its two signals.
 
 ## Role-scoped commands
 
