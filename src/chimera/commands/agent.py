@@ -4,7 +4,6 @@ from pathlib import Path
 
 from loguru import logger
 
-from chimera.addresses import Actor
 from chimera.agent_env import ai_session
 from chimera.agents import BRANCHED, AgentSession
 from chimera.agents.registry import AGENTS, AgentSpec
@@ -302,8 +301,14 @@ def agent(
     )
 
 
-def resume_target(cwd: Path, platform: str, project: str, goal: str, actor: str) -> str | None:
-    """The archived native session id ``agent resume`` resumes by, else ``None``.
+def resume_target(cwd: Path, platform: str, address: str) -> str | None:
+    """The archived native session id a resume should revive, else ``None``.
+
+    Takes the **address**, so every launcher that revives something can use it — a goal
+    actor's, but equally the captain's or a manager's. ``ch chat --resume`` went by
+    registry name alone, which the address grammar change would have stranded: it looked
+    for ``@@captain``, a name no session had ever carried, while the row itself was right
+    there under the address the migration had just given it.
 
     Session identity lives in the archive, and is asked for **by address**, never by the
     axes that happen to match it: a raw ``claude`` or an errand's one-shot run in the same
@@ -324,14 +329,12 @@ def resume_target(cwd: Path, platform: str, project: str, goal: str, actor: str)
     except NotInWorkspaceError:
         return None
     with archive(workspace) as store:
-        session = store.latest_session_for(
-            project, address=str(Actor(project, goal, actor)), platform=platform, resumable=True
-        )
+        session = store.latest_session_for(None, address=address, platform=platform, resumable=True)
     if session is None:
         return None
-    logger.bind(
-        platform=platform, native_id=session.native_id, project=project, goal=goal, actor=actor
-    ).info('agent resume: archived session')
+    logger.bind(platform=platform, native_id=session.native_id, address=address).info(
+        'agent resume: archived session'
+    )
     return session.native_id
 
 

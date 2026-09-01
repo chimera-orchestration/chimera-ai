@@ -293,7 +293,7 @@ def test_resume_target_answers_from_the_archive_despite_a_rename(
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     _address_archived(ws, 'uuid-renamed')  # whatever the registry now calls it
-    assert resume_target(ws, 'claude', 'myproject', 'g', 'agent') == 'uuid-renamed'
+    assert resume_target(ws, 'claude', 'myproject@g@agent') == 'uuid-renamed'
 
 
 def test_resume_target_ignores_an_unaddressed_session_sharing_the_worktree(
@@ -306,18 +306,18 @@ def test_resume_target_ignores_an_unaddressed_session_sharing_the_worktree(
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     _address_archived(ws, 'uuid-agent')
     _address_archived(ws, 'uuid-a-human-opened-this', address=None)  # hand-launched
-    compare(resume_target(ws, 'claude', 'myproject', 'g', 'agent'), expected='uuid-agent')
+    compare(resume_target(ws, 'claude', 'myproject@g@agent'), expected='uuid-agent')
 
 
 def test_resume_target_is_none_for_an_unseen_address(tmpdir: TempDir, replace: Replacer) -> None:
     ws = tmpdir.makedir('ws')
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    assert resume_target(ws, 'claude', 'myproject', 'g', 'agent') is None
+    assert resume_target(ws, 'claude', 'myproject@g@agent') is None
 
 
 def test_resume_target_is_none_outside_any_workspace(tmpdir: TempDir) -> None:
-    assert resume_target(tmpdir.path, 'claude', 'myproject', 'g', 'agent') is None
+    assert resume_target(tmpdir.path, 'claude', 'myproject@g@agent') is None
 
 
 def _project_with_worktree(tmpdir: TempDir) -> Path:
@@ -623,11 +623,10 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
             },
             {
                 'level': 'INFO',
+                'goal': 'g',
                 'platform': 'claude',
                 'native_id': 'uuid-1234',
-                'project': 'proj',
-                'goal': 'g',
-                'actor': 'agent',
+                'address': 'proj@g@agent',
                 'message': 'agent resume: archived session',
             },
             # no `agent: launching` — a resume records no launch to be claimed

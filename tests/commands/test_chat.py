@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from hashlib import sha256
 from collections.abc import Iterable
 from pathlib import Path
@@ -8,6 +9,7 @@ from testfixtures import Replacer, ShouldRaise, TempDir, compare
 from chimera.addresses import Captain, Manager
 from chimera.agent_env import ROLE_CAPTAIN, ROLE_MANAGER
 from chimera.agents import AgentSession
+from chimera.archive import Archive, ArchiveSession
 from chimera.agents.claude import Claude
 from chimera.commands.chat import ChatAlreadyLiveError, GoalHasAgentError, chat, chat_target
 from chimera.config import ProjectConfig, UserError
@@ -32,6 +34,21 @@ MANAGER_TEXT = f'# Role: manager\n\n{prime(ROLE_MANAGER, project="proj")}'
 
 def _project_obj(directory: Path) -> Project:
     return Project(directory, ProjectConfig(kind='project', repo=Path('/r')))
+
+
+def _archived_chat(workspace: Path, native_id: str, address: str) -> None:
+    """A chat session recorded under ``address`` — what a migration leaves behind."""
+    with Archive.open(workspace / 'state' / 'archive.db') as store:
+        store.record_session(
+            ArchiveSession(
+                platform='claude',
+                native_id=native_id,
+                status='other',
+                started_at=datetime(2026, 7, 17, 9, 0, tzinfo=timezone.utc),
+                address=address,
+                workspace=workspace.name,
+            )
+        )
 
 
 def _stub(replace: Replacer, live: Iterable[AgentSession] = ()) -> list[object]:
@@ -78,11 +95,36 @@ class TestChat:
         assert chat(ws, 'pegasus') is None  # no note: nothing to report
         compare(calls, expected=[(['claude', '--session-id', SESSION_ID, '--name', 'pegasus'], ws)])
 
-    def test_resume_revives_by_name(self, tmpdir: TempDir, replace: Replacer) -> None:
+    def test_resume_revives_by_name_when_the_archive_has_never_seen_it(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
         ws = tmpdir.makedir('lycia')
         calls = _stub(replace)
         chat(ws, 'pegasus', resume=True)
         compare(calls, expected=[(['claude', '--resume', 'pegasus'], ws)])
+
+    def test_resume_revives_by_archived_id_not_by_name(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # a chat went by registry name alone, which the address grammar change would have
+        # stranded: it looked for @@captain, a name no session ever carried, while the row
+        # sat right there under the address the migration had just given it. `agent
+        # resume` has always resolved through the archive; a chat is no different
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+        replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'lycia'))
+        ws = tmpdir.path / 'lycia'
+        _archived_chat(ws, 'uuid-the-captains-last-session', str(Captain()))
+        calls = _stub(replace)
+        chat(ws, str(Captain()), resume=True)
+        compare(
+            calls,
+            expected=[
+                (
+                    ['claude', '--resume', 'uuid-the-captains-last-session', '--name', '@@captain'],
+                    ws,
+                )
+            ],
+        )
 
     def test_refuses_when_the_chat_itself_is_live(self, tmpdir: TempDir, replace: Replacer) -> None:
         ws = tmpdir.makedir('lycia')

@@ -1695,7 +1695,7 @@ def agent_resume(
     context, sources = _context_file(
         p, name, ROLE_AGENT, _prime(ROLE_AGENT, project=p.name, goal=g)
     )
-    native = resume_target(Path.cwd(), spec.agent.platform, p.name, g, actor)
+    native = resume_target(Path.cwd(), spec.agent.platform, str(Actor(p.name, g, actor)))
     _resume(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, dry_run, native)
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
