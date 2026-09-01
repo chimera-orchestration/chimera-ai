@@ -29,6 +29,13 @@ will drift. Detection must be free and automatic — no one will remember to re-
 
 ## Claude Code (observed 2.1.212–2.1.220)
 
+> **The alarm above is ringing.** Sessions on this machine now report
+> `claude-code_2-1-251_agent` — thirty-one builds past anything validated here. Nothing
+> below has been re-checked against it; the compact firings in the next section are the
+> one exception, and they were found by a code review rather than by anyone looking. Treat
+> every claim as observed-then, not verified-now, until a pass says otherwise.
+
+
 ### The five ways a session starts
 
 | mode | how | `source` |
@@ -38,6 +45,30 @@ will drift. Detection must be free and automatic — no one will remember to re-
 | bridge | backgrounding a running foreground session | `fork` |
 | resume | `claude --resume <id>` | `resume` |
 | non-conversation | the `claude agents` browser, or one-shot `claude -p` | `startup` |
+
+### …and two ways it fires without one
+
+SessionStart is **not** only "a session started". It fires again for a session already
+running, when its conversation is emptied or condensed — same process, same id, same
+archive row:
+
+| event | how | `source` | seen |
+|---|---|---|---|
+| compact | `/compact`, or claude compacting on its own | `compact` | 5 firings, 2026-07-16 → 2026-09-01, across three sessions |
+| clear | `/clear` | `clear` | never in this archive; named by chimera's own pre-2.1 docstring, so treat as claimed, not observed |
+
+**This is the trap, and it has been fallen into.** An adapter that maps only `fork` and
+passes everything else through hands `compact` to the cold-start path, where it claims a
+`PendingLaunch` — one meant for a session genuinely starting in that directory, which then
+comes up unaddressed. Compaction happens on claude's own schedule during long runs, so
+nobody has to do anything unusual to hit it: two of the five firings above are this very
+document's session.
+
+So the rule for `Agent.lifecycle` is that these answer **`resume`** — the session is
+continuing, and a continuation claims nothing. And since the list will grow, an
+*unrecognised* source must be treated as a cold start rather than passed through: an
+unclaimed launch costs an address, while a claim taken by the wrong session costs someone
+else's mail.
 
 ### Identity
 
