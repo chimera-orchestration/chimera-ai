@@ -236,22 +236,32 @@ class Comms:
 
         Raises :class:`MessageNotFoundError` when ``message_id`` names nothing at all in
         ``address``'s mailbox — never when it's already in ``done/`` (that's the legitimate
-        idempotent re-ack). A caller that got the address or id wrong must find out now: a
-        silent no-op here is indistinguishable from success, and the real message — never
-        actually moved — keeps living in ``new``/``cur`` and resurfaces on a later turn as
-        mail that looks freshly-arrived despite having supposedly been acked already.
+        idempotent re-ack, whether it got there via an earlier call of this method or a
+        concurrent one racing it — see below). A caller that got the address or id wrong
+        must find out now: a silent no-op here is indistinguishable from success, and the
+        real message — never actually moved — keeps living in ``new``/``cur`` and resurfaces
+        on a later turn as mail that looks freshly-arrived despite having supposedly been
+        acked already.
+
+        Two callers disposing the same message at once is the same race :meth:`drain` already
+        guards: the loser's ``os.replace`` (or even its read, if the winner is quick enough)
+        raises ``FileNotFoundError`` once the winner has moved it — caught here the same way,
+        so the loser falls through to the already-``done`` check and returns quietly instead
+        of surfacing a race as a crash.
         """
         mailbox = self._root / address
         name = f'{message_id}.json'
-        done = self._ensure(address) / 'done'
         for state in ('cur', 'new'):
             source = mailbox / state / name
             if source.exists():
-                message = _read(source)
-                os.replace(source, done / name)
+                try:
+                    message = _read(source)
+                    os.replace(source, self._ensure(address) / 'done' / name)
+                except FileNotFoundError:
+                    continue  # a concurrent dispose won the race — check done/ below
                 log_action('dispose', message)
                 return
-        if (done / name).exists():
+        if (mailbox / 'done' / name).exists():
             return
         raise MessageNotFoundError(address, message_id)
 

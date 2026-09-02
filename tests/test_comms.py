@@ -247,6 +247,14 @@ def test_acking_the_wrong_address_raises_and_leaves_the_real_message_live(tmpdir
     assert comms.inbox(TO) == []
 
 
+def test_a_failed_dispose_leaves_no_mailbox_behind(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    typo_address = 'someone@else@agent'
+    with ShouldRaise(MessageNotFoundError(typo_address, 'm1')):
+        comms.dispose(typo_address, 'm1')
+    assert not (tmpdir.path / typo_address).exists()  # no phantom mailbox from a bad ack
+
+
 def test_thread_gathers_the_conversation_across_states(tmpdir: TempDir) -> None:
     comms = Comms(tmpdir.path)
     comms.send(a_message('01', subject='root'))
@@ -269,6 +277,20 @@ def test_drain_skips_a_message_another_drainer_already_claimed(
     replace(target=os.replace, container=os, name='replace', replacement=already_gone)
     assert comms.drain(TO) == []
     assert [m.id for m in comms.inbox(TO, unread_only=True)] == ['01']  # left for the winner
+
+
+def test_dispose_treats_a_race_lost_to_a_concurrent_dispose_as_already_done(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    (tmpdir.path / TO / 'done' / 'm1.json').write_text('{}')  # the winner already moved it
+
+    def already_gone(*_: object) -> None:
+        raise FileNotFoundError  # the losing side of a concurrent dispose
+
+    replace(target=os.replace, container=os, name='replace', replacement=already_gone)
+    comms.dispose(TO, 'm1')  # must not crash — the message is already done/
 
 
 def test_messages_lists_every_mailbox_with_its_state(tmpdir: TempDir) -> None:
