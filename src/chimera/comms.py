@@ -47,6 +47,8 @@ from typing import Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
+from chimera.config import UserError
+
 Kind = Literal['message', 'request', 'escalation', 'notice']
 """``message`` = FYI with a reply welcome; ``request`` expects one (blocks a Stop hook
 while undisposed); ``escalation`` carries ``severity`` and routes upward; ``notice`` is
@@ -55,6 +57,20 @@ fire-and-forget (never nags, may carry ``expires``)."""
 Priority = Literal['normal', 'urgent']
 
 _STATES = ('tmp', 'new', 'cur', 'done')
+
+
+class MessageNotFoundError(UserError):
+    """``dispose`` was asked to retire a message that isn't in ``address``'s mailbox at all.
+
+    Never raised for a message already disposed (that's the documented idempotent no-op) —
+    only when ``new``/``cur``/``done`` all lack it, which means either the id is wrong or
+    ``address`` is: acking the right id at the wrong mailbox must not look like success, or
+    the real message is left live and silently resurfaces later as if the ack never
+    happened.
+    """
+
+    def __init__(self, address: str, message_id: str) -> None:
+        super().__init__(f'no such message for {address}: {message_id}')
 
 
 class Message(BaseModel):
@@ -213,10 +229,17 @@ class Comms:
         return fresh
 
     def dispose(self, address: str, message_id: str) -> None:
-        """Retire a message (``new/`` or ``cur/`` → ``done/``). No-op if already gone (idempotent).
+        """Retire a message (``new/`` or ``cur/`` → ``done/``). No-op if already disposed.
 
         Both ``ch msg ack`` and ``ch msg defer`` land here — the store records only *that* a
         message was disposed; *how*, and any deferral reason, is the caller's to log.
+
+        Raises :class:`MessageNotFoundError` when ``message_id`` names nothing at all in
+        ``address``'s mailbox — never when it's already in ``done/`` (that's the legitimate
+        idempotent re-ack). A caller that got the address or id wrong must find out now: a
+        silent no-op here is indistinguishable from success, and the real message — never
+        actually moved — keeps living in ``new``/``cur`` and resurfaces on a later turn as
+        mail that looks freshly-arrived despite having supposedly been acked already.
         """
         mailbox = self._root / address
         name = f'{message_id}.json'
@@ -228,6 +251,9 @@ class Comms:
                 os.replace(source, done / name)
                 log_action('dispose', message)
                 return
+        if (done / name).exists():
+            return
+        raise MessageNotFoundError(address, message_id)
 
     def thread(self, address: str, thread: str) -> list[Message]:
         """Every message of a conversation in ``address``'s mailbox, oldest first, across states.

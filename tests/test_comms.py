@@ -2,10 +2,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from threading import Barrier, Thread
 
-from testfixtures import LogCapture, Replacer, TempDir
+from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir
 from testfixtures.loguru import LoguruSource
 
-from chimera.comms import Comms, Kind, Message, Priority, compose
+from chimera.comms import Comms, Kind, Message, MessageNotFoundError, Priority, compose
 from tests.cli import full_capture
 
 NOON = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
@@ -218,11 +218,35 @@ def test_dispose_works_on_an_undrained_message(tmpdir: TempDir) -> None:
     assert comms.inbox(TO) == []
 
 
-def test_dispose_is_a_no_op_for_an_unknown_message(tmpdir: TempDir) -> None:
+def test_dispose_raises_for_a_message_never_sent_to_that_address(tmpdir: TempDir) -> None:
     comms = Comms(tmpdir.path)
     comms.send(a_message('m1'))
-    comms.dispose(TO, 'never-sent')
+    with ShouldRaise(MessageNotFoundError(TO, 'never-sent')):
+        comms.dispose(TO, 'never-sent')
     assert [m.id for m in comms.inbox(TO)] == ['m1']  # the real one is untouched
+
+
+def test_dispose_is_idempotent_once_already_disposed(tmpdir: TempDir) -> None:
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    comms.dispose(TO, 'm1')
+    comms.dispose(TO, 'm1')  # already in done/ — a re-ack, not an error
+    assert comms.inbox(TO) == []
+
+
+def test_acking_the_wrong_address_raises_and_leaves_the_real_message_live(tmpdir: TempDir) -> None:
+    """The resurrection path: an ack that silently no-ops looks identical to a real one —
+    the message it meant to retire is never actually moved, so it later resurfaces as if
+    the ack had never happened. Disposing at the wrong mailbox must fail loudly instead."""
+    comms = Comms(tmpdir.path)
+    comms.send(a_message('m1'))
+    comms.deliver(TO, 'session-1')  # the recipient sees it, believes it handled
+    wrong_address = 'someone@else@agent'
+    with ShouldRaise(MessageNotFoundError(wrong_address, 'm1')):
+        comms.dispose(wrong_address, 'm1')
+    assert [m.id for m in comms.inbox(TO)] == ['m1']  # still live, never resurrected from done
+    comms.dispose(TO, 'm1')  # the real ack still works
+    assert comms.inbox(TO) == []
 
 
 def test_thread_gathers_the_conversation_across_states(tmpdir: TempDir) -> None:

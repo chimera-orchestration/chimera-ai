@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from testfixtures import Replacer, TempDir
+from testfixtures import Replacer, TempDir, compare
 
 from chimera.commands.msg.dispose import dispose
 from chimera.commands.msg.inbox import inbox
@@ -64,4 +64,40 @@ def test_msg_defer_cli(tmpdir: TempDir, command: Command, replace: Replacer) -> 
     )
     command.run('msg', 'defer', 'm1', 'p@g@agent', '--reason', 'later').check(
         output='Deferred m1: later', logging=[start, DISPOSED, end]
+    )
+
+
+def test_msg_ack_cli_on_an_unknown_message_is_a_user_error(
+    tmpdir: TempDir, command: Command, replace: Replacer
+) -> None:
+    """An ack that finds nothing to retire must fail loudly, never print 'Acked' — a wrong
+    address or id must not look like success while the real message stays undisposed."""
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    _seed(ws, 'p@g@agent', 'm1')
+    start, end = action_logs(
+        'msg ack',
+        DISPOSE,
+        {'message_id': 'm1', 'address': 'wrong@g@agent'},
+        error='MessageNotFoundError: no such message for wrong@g@agent: m1',
+    )
+    command.run('msg', 'ack', 'm1', 'wrong@g@agent').check(
+        output='Error: no such message for wrong@g@agent: m1',
+        return_code=1,
+        logging=[start, end],
+    )
+    compare(
+        inbox(ws, 'p@g@agent', unread_only=False),
+        expected=[
+            Message(
+                id='m1',
+                sender='p@manager',
+                to='p@g@agent',
+                kind='request',
+                subject='do',
+                body='.',
+                ts=NOON,
+            )
+        ],
     )
