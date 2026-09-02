@@ -70,8 +70,7 @@ def test_msg_defer_cli(tmpdir: TempDir, command: Command, replace: Replacer) -> 
 def test_msg_ack_cli_on_an_unknown_message_is_a_user_error(
     tmpdir: TempDir, command: Command, replace: Replacer
 ) -> None:
-    """An ack that finds nothing to retire must fail loudly, never print 'Acked' — a wrong
-    address or id must not look like success while the real message stays undisposed."""
+    # a wrong address or id must not print 'Acked' while the real message stays undisposed
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     ws = tmpdir.path / 'ws'
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))

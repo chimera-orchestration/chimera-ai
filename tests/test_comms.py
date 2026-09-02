@@ -235,9 +235,7 @@ def test_dispose_is_idempotent_once_already_disposed(tmpdir: TempDir) -> None:
 
 
 def test_acking_the_wrong_address_raises_and_leaves_the_real_message_live(tmpdir: TempDir) -> None:
-    """The resurrection path: an ack that silently no-ops looks identical to a real one —
-    the message it meant to retire is never actually moved, so it later resurfaces as if
-    the ack had never happened. Disposing at the wrong mailbox must fail loudly instead."""
+    # the resurrection path: a silent no-op here is indistinguishable from a real ack
     comms = Comms(tmpdir.path)
     comms.send(a_message('m1'))
     comms.deliver(TO, 'session-1')  # the recipient sees it, believes it handled
