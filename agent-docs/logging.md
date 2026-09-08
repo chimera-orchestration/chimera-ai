@@ -49,13 +49,18 @@ field of every record (params, git before/after maps, full tracebacks).
 
 ## Git command trace
 
-Every git subprocess runs through `chimera.git.Git` (never `giterator.Git` directly), whose
-`__call__` lands a DEBUG line *before* the command runs — so a hung fetch is on record while it
+Every git subprocess runs through `chimera.git.Git` (never `giterator.Git` directly), whose two
+entry points — `__call__` for text output, `raw` for bytes (diff text and `-z` names, which git
+never transcodes; it also keeps stderr out of what callers parse) — each land a DEBUG line
+*before* the command runs, so a hung fetch is on record while it
 hangs (`tail -f state/log.jsonl` to watch live — the raw form deliberately, since agents
 don't get `ch logtail`). The message is the exact command
 (`git fetch --prune origin`), the working directory rides `git_cwd`. The trace goes only to the
-log file, never the console (and is suppressed during shell completion, where the file sink
-isn't configured). `chimera.git` also injects network timeouts (`GIT_SSH_COMMAND`
+log file, never the console — a decision `chimera.git` makes no part of: it always traces, and
+quiet is a *sink* property: `main` drops loguru's default stderr handler before anything runs,
+and only a command that actually runs configures a file sink in its place, so a context that
+never reaches one (shell completion) traces into nothing.
+`chimera.git` also injects network timeouts (`GIT_SSH_COMMAND`
 connect/keepalive, `GIT_HTTP_LOW_SPEED_*`) unless the user set their own, so a dead transport
 fails in seconds instead of hanging forever. The trace is spew-exempt by construction: it lives
 at DEBUG, below the triage levels, and tests pin their captures to INFO+ so command sequences

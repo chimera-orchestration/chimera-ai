@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import pytest
 from giterator.testing import Repo
 from testfixtures import Replacer, TempDir, compare
 from typer._click.shell_completion import get_completion_class
@@ -15,6 +16,7 @@ from chimera.completions import (
     complete_check,
     complete_harness,
     complete_template,
+    completing,
 )
 
 completion_init()
@@ -163,3 +165,13 @@ def test_remote_without_a_repo_is_silent(tmpdir: TempDir, workspace_with_env: Pa
         {'kind': 'project', 'repo': str(tmpdir / 'ghost')},  # repo path doesn't exist
     )
     compare(_complete(['-p', 'proj', 'goal', 'pr', 'g', '--to']), expected=[])
+
+
+class TestCompleting:
+    def test_false_when_no_callback_var_is_set(self) -> None:
+        assert not completing()
+
+    @pytest.mark.parametrize('var', ['_CH_COMPLETE', '_CHIMERA_COMPLETE'])
+    def test_true_under_either_callback_var(self, replace: Replacer, var: str) -> None:
+        replace.in_environ(var, 'zsh_complete')
+        assert completing()

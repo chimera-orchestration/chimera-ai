@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -5,6 +6,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from loguru import logger
 from testfixtures import Replacer, ShouldRaise, TempDir, compare, not_there
 from typer._click.core import Command, Context
 from typer.core import TyperCommand, TyperGroup
@@ -404,6 +406,18 @@ class TestMainRole:
         with ShouldRaise(SystemExit(0)):
             main()
         assert 'workspace' in capsys.readouterr().out
+
+    def test_completion_drops_the_log_sinks(self, tmpdir: TempDir, replace: Replacer) -> None:
+        # completion never reaches LoggingCommand.invoke, so nothing else clears loguru's
+        # default stderr sink — a completer's own git calls would trace into its output
+        as_session(tmpdir, replace, 'proj@@manager')
+        core = getattr(logger, '_core')  # no typed helper fits an instance attribute
+        replace(target=core.handlers, container=core, name='handlers', replacement={})
+        logger.add(io.StringIO())
+        _completion_request(replace)
+        with ShouldRaise(SystemExit(0)):
+            main()
+        compare(getattr(logger, '_core').handlers, expected={})
 
     def test_an_archive_awaiting_migration_completes_nothing_silently(
         self, tmpdir: TempDir, replace: Replacer, capsys: pytest.CaptureFixture[str]

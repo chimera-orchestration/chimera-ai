@@ -161,8 +161,7 @@ listers unfenced), and its target axis carries its own containment (below). The 
 no `ROLE_COMMANDS` entry — full tree (the
 option strip still applies: a recorded session is an AI session). An unknown role is
 now unreachable rather than merely unobserved: a role is read off the address, whose three
-shapes *are* the three roles, so it can only be one of them or nothing at all. One carve-out: Click's completion dispatch (`chimera.git.completing`, the same
-detection that mutes the git DEBUG trace) instead completes *nothing*, silently, exit 0 — a
+shapes *are* the three roles, so it can only be one of them or nothing at all. One carve-out: Click's completion dispatch (`chimera.completions.completing`) instead completes *nothing*, silently, exit 0 — a
 completer must never raise or print, and an archive awaiting migration would otherwise break
 every TAB; fail-closed keeps both rules standing (loud for invocations, silent for completers).
 Honesty: the fence is a fence, not a wall — a session holding no address is simply unfenced — the wall is the harness permission layer; the fence's real value is not

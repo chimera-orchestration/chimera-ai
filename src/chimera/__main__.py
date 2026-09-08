@@ -104,8 +104,8 @@ from chimera.context import (
     resolve_workspace,
     seat,
 )
+from chimera.completions import completing
 from chimera.dry import Dry
-from chimera.git import completing
 from chimera.help import command_index, render_json, render_text
 from chimera.prime import prime as _prime
 from chimera.prime import resolve_role
