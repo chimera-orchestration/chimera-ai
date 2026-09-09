@@ -2,6 +2,7 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
 from giterator import Git
 from giterator.testing import Repo
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
@@ -184,12 +185,124 @@ def test_adopt_completes_a_half_restructured_goal(
     tmpdir.compare(['feature@agent'], path='worktrees', recursive=False)
 
 
+@pytest.mark.parametrize('dry', [Dry(), Dry(True)])
 def test_adopt_refuses_when_no_branch_to_adopt(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, dry: Dry
+) -> None:
+    # --dry must refuse exactly where the real run does: the preconditions run either way
+    calls = _stub_agent(replace)
+    with ShouldRaise(UserError("no branch 'ghost' to adopt")):
+        adopt(git_repo.path, tmpdir / 'worktrees', 'ghost', 'proj@ghost@agent', dry=dry)
+    compare(calls, expected=[])
+
+
+def test_goal_adopt_cli_dry_refuses_when_no_branch_to_adopt(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer, command: Command
+) -> None:
+    _project(tmpdir, git_repo)
+    _stub_agent(replace)
+    message = "no branch 'ghost' to adopt"
+    start, end = action_logs(
+        'goal adopt',
+        'chimera.commands.goal.adopt.adopt',
+        {
+            'goal': 'ghost',
+            'prompt': None,
+            'dangerous': False,
+            'harness': None,
+            'model': None,
+            'dry': True,
+            'project': None,
+        },
+        error=f'UserError: {message}',
+    )
+    # the refs line still lands (ref_log's `finally`): nothing existed, nothing moved
+    refs = {
+        'level': 'INFO',
+        'message': 'goal adopt: refs',
+        'goal': 'ghost',
+        'git': {'before': {}, 'after': {}},
+    }
+    command.run('goal', 'adopt', 'ghost', '--dry').check(
+        output=f'Error: {message}', return_code=1, logging=[start, refs, end]
+    )
+
+
+def _agent_only_goal(git_repo: Repo) -> str:
+    """Leave only ``feature/agent`` — the shape a goal is in once its transcript is lost."""
+    git_repo('checkout', '-b', 'feature/agent')
+    tip = git_repo.commit_content('agent-work', short=False)
+    git_repo('checkout', 'main')
+    return tip
+
+
+def test_adopt_agent_only_goal_materialises_human_from_the_agent_tip(
     tmpdir: TempDir, git_repo: Repo, replace: Replacer
 ) -> None:
+    tip = _agent_only_goal(git_repo)
+    worktrees = tmpdir / 'worktrees'
+    calls = _stub_agent(replace)
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        compare(
+            adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent'),
+            expected=worktrees / 'feature@agent',
+        )
+    compare(Git(git_repo.path).branches(), expected=['feature/agent', 'feature/human', 'main'])
+    compare(_rev(git_repo.path, 'feature/human'), expected=tip)
+    compare(_rev(worktrees / 'feature@agent', 'HEAD'), expected=tip)
+    compare(len(calls), expected=1)
+    log.check(
+        (
+            'goal adopt: refs',
+            {
+                'goal': 'feature',
+                'git': {
+                    'before': {'feature/agent': tip},
+                    'after': {'feature/human': tip, 'feature/agent': tip},
+                },
+                'worktree': str(worktrees / 'feature@agent'),
+            },
+        ),
+    )
+
+
+def test_adopt_agent_only_goal_ignores_a_remote_counterpart_that_is_ahead(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    # the human branch mirrors the *local* agent tip; a remote ahead of it is `goal sync`'s
+    # business (and adopt never fetches), so it is deliberately not consulted
+    tip = _agent_only_goal(git_repo)
+    git_repo('checkout', 'feature/agent')
+    ahead = git_repo.commit_content('pushed-then-lost', short=False)
+    git_repo('reset', '--hard', tip)
+    git_repo('checkout', 'main')
+    git_repo('update-ref', 'refs/remotes/fork/feature', ahead)  # what `goal pr` would have pushed
     _stub_agent(replace)
-    with ShouldRaise(RuntimeError("no branch 'ghost' to adopt")):
-        adopt(git_repo.path, tmpdir / 'worktrees', 'ghost', 'proj@ghost@agent')
+    adopt(git_repo.path, tmpdir / 'worktrees', 'feature', 'proj@feature@agent')
+    compare(_rev(git_repo.path, 'feature/human'), expected=tip)
+
+
+def test_adopt_agent_only_goal_dry_creates_nothing(
+    tmpdir: TempDir, git_repo: Repo, replace: Replacer
+) -> None:
+    tip = _agent_only_goal(git_repo)
+    worktrees = tmpdir / 'worktrees'
+    calls = _stub_agent(replace)
+    with LogCapture(LoguruSource(('message', 'extra'), level='INFO')) as log:
+        adopt(git_repo.path, worktrees, 'feature', 'proj@feature@agent', dry=Dry(True))
+    assert not worktrees.exists()
+    compare(Git(git_repo.path).branches(), expected=['feature/agent', 'main'])
+    compare(len(calls), expected=1)  # the launch is previewed by the agent launcher itself
+    log.check(
+        (
+            'goal adopt: refs',
+            {
+                'goal': 'feature',
+                'git': {'before': {'feature/agent': tip}, 'after': {'feature/agent': tip}},
+                'worktree': str(worktrees / 'feature@agent'),
+            },
+        ),
+    )
 
 
 def test_adopt_refuses_a_nested_branch(tmpdir: TempDir, git_repo: Repo, replace: Replacer) -> None:

@@ -56,6 +56,10 @@ already exists: it restructures an existing branch into the goal shape (the
 branch becomes ``<branch>/human``, the agent's branch is split off its tip),
 creates the worktree, and launches the agent — the way to hand an in-flight
 feature branch to an agent. It is idempotent: re-running just relaunches.
+A goal whose session is lost — only ``<branch>/agent`` left, nothing to
+``resume`` — adopts too: the human branch is created at the agent branch's
+tip and the agent relaunched. A branch that exists in no shape is refused,
+under ``--dry`` as well.
 
 ``ch worktree add --goal <goal>`` is the setup half alone — branches and
 worktree, no launch — for when you want the structure without an agent yet.
