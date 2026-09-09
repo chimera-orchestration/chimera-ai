@@ -4,6 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from chimera.addresses import Actor, Address, Captain, Manager
 from chimera.agent_env import ai_session
 from chimera.agents import BRANCHED, AgentSession
 from chimera.agents.registry import AGENTS, AgentSpec
@@ -301,8 +302,35 @@ def agent(
     )
 
 
-def resume_target(cwd: Path, platform: str, address: str) -> str | None:
-    """The archived native session id a resume should revive, else ``None``.
+class NothingToResumeError(UserError):
+    """No session of ``address`` can be revived: the reason, then the fresh start.
+
+    One message shape for every cause, so a reader learns three things in order — what
+    was asked for, why nothing answers it, and the command that starts the role over.
+    The pointer is per role: a goal actor restarts with ``agent start``, a chat with
+    ``chat``. Never a by-name resume — see :func:`resume_target` for why that is not a
+    fallback but the failure itself.
+    """
+
+    def __init__(self, address: str, reason: str) -> None:
+        super().__init__(
+            f'nothing to resume for {address}: {reason} — start fresh with {fresh(address)}'
+        )
+
+
+def fresh(address: str) -> str:
+    """The ``ch`` command that starts ``address``'s role over from nothing."""
+    match Address.parse(address):
+        case Actor(project=project, goal=goal):
+            return f'ch agent start -g {goal} -p {project}'
+        case Manager(project=project):
+            return f'ch chat -p {project}'
+        case Captain():
+            return 'ch chat'
+
+
+def resume_target(cwd: Path, platform: str, address: str) -> str:
+    """The archived native session id a resume revives, or :class:`NothingToResumeError`.
 
     Takes the **address**, so every launcher that revives something can use it — a goal
     actor's, but equally the captain's or a manager's. ``ch chat --resume`` went by
@@ -316,22 +344,39 @@ def resume_target(cwd: Path, platform: str, address: str) -> str | None:
     agent's name is precisely what an address is for preventing. The address maps
     to its newest session — live or dead, resuming is how a dead one is revived — and
     that session's immutable native id is the resume target; the registry name is
-    display-only (a rename in the harness's UI must not orphan the session). ``None`` —
-    no workspace to hold an archive, an address it has never seen, or nothing left whose
-    transcript still exists — falls back to resuming by name.
+    display-only (a rename in the harness's UI must not orphan the session).
 
-    Sessions whose transcript the harness has pruned are skipped: handing claude an id it
-    no longer knows produced a raw "No conversation found" traceback, which is the failure
-    this whole design started from.
+    There is no by-name fallback, and there deliberately isn't one to guard: an address
+    that resolves to nothing — no workspace to hold an archive, an address it has never
+    seen, or nothing left whose transcript still exists — is **refused**, naming the
+    cause and the fresh start. ``claude --resume <name>`` was that fallback, and a name
+    claude couldn't match dropped a *headless* resume into its interactive session
+    picker, where it blocked indefinitely with no start hook ever firing — a launch that
+    ``ch ls`` showed alive and that nothing would ever finish. Post-rewrite every session
+    chimera launches in a workspace is archived, so the name has no legitimate job left
+    in a resume; a session chimera never recorded is one it never addressed, and the
+    harness's own tools are the way back into that.
+
+    Sessions whose transcript the harness has pruned are skipped in favour of an older
+    one that still has its file: handing claude an id it no longer knows produced a raw
+    "No conversation found" traceback, which is the failure this whole design started
+    from. When *every* row is pruned the refusal names the newest one's transcript, so
+    the reader can see exactly what claude retired.
     """
     try:
         workspace = resolve_workspace(cwd)
     except NotInWorkspaceError:
-        return None
+        raise NothingToResumeError(address, 'no workspace here to hold its archive') from None
     with archive(workspace) as store:
         session = store.latest_session_for(None, address=address, platform=platform, resumable=True)
+        if session is None:
+            newest = store.latest_session_for(None, address=address, platform=platform)
     if session is None:
-        return None
+        if newest is None:
+            raise NothingToResumeError(address, 'no session recorded')
+        raise NothingToResumeError(
+            address, f'the transcript of its last session is gone ({newest.transcript})'
+        )
     logger.bind(platform=platform, native_id=session.native_id, address=address).info(
         'agent resume: archived session'
     )
@@ -347,10 +392,11 @@ def resume(
     spec: AgentSpec = AgentSpec(),
     context: Path | None = None,
     dry: Dry = Dry(),
-    id: str | None = None,
+    *,
+    id: str,
 ) -> None:
-    """Revive ``spec``'s agent session — by archived ``id`` when the caller resolved
-    one (see :func:`resume_target`), else by ``name`` (see ``Agent.resume``).
+    """Revive ``spec``'s agent session ``id`` — the archived id :func:`resume_target`
+    resolved — under its canonical ``name`` (see ``Agent.resume``).
 
     Deliberately records no launch. A resume takes nothing new: the address is already on
     the session's own row and ``record_session`` coalesces it forward, which is why the

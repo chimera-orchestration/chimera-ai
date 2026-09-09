@@ -157,25 +157,28 @@ class Claude(Agent):
         extra: Sequence[str] = (),
         dangerous: bool = False,
         *,
-        id: str | None = None,
+        id: str,
         model: str | None = None,
         context: Path | None = None,
     ) -> str | None:
-        """Resume a claude session, with cwd set to ``cwd``.
+        """Resume claude session ``id``, with cwd set to ``cwd``.
 
-        With ``id`` (the session's full UUID — ``--resume``'s documented argument) the
-        session is resumed by identity and ``--name`` re-asserts the canonical label,
-        exactly as :meth:`start` set it — so a rename in claude's own UI neither orphans
-        the session nor survives the resume. Without one, ``--resume <name>`` leans on
-        claude's name-to-session DWIM, the pre-archive behaviour. The cwd is the key —
+        ``id`` is the session's full UUID — ``--resume``'s documented argument — and
+        ``--name`` re-asserts the canonical label exactly as :meth:`start` set it, so a
+        rename in claude's own UI neither orphans the session nor survives the resume.
+        ``--resume <name>`` is never built: claude's name-to-session DWIM, given a name
+        it doesn't know, opens its interactive session picker — and does so under
+        ``--bg`` too, where a headless job then blocks on it indefinitely with no
+        SessionStart ever firing (observed 2026-09-08; agent-docs/sessions.md, *Resuming*).
+        The cwd is the key —
         claude has no ``--cwd``, so setting it here is what lets a dead session be
         revived in its worktree from anywhere. Interactive foreground by default; with
         ``prompt`` it resumes in the background (``--bg``) to keep working. Returns the
-        ``id`` it resumed by — a resume adds no new identity, and without one there is
-        nothing to report but the mutable name.
+        ``id`` it resumed by — a resume adds no new identity.
         """
-        lead = ['--resume', id, '--name', name] if id is not None else ['--resume', name]
-        args = _session_args(lead, prompt, extra, dangerous, model, context)
+        args = _session_args(
+            ['--resume', id, '--name', name], prompt, extra, dangerous, model, context
+        )
         self._launch(cwd, args)
         return id
 

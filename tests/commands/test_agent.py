@@ -1,3 +1,4 @@
+import inspect
 import os
 import signal
 import subprocess
@@ -15,11 +16,13 @@ from chimera import __main__ as chimera_main
 from chimera.addresses import Actor
 from chimera.agents import AgentSession
 from chimera.agents.claude import Claude
-from chimera.agents.registry import AgentSpec
+from chimera.agents.registry import AGENTS, AgentSpec
 from chimera.archive import Archive, ArchiveSession, Event
 from chimera.commands.agent import (
+    NothingToResumeError,
     agent,
     agents,
+    fresh,
     in_goal,
     live,
     occupants,
@@ -172,13 +175,18 @@ def test_agent_does_not_double_up_when_bypass_already_requested(
     compare(calls, expected=[(expected, worktree)])
 
 
+RESUMED = '11111111-2222-3333-4444-555555555555'
+"""The archived native id a resume revives by — the only handle a resume ever takes."""
+
+
 def test_resume_runs_claude_resume_in_the_foreground_by_default(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
-    resume(worktree, 'proj@goal@agent')
-    expected = ['claude', '--resume', 'proj@goal@agent']  # no bypass flag unless dangerous
+    resume(worktree, 'proj@goal@agent', id=RESUMED)
+    # by id, re-asserting the canonical name; no bypass flag unless dangerous
+    expected = ['claude', '--resume', RESUMED, '--name', 'proj@goal@agent']
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -193,7 +201,7 @@ def test_resume_records_no_launch_for_a_passer_by_to_claim(
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
     worktree = tmpdir.makedir('ws/proj/worktrees/g@agent')
     _stub(replace)
-    resume(worktree, 'proj@g@agent')
+    resume(worktree, 'proj@g@agent', id=RESUMED)
     with Archive.open(ws / 'state' / 'archive.db') as store:
         assert store.claim_launch('claude', worktree, now=datetime.now(timezone.utc)) is None
 
@@ -201,8 +209,15 @@ def test_resume_records_no_launch_for_a_passer_by_to_claim(
 def test_resume_makes_bypass_reachable_when_dangerous(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
-    resume(worktree, 'proj@goal@agent', dangerous=True)
-    expected = ['claude', '--resume', 'proj@goal@agent', '--allow-dangerously-skip-permissions']
+    resume(worktree, 'proj@goal@agent', dangerous=True, id=RESUMED)
+    expected = [
+        'claude',
+        '--resume',
+        RESUMED,
+        '--name',
+        'proj@goal@agent',
+        '--allow-dangerously-skip-permissions',
+    ]
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -211,16 +226,23 @@ def test_resume_runs_in_the_background_when_given_a_prompt(
 ) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
-    resume(worktree, 'proj@goal@agent', 'carry on')
-    expected = ['claude', '--bg', '--resume', 'proj@goal@agent', 'carry on']
+    resume(worktree, 'proj@goal@agent', 'carry on', id=RESUMED)
+    expected = ['claude', '--bg', '--resume', RESUMED, '--name', 'proj@goal@agent', 'carry on']
     compare(calls, expected=[(expected, worktree)])
 
 
 def test_resume_passes_extra_flags_through(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
-    resume(worktree, 'proj@goal@agent', extra=['--dangerously-skip-permissions'])
-    expected = ['claude', '--resume', 'proj@goal@agent', '--dangerously-skip-permissions']
+    resume(worktree, 'proj@goal@agent', extra=['--dangerously-skip-permissions'], id=RESUMED)
+    expected = [
+        'claude',
+        '--resume',
+        RESUMED,
+        '--name',
+        'proj@goal@agent',
+        '--dangerously-skip-permissions',
+    ]
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -230,29 +252,13 @@ def test_resume_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replace
     with ShouldRaise(
         RuntimeError(f'an agent is already live in {worktree}: abc123 (idle) — attach or stop it')
     ):
-        resume(worktree, 'proj@goal@agent')
+        resume(worktree, 'proj@goal@agent', id=RESUMED)
     compare(calls, expected=[])  # never launched
 
 
 def test_resume_missing_worktree_raises(tmpdir: TempDir) -> None:
     with ShouldRaise(FileNotFoundError(tmpdir / 'nope')):
-        resume(tmpdir / 'nope', 'x')
-
-
-def test_resume_by_archived_id_reasserts_the_canonical_name(
-    tmpdir: TempDir, replace: Replacer
-) -> None:
-    worktree = tmpdir.makedir('wt')
-    calls = _stub(replace)
-    resume(worktree, 'proj@goal@agent', id='11111111-2222-3333-4444-555555555555')
-    expected = [
-        'claude',
-        '--resume',
-        '11111111-2222-3333-4444-555555555555',
-        '--name',
-        'proj@goal@agent',
-    ]
-    compare(calls, expected=[(expected, worktree)])
+        resume(tmpdir / 'nope', 'x', id=RESUMED)
 
 
 _CANONICAL = '<the address this session was launched under>'
@@ -264,12 +270,15 @@ def _address_archived(
     native_id: str,
     project: str = 'myproject',
     address: str | None = _CANONICAL,
+    transcript: Path | None = None,
 ) -> None:
     """A recorded session holding the ``<project>@g@agent`` address, unless told otherwise.
 
     The address is what chimera stamped at launch and is immutable; the registry's
     display name is a separate, mutable thing this row does not carry at all — which is
-    the point of resolving a resume through here.
+    the point of resolving a resume through here. ``transcript`` is where claude keeps
+    the conversation — point it at a file that doesn't exist to record a session claude
+    has since pruned.
     """
     with Archive.open(workspace / 'state' / 'archive.db') as store:
         store.record_session(
@@ -282,6 +291,7 @@ def _address_archived(
                 project=project,
                 goal='g',
                 actor='agent',
+                transcript=transcript,
             )
         )
 
@@ -309,15 +319,61 @@ def test_resume_target_ignores_an_unaddressed_session_sharing_the_worktree(
     compare(resume_target(ws, 'claude', 'myproject@g@agent'), expected='uuid-agent')
 
 
-def test_resume_target_is_none_for_an_unseen_address(tmpdir: TempDir, replace: Replacer) -> None:
+def test_resume_target_refuses_an_unseen_address(tmpdir: TempDir, replace: Replacer) -> None:
     ws = tmpdir.makedir('ws')
     tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
     replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    assert resume_target(ws, 'claude', 'myproject@g@agent') is None
+    with ShouldRaise(NothingToResumeError('myproject@g@agent', 'no session recorded')):
+        resume_target(ws, 'claude', 'myproject@g@agent')
 
 
-def test_resume_target_is_none_outside_any_workspace(tmpdir: TempDir) -> None:
-    assert resume_target(tmpdir.path, 'claude', 'myproject@g@agent') is None
+def test_resume_target_refuses_outside_any_workspace(tmpdir: TempDir) -> None:
+    with ShouldRaise(
+        NothingToResumeError('myproject@g@agent', 'no workspace here to hold its archive')
+    ):
+        resume_target(tmpdir.path, 'claude', 'myproject@g@agent')
+
+
+def test_resume_target_refuses_when_the_transcript_is_gone(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # the field failure: claude had pruned the transcript, so the archive answered nothing
+    # and resume fell back to `claude --resume <name>` — which, finding no session by that
+    # name, dropped a *headless* job into its interactive session picker, where it sat
+    # blocked forever with no start hook ever firing
+    ws = tmpdir.makedir('ws')
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    gone = tmpdir.path / 'projects' / 'myproject-g-agent' / 'uuid-pruned.jsonl'
+    _address_archived(ws, 'uuid-pruned', transcript=gone)
+    with ShouldRaise(
+        NothingToResumeError(
+            'myproject@g@agent', f'the transcript of its last session is gone ({gone})'
+        )
+    ):
+        resume_target(ws, 'claude', 'myproject@g@agent')
+
+
+def test_nothing_to_resume_names_the_cause_then_the_fresh_start_for_the_role() -> None:
+    compare(
+        str(NothingToResumeError('myproject@g@agent', 'no session recorded')),
+        expected=(
+            'nothing to resume for myproject@g@agent: no session recorded'
+            ' — start fresh with ch agent start -g g -p myproject'
+        ),
+    )
+    compare(fresh('myproject@@manager'), expected='ch chat -p myproject')
+    compare(fresh('@@captain'), expected='ch chat')
+
+
+def test_no_harness_can_resume_by_name_alone() -> None:
+    # the seam the picker got through: a resume built without an id is `--resume <name>`,
+    # and a name the harness doesn't know is an interactive prompt — fatal to a headless
+    # job. So the id is not optional anywhere; there is no by-name spelling to fall into
+    for harness in AGENTS.values():
+        parameter = inspect.signature(harness.resume).parameters['id']
+        assert parameter.default is inspect.Parameter.empty, harness.platform
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY, harness.platform
 
 
 def _project_with_worktree(tmpdir: TempDir) -> Path:
@@ -326,6 +382,30 @@ def _project_with_worktree(tmpdir: TempDir) -> Path:
     (project / 'worktrees' / 'g@agent').mkdir(parents=True)
     os.chdir(project)  # the CLI infers the project (and its name) from cwd
     return project
+
+
+def _archived_agent_in_workspace(
+    tmpdir: TempDir, replace: Replacer, native_id: str, transcript: Path | None = None
+) -> Path:
+    """A workspace whose ``proj`` has a ``g@agent`` worktree and an archived session for it.
+
+    Chdirs into the project so the CLI infers it; returns the workspace.
+    """
+    ws = tmpdir.makedir('lycia')
+    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+    project = ws / 'proj'
+    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
+    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    os.chdir(project)
+    _address_archived(ws, native_id, project='proj', transcript=transcript)
+    return ws
+
+
+_LOST = (
+    'nothing to resume for proj@g@agent: the transcript of its last session is gone'
+    ' ({gone}) — start fresh with ch agent start -g g -p proj'
+)
 
 
 def test_agent_start_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
@@ -512,13 +592,20 @@ def test_agent_start_cli_with_prompt_and_passthrough(
     compare(calls, expected=[(claude_cmd, expected)])
 
 
-def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
+def test_agent_resume_cli_refuses_outside_a_workspace(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    # a lone project has no archive, so nothing it launched was ever addressed — there is
+    # no session of this address to revive, and the name is not a handle (see resume_target)
     _project_with_worktree(tmpdir)
     calls = _stub(replace)
-    expected = Path.cwd() / 'worktrees' / 'g@agent'
-    claude_cmd = ['claude', '--resume', 'myproject@g@agent']  # no bypass flag by default
+    message = (
+        'nothing to resume for myproject@g@agent: no workspace here to hold its archive'
+        ' — start fresh with ch agent start -g g -p myproject'
+    )
     command.run('agent', 'resume', '-g', 'g').check(
-        output=f'Resumed agent in {expected}',
+        output=f'Error: {message}',
+        return_code=1,
         logging=action_logs(
             'agent resume',
             'chimera.commands.agent.resume',
@@ -532,19 +619,28 @@ def test_agent_resume_cli(tmpdir: TempDir, replace: Replacer, command: Command) 
                 'model': None,
                 'dry': False,
             },
-            middle=[launched(claude_cmd, expected)],
+            error=f'NothingToResumeError: {message}',
         ),
     )
-    compare(calls, expected=[(claude_cmd, expected)])
+    compare(calls, expected=[])  # never launched
 
 
 def test_agent_resume_cli_with_passthrough(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
-    _project_with_worktree(tmpdir)
+    ws = _archived_agent_in_workspace(tmpdir, replace, 'uuid-1234')
     calls = _stub(replace)
     expected = Path.cwd() / 'worktrees' / 'g@agent'
-    claude_cmd = ['claude', '--resume', 'myproject@g@agent', '--dangerously-skip-permissions']
+    claude_cmd = [
+        'claude',
+        '--resume',
+        'uuid-1234',
+        '--name',
+        'proj@g@agent',
+        '--append-system-prompt-file',
+        str(_agent_context(ws)),
+        '--dangerously-skip-permissions',
+    ]
     command.run('agent', 'resume', '-g', 'g', '--', '--dangerously-skip-permissions').check(
         output=f'Resumed agent in {expected}',
         logging=action_logs(
@@ -560,7 +656,11 @@ def test_agent_resume_cli_with_passthrough(
                 'model': None,
                 'dry': False,
             },
-            middle=[launched(claude_cmd, expected)],
+            middle=[
+                _agent_context_rendered(ws),
+                _archived_session_found('uuid-1234'),
+                launched(claude_cmd, expected),
+            ],
         ),
     )
     compare(calls, expected=[(claude_cmd, expected)])
@@ -571,18 +671,12 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
 ) -> None:
     # the field failure this guards: a UI rename left the canonical name unfindable in
     # the registry — the archive answers the address by immutable id instead
-    ws = tmpdir.makedir('lycia')
-    tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
-    project = ws / 'proj'
-    (project / 'worktrees' / 'g@agent').mkdir(parents=True)
-    tmpdir.dump('lycia/proj/config.yaml', {'kind': 'project', 'repo': str(project)})
-    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
-    os.chdir(project)
-    _address_archived(ws, 'uuid-1234', project='proj')
+    ws = _archived_agent_in_workspace(tmpdir, replace, 'uuid-1234')
+    project = Path.cwd()
     calls = _stub(replace)
-    expected = Path.cwd() / 'worktrees' / 'g@agent'
+    expected = project / 'worktrees' / 'g@agent'
     digest = sha256(AGENT_ROLE_TEXT.encode()).hexdigest()
-    context = ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+    context = _agent_context(ws)
     claude_cmd = [
         'claude',
         '--resume',
@@ -635,6 +729,99 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
         ],
     )
     compare(calls, expected=[(claude_cmd, expected)])
+
+
+def test_agent_resume_cli_refuses_a_headless_revival_of_a_lost_transcript(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    # the reproduced field failure: a background resume whose transcript claude had
+    # pruned was handed `claude --resume <name>`, which found nothing by that name and
+    # dropped the headless job into an interactive picker — blocked indefinitely, no
+    # session-start hook ever firing. A resume with nothing to revive must refuse instead
+    gone = tmpdir.path / 'projects' / 'proj-g-agent' / 'uuid-pruned.jsonl'
+    ws = _archived_agent_in_workspace(tmpdir, replace, 'uuid-pruned', transcript=gone)
+    calls = _stub(replace)
+    message = _LOST.format(gone=gone)
+    command.run('agent', 'resume', '-g', 'g', 'carry on').check(
+        output=f'Error: {message}',
+        return_code=1,
+        logging=[
+            {
+                'level': 'INFO',
+                'command': 'agent resume',
+                'goal': 'g',
+                'phase': 'start',
+                'function': 'chimera.commands.agent.resume',
+                'params': {
+                    'prompt': 'carry on',
+                    'goal': 'g',
+                    'actor': None,
+                    'project': None,
+                    'dangerous': False,
+                    'harness': None,
+                    'model': None,
+                    'dry': False,
+                },
+            },
+            _agent_context_rendered(ws),
+            {
+                'level': 'INFO',
+                'goal': 'g',
+                'native_id': 'uuid-pruned',
+                'transcript': str(gone),
+                'message': 'archive: skipping a session whose transcript is gone',
+            },
+            {
+                'level': 'ERROR',
+                'command': 'agent resume',
+                'goal': 'g',
+                'phase': 'end',
+                'error': f'NothingToResumeError: {message}',
+            },
+        ],
+    )
+    compare(calls, expected=[])  # never launched — nothing for a picker to swallow
+
+
+def test_agent_resume_cli_dry_reports_the_same_refusal(
+    tmpdir: TempDir, replace: Replacer, command: Command
+) -> None:
+    # --dry must take the decision the real run would: a preview that said "by name" and
+    # a run that hung in a picker is how the failure went unnoticed
+    gone = tmpdir.path / 'projects' / 'proj-g-agent' / 'uuid-pruned.jsonl'
+    ws = _archived_agent_in_workspace(tmpdir, replace, 'uuid-pruned', transcript=gone)
+    calls = _stub(replace)
+    message = _LOST.format(gone=gone)
+    command.run('agent', 'resume', '-g', 'g', '--dry').check(
+        output=f'Error: {message}',
+        return_code=1,
+        logging=action_logs(
+            'agent resume',
+            'chimera.commands.agent.resume',
+            {
+                'prompt': None,
+                'goal': 'g',
+                'actor': None,
+                'project': None,
+                'dangerous': False,
+                'harness': None,
+                'model': None,
+                'dry': True,
+            },
+            error=f'NothingToResumeError: {message}',
+            middle=[
+                _agent_context_rendered(ws),
+                {
+                    'level': 'INFO',
+                    'goal': 'g',
+                    'native_id': 'uuid-pruned',
+                    'transcript': str(gone),
+                    'message': 'archive: skipping a session whose transcript is gone',
+                },
+            ],
+        ),
+    )
+    compare(calls, expected=[])
 
 
 def test_stop_is_keyed_by_worktree_so_a_rename_cannot_hide_a_session(
@@ -700,7 +887,7 @@ def test_extra_bypass_flags_refused_under_an_ai_agent(tmpdir: TempDir, replace: 
     with ShouldRaise(refused):
         agent(worktree, 'n', extra=['--dangerously-skip-permissions'])
     with ShouldRaise(refused):
-        resume(worktree, 'n', extra=['--dangerously-skip-permissions'])
+        resume(worktree, 'n', extra=['--dangerously-skip-permissions'], id=RESUMED)
     compare(calls, expected=[])  # never launched
 
 
@@ -1060,8 +1247,8 @@ def test_agent_passthrough_model_beats_spec_model(tmpdir: TempDir, replace: Repl
 def test_resume_spec_model_rides_as_model_flag(tmpdir: TempDir, replace: Replacer) -> None:
     worktree = tmpdir.makedir('wt')
     calls = _stub(replace)
-    resume(worktree, 'proj@goal@agent', spec=AgentSpec('claude', 'opus'))
-    expected = ['claude', '--resume', 'proj@goal@agent', '--model', 'opus']
+    resume(worktree, 'proj@goal@agent', spec=AgentSpec('claude', 'opus'), id=RESUMED)
+    expected = ['claude', '--resume', RESUMED, '--name', 'proj@goal@agent', '--model', 'opus']
     compare(calls, expected=[(expected, worktree)])
 
 
@@ -1144,6 +1331,37 @@ def test_agent_start_cli_model_from_project_config(
 # The role section leading every launched agent's context: the whole agent prime, pushed
 # so the session never has to guess to pull it (see agent-docs/workspace-layout.md).
 AGENT_ROLE_TEXT = f'# Role: agent\n\n{prime(ROLE_AGENT, project="proj", goal="g")}'
+
+
+def _agent_context(ws: Path) -> Path:
+    """Where the bare agent role text (no directives, no principles) renders for ``proj@g@agent``."""
+    digest = sha256(AGENT_ROLE_TEXT.encode()).hexdigest()
+    return ws / 'state' / 'context' / f'proj@g@agent-{digest[:8]}.md'
+
+
+def _agent_context_rendered(ws: Path) -> dict[str, object]:
+    """The ``context: rendered`` log line for :func:`_agent_context`, ``proj`` pinned."""
+    return {
+        'level': 'INFO',
+        'goal': 'g',
+        'session': 'proj@g@agent',
+        'path': str(_agent_context(ws)),
+        'sha256': sha256(AGENT_ROLE_TEXT.encode()).hexdigest(),
+        'sources': context_sources(ws, 'agent', pinned=(ws / 'proj').resolve()),
+        'message': 'context: rendered',
+    }
+
+
+def _archived_session_found(native_id: str) -> dict[str, object]:
+    """The log line ``resume_target`` lands when the archive answers ``proj@g@agent``."""
+    return {
+        'level': 'INFO',
+        'goal': 'g',
+        'platform': 'claude',
+        'native_id': native_id,
+        'address': 'proj@g@agent',
+        'message': 'agent resume: archived session',
+    }
 
 
 def test_agent_start_cli_model_from_workspace_config(
@@ -1388,23 +1606,27 @@ def test_agent_start_cli_dry_previews_without_launching(
     compare(calls, expected=[])  # nothing launched
 
 
-def test_agent_resume_cli_dry_without_context(
+def test_agent_resume_cli_dry_previews_the_archived_session(
     tmpdir: TempDir, replace: Replacer, command: Command
 ) -> None:
-    _project_with_worktree(tmpdir)
+    ws = _archived_agent_in_workspace(tmpdir, replace, 'uuid-1234')
+    project = Path.cwd()
     calls = _stub(replace)
-    expected_wt = Path.cwd() / 'worktrees' / 'g@agent'
-    # no workspace, no sources: the preview shows an interactive launch with no context
+    expected_wt = project / 'worktrees' / 'g@agent'
+    context = _agent_context(ws)
     command.run('agent', 'resume', '-g', 'g', '--dry', '--', '--verbose').check(
         output='\n'.join(
             [
                 f'Would resume agent in {expected_wt}',
-                'session: (no archived id — by name)',
+                'session: uuid-1234',
                 'harness: claude',
-                'address: myproject@g@agent',
+                'address: proj@g@agent',
                 'prompt: (interactive)',
                 'passthrough: --verbose',
-                'context: (none)',
+                *sources_lines(context_sources(ws, 'agent', pinned=project.resolve())),
+                f'context: {context}',
+                '---',
+                AGENT_ROLE_TEXT,
             ]
         ),
         logging=action_logs(
@@ -1420,6 +1642,7 @@ def test_agent_resume_cli_dry_without_context(
                 'model': None,
                 'dry': True,
             },
+            middle=[_agent_context_rendered(ws), _archived_session_found('uuid-1234')],
         ),
     )
     compare(calls, expected=[])  # nothing launched

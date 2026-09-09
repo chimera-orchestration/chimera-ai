@@ -397,8 +397,10 @@ class Archive:
         a board slot needs the exact address, not a widened match.
 
         ``resumable`` skips sessions whose transcript has been pruned, returning the
-        newest one that can actually be revived. Without it, ``ch agent resume`` hands
-        claude an id it no longer knows and the user sees a raw "No conversation found"
+        newest one that can actually be revived — ``None`` when there is none, which the
+        caller must treat as *nothing to resume*, never as licence to try another handle
+        (``commands.agent.resume_target``). Without it, ``ch agent resume`` hands claude
+        an id it no longer knows and the user sees a raw "No conversation found"
         traceback — the failure that started all of this. Off by default: a *listing*
         wants the truth about what ran most recently, pruned or not.
         """

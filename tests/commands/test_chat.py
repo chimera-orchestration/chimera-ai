@@ -11,6 +11,7 @@ from chimera.agent_env import ROLE_CAPTAIN, ROLE_MANAGER
 from chimera.agents import AgentSession
 from chimera.archive import Archive, ArchiveSession
 from chimera.agents.claude import Claude
+from chimera.commands.agent import NothingToResumeError
 from chimera.commands.chat import ChatAlreadyLiveError, GoalHasAgentError, chat, chat_target
 from chimera.config import ProjectConfig, UserError
 from chimera.context import Project, Scope
@@ -95,13 +96,18 @@ class TestChat:
         assert chat(ws, 'pegasus') is None  # no note: nothing to report
         compare(calls, expected=[(['claude', '--session-id', SESSION_ID, '--name', 'pegasus'], ws)])
 
-    def test_resume_revives_by_name_when_the_archive_has_never_seen_it(
+    def test_resume_refuses_when_the_archive_has_never_seen_it(
         self, tmpdir: TempDir, replace: Replacer
     ) -> None:
-        ws = tmpdir.makedir('lycia')
+        # never by name: a name claude can't match opens its interactive picker, which a
+        # background resume then sits in forever — see chimera.commands.agent.resume_target
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+        replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'lycia'))
+        ws = tmpdir.path / 'lycia'
         calls = _stub(replace)
-        chat(ws, 'pegasus', resume=True)
-        compare(calls, expected=[(['claude', '--resume', 'pegasus'], ws)])
+        with ShouldRaise(NothingToResumeError('@@captain', 'no session recorded')):
+            chat(ws, str(Captain()), resume=True)
+        compare(calls, expected=[])  # never launched
 
     def test_resume_revives_by_archived_id_not_by_name(
         self, tmpdir: TempDir, replace: Replacer
@@ -138,11 +144,15 @@ class TestChat:
     def test_dry_reports_the_live_chat_instead_of_refusing(
         self, tmpdir: TempDir, replace: Replacer
     ) -> None:
-        ws = tmpdir.makedir('lycia')
-        calls = _stub(replace, live=[AgentSession('x', 'pegasus', 'idle', ws, None)])
-        note = "note: chat 'pegasus' is already live — a real launch would refuse"
-        compare(chat(ws, 'pegasus', dry=Dry(True)), expected=note)
-        compare(chat(ws, 'pegasus', resume=True, dry=Dry(True)), expected=note)
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+        replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'lycia'))
+        ws = tmpdir.path / 'lycia'
+        captain = str(Captain())
+        _archived_chat(ws, 'uuid-captain', captain)  # so the resume has something to preview
+        calls = _stub(replace, live=[AgentSession('x', captain, 'idle', ws, None)])
+        note = "note: chat '@@captain' is already live — a real launch would refuse"
+        compare(chat(ws, captain, dry=Dry(True)), expected=note)
+        compare(chat(ws, captain, resume=True, dry=Dry(True)), expected=note)
         compare(calls, expected=[])  # previewed, never launched
 
     def test_extra_bypass_flags_refused_under_an_ai_agent(
@@ -435,6 +445,7 @@ def test_chat_cli_explicit_goal_never_launches_the_captain(
 
 def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -> None:
     ws = _workspace(tmpdir, replace, {'kind': 'workspace', 'captain': 'pegasus'})
+    _archived_chat(ws, 'uuid-captain', str(Captain()))
     calls = _stub(replace)
     run = command.run('chat', '--resume')
     # even without a roles/captain dir the prime renders, so context is injected
@@ -442,7 +453,15 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'state' / 'context' / f'@@captain-{digest[:8]}.md'
     compare(context.read_text(), expected=text)
-    claude_cmd = ['claude', '--resume', '@@captain', '--append-system-prompt-file', str(context)]
+    claude_cmd = [
+        'claude',
+        '--resume',
+        'uuid-captain',
+        '--name',
+        '@@captain',
+        '--append-system-prompt-file',
+        str(context),
+    ]
     run.check(
         output=f'Resumed chat @@captain in {ws}',
         logging=[
@@ -471,6 +490,13 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
                 'message': 'context: rendered',
             },
             # no `agent: launching` — a resume records no launch to be claimed
+            {
+                'level': 'INFO',
+                'platform': 'claude',
+                'native_id': 'uuid-captain',
+                'address': '@@captain',
+                'message': 'agent resume: archived session',
+            },
             launched(claude_cmd, ws),
             {'level': 'INFO', 'command': 'chat', 'phase': 'end'},
         ],

@@ -170,6 +170,23 @@ pick a winner among them.
 - A fork **copies the parent's transcript**; the parent's file is left a pre-bridge stub.
   Exact lineage is recoverable from transcript-prefix overlap (agentsview's job, not ours).
 
+### Resuming
+
+- `claude --resume <uuid>` revives a session by its transcript. `--resume <name>` is a DWIM
+  over the registry's mutable names, and when nothing matches — the name was renamed, or
+  the session was never in this machine's registry — claude opens its **interactive
+  Resume-session picker** (`No sessions match …` in `claude logs`). It does this under
+  `--bg` too: the headless job sits in the picker indefinitely, `ch ls` shows it blocked,
+  and no SessionStart ever fires, so nothing chimera holds can tell it from a session
+  that is thinking. Observed 2026-09-08 reviving a goal whose transcript folder claude had
+  pruned: the archive rightly answered nothing resumable, chimera fell back to by-name, and
+  the job had to be stopped by hand. The build is unrecorded — precisely because no hook
+  ever fired to stamp it (the machine ran 2.1.266 the next day).
+- So chimera **never builds `--resume <name>`**: `Agent.resume` requires the id, and
+  `resume_target` refuses — cause named, fresh start pointed at — when the archive can't
+  supply one. A pruned transcript is claude's retention talking, not damage: the row stays,
+  marked gone (`ch session show`), and the refusal names the file that vanished.
+
 ### Non-conversation sessions
 
 These register real SessionStart/SessionEnd hooks in ordinary directories and must never

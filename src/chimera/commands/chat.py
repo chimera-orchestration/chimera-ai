@@ -1,11 +1,9 @@
 from collections.abc import Sequence
 from pathlib import Path
-from typing import cast
 
 from loguru import logger
 
 from chimera.addresses import Manager
-from chimera.agents import Launch
 from chimera.agents.registry import AgentSpec
 from chimera.commands.agent import record_launch, refuse_restricted, resume_target
 from chimera.config import UserError
@@ -76,26 +74,34 @@ def chat(
     live = any(session.name == name for session in spec.agent.live())
     if live and not dry.on:
         raise ChatAlreadyLiveError(name)
-    # cast, not an annotation: ty narrows the local back to the start|resume union at the
-    # call site, and the union's ParamSpec join trips over resume's extra kw-only `id`
-    launch = cast(Launch, spec.agent.resume if resume else spec.agent.start)
-    if not resume:  # a resume takes nothing new — see chimera.commands.agent.resume
-        dry(record_launch, cwd, name, spec)
-    # resolve the revival through the archive, as `agent resume` does: the registry's
-    # name is mutable and, across the address grammar change, was not even the name the
-    # session had been launched under
-    revive = {'id': resume_target(cwd, spec.agent.platform, name)} if resume else {}
-    dry(
-        launch,
-        cwd,
-        name,
-        prompt,
-        extra,
-        dangerous,
-        model=spec.model,
-        context=context,
-        **revive,
-    )
+    if resume:
+        # resolved through the archive, as `agent resume` is: the registry's name is
+        # mutable and, across the address grammar change, was not even the name the
+        # session had been launched under — and nothing to revive refuses (see resume_target)
+        id = resume_target(cwd, spec.agent.platform, name)
+        dry(
+            spec.agent.resume,
+            cwd,
+            name,
+            prompt,
+            extra,
+            dangerous,
+            id=id,
+            model=spec.model,
+            context=context,
+        )
+    else:
+        dry(record_launch, cwd, name, spec)  # a resume takes nothing new — see agent.resume
+        dry(
+            spec.agent.start,
+            cwd,
+            name,
+            prompt,
+            extra,
+            dangerous,
+            model=spec.model,
+            context=context,
+        )
     if live:
         logger.bind(session=name).warning('chat: already live')
         return f"note: chat '{name}' is already live — a real launch would refuse"

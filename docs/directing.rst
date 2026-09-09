@@ -69,7 +69,11 @@ Each goal's agent is a session Chimera can find again by name:
   worktree.
 * ``ch agent resume -g <goal>`` — revive the goal's exited session, history
   intact. Chimera knows the worktree, so this works from anywhere — just
-  name the project with ``-p`` when you're not standing in it.
+  name the project with ``-p`` when you're not standing in it. When there is
+  nothing to revive — the harness has pruned the session's transcript, or no
+  session was ever recorded for the goal — it refuses, says why, and names
+  the fresh start (``ch agent start -g <goal>``); it never guesses at a
+  session by name. ``ch session show`` marks a pruned transcript as gone.
 * ``ch agent stop -g <goal>`` — stop the live session cleanly (a polite
   signal and a wait — never a hard kill; a session that won't die is
   reported for you to inspect, and a goal with no worktree is an error, so a
