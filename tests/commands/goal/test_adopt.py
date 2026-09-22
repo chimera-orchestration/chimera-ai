@@ -375,6 +375,7 @@ def test_goal_adopt_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
                 f'Would adopt feature in {worktree}',
                 'harness: claude',
                 'address: project@feature@agent',
+                'memory: (harness default)',
                 'prompt: (interactive)',
                 'context: (none)',
             ]

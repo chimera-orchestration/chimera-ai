@@ -40,6 +40,20 @@ The shape is checked rather than assumed, because ``Path('/tmp/x.sh').parent.nam
 the disagreement warning, and that warning's whole worth is meaning "the harness changed".
 """
 
+MEMORY_SETTING = 'autoMemoryDirectory'
+"""
+The documented settings key that relocates a session's auto-memory directory.
+
+Claude keys that directory on the *git repository* — every worktree and subdirectory of
+one repo shares it (documented, and observed 2.1.278: a worktree's memory landed under
+its main checkout's slug) — so every seat in a workspace, itself one repo, shared one
+``MEMORY.md``. Passed as inline JSON through ``--settings``, it rides the argv and so
+reaches a ``--bg`` session too, where a launcher's environment never does. A relative
+value is silently ignored (observed), so the caller hands over an absolute path.
+"""
+
+SETTINGS_FLAG = '--settings'
+
 ENTRYPOINT_VAR = 'CLAUDE_CODE_ENTRYPOINT'
 
 PRINT_ENTRYPOINT = 'sdk-cli'
@@ -127,6 +141,7 @@ class Claude(Agent):
         *,
         model: str | None = None,
         context: Path | None = None,
+        memory: Path | None = None,
     ) -> str | None:
         """Run a claude session named ``name``, with cwd set to ``cwd``.
 
@@ -142,10 +157,12 @@ class Claude(Agent):
         ("``--bg`` manages the session id") and only prints a *short* id, so a background
         launch answers ``None`` — the full id arrives later, from the session's own
         SessionStart hook. Never the short form: it isn't resumable.
+
+        ``memory`` rides as an ``autoMemoryDirectory`` setting (see :data:`MEMORY_SETTING`).
         """
         supplied = None if prompt is not None else str(uuid4())
         lead = ['--name', name] if supplied is None else ['--session-id', supplied, '--name', name]
-        args = _session_args(lead, prompt, extra, dangerous, model, context)
+        args = _session_args(lead, prompt, extra, dangerous, model, context, memory)
         self._launch(cwd, args)
         return supplied
 
@@ -160,6 +177,7 @@ class Claude(Agent):
         id: str | None = None,
         model: str | None = None,
         context: Path | None = None,
+        memory: Path | None = None,
     ) -> str | None:
         """Resume a claude session, with cwd set to ``cwd``.
 
@@ -172,10 +190,12 @@ class Claude(Agent):
         revived in its worktree from anywhere. Interactive foreground by default; with
         ``prompt`` it resumes in the background (``--bg``) to keep working. Returns the
         ``id`` it resumed by — a resume adds no new identity, and without one there is
-        nothing to report but the mutable name.
+        nothing to report but the mutable name. ``memory`` is re-asserted exactly as
+        :meth:`start` set it — settings are read afresh on every launch, so a revival
+        without it would fall back to the repo-keyed default and lose the seat's notes.
         """
         lead = ['--resume', id, '--name', name] if id is not None else ['--resume', name]
-        args = _session_args(lead, prompt, extra, dangerous, model, context)
+        args = _session_args(lead, prompt, extra, dangerous, model, context, memory)
         self._launch(cwd, args)
         return id
 
@@ -517,10 +537,13 @@ def _session_args(
     dangerous: bool,
     model: str | None = None,
     context: Path | None = None,
+    memory: Path | None = None,
 ) -> list[str]:
-    """The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, then prompt.
+    """
+    The claude argv tail: ``--bg`` when backgrounding, the lead, passthrough, settings, then prompt.
 
-    The model/context lead is :func:`_lead_args`.
+    The model/context lead is :func:`_lead_args`; the seat memory settings token that
+    follows the passthrough is :func:`_settings_args`.
 
     With ``dangerous`` the session also gets ``--allow-dangerously-skip-permissions`` (unless
     ``extra`` already asks for bypass) so bypass-permissions mode is reachable with shift-tab.
@@ -532,9 +555,56 @@ def _session_args(
     """
     lead = [*lead, *_lead_args(extra, model, context)]
     allow = (ALLOW_BYPASS,) if dangerous and not _BYPASS_FLAGS.intersection(extra) else ()
+    tail = [*_settings_args(memory, extra), *allow]
     if prompt is not None:
-        return ['--bg', *lead, *extra, *allow, prompt]
-    return [*lead, *extra, *allow]
+        return ['--bg', *lead, *extra, *tail, prompt]
+    return [*lead, *extra, *tail]
+
+
+def _settings_args(memory: Path | None, extra: Sequence[str]) -> list[str]:
+    """
+    The ``--settings`` token carrying the seat's memory dir; nothing without one.
+
+    Emitted *after* the passthrough, because a later ``--settings`` replaces an earlier
+    one wholesale — verified on 2.1.278, no merging — so one the caller passed through
+    would otherwise silently discard the seat's memory. Instead it is folded in: the
+    passthrough's own settings (inline JSON or a file, the last one when repeated, as
+    claude itself keeps only the last) plus the memory dir, the caller's own
+    ``autoMemoryDirectory`` winning like an explicit ``--model`` does over the spec's.
+    """
+    if memory is None:
+        return []
+    settings = _passthrough_settings(extra)
+    settings.setdefault(MEMORY_SETTING, str(memory))
+    return [SETTINGS_FLAG, json.dumps(settings)]
+
+
+def _passthrough_settings(extra: Sequence[str]) -> dict[str, object]:
+    """
+    The settings object the passthrough's last ``--settings`` names; ``{}`` when none.
+
+    Both spellings (``--settings X``, ``--settings=X``), the value either inline JSON or
+    a path to a JSON file, exactly as claude accepts them. Anything else refuses: claude
+    would refuse it too, and guessing what the caller meant would launch a session on
+    settings nobody asked for.
+    """
+    values = [
+        arg.removeprefix(f'{SETTINGS_FLAG}=')
+        if arg.startswith(f'{SETTINGS_FLAG}=')
+        else extra[i + 1]
+        for i, arg in enumerate(extra)
+        if arg.startswith(f'{SETTINGS_FLAG}=') or (arg == SETTINGS_FLAG and i + 1 < len(extra))
+    ]
+    if not values:
+        return {}
+    value = values[-1]
+    try:
+        loaded = json.loads(value if value.lstrip().startswith('{') else Path(value).read_text())
+    except (OSError, ValueError):
+        loaded = None
+    if not isinstance(loaded, dict):
+        raise UserError(f'{SETTINGS_FLAG} {value!r}: not a JSON object or a readable settings file')
+    return loaded
 
 
 def _print_args(

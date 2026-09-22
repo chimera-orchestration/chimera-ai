@@ -29,6 +29,7 @@ Layout
         archive.db              #   the session archive
         mail/                   #   inter-agent mailboxes, one per address
         context/                #   rendered launch contexts
+        memory/                 #   each seat's auto-memory, one dir per address
       <project>/
         config.yaml             # kind: project + where its repo lives
         principles/  knowledge/  prompts/  roles/  processes/

@@ -350,6 +350,7 @@ def test_goal_start_cli_dry_role_leads_the_context(
                 f'Would start g in {worktree}',
                 'harness: claude',
                 'address: proj@g@agent',
+                f'memory: {ws / "state" / "memory" / "proj@g@agent"}',
                 'prompt: (interactive)',
                 *sources_lines(sources),
                 f'context: {context}',
@@ -401,6 +402,7 @@ def test_goal_start_cli_dry(tmpdir: TempDir, git_repo: Repo, command: Command) -
                 f'Would start g in {worktree}',
                 'harness: claude',
                 'address: project@g@agent',
+                'memory: (harness default)',
                 'prompt: (interactive)',
                 'context: (none)',
             ]

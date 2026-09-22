@@ -543,6 +543,7 @@ class TestErrandCli:
                     'out: (stdout)',
                     'harness: claude',
                     'address: proj@errand-abc123@agent',
+                    'memory: (harness default)',
                     'prompt: q (guardrail prepended)',
                     *sources_lines(sources),
                     f'context: {artifact}',
@@ -578,6 +579,7 @@ class TestErrandCli:
                     'out: r.md',
                     'harness: claude',
                     'address: proj@errand-abc123@agent',
+                    'memory: (harness default)',
                     'prompt: q (guardrail prepended)',
                     'context: (none)',
                 ]

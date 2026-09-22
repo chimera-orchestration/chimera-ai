@@ -949,6 +949,7 @@ def test_review_cli_dry_with_packaged_template(
                 f'Would review 1 in {expected}',
                 'harness: claude',
                 'address: project@pr-1@agent',
+                'memory: (harness default)',
                 f'prompt: review template ({PACKAGED / "review.md"} (packaged)) + guardrail',
                 'context: (none)',
             ]
@@ -985,6 +986,7 @@ def test_review_cli_dry_names_the_project_template(
                 f'Would review 1 in {expected}',
                 'harness: claude',
                 'address: project@pr-1@agent',
+                'memory: (harness default)',
                 f'prompt: review template ({Path.cwd() / "prompts" / "review.md"}) + guardrail',
                 'context: (none)',
             ]

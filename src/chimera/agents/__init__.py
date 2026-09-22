@@ -95,6 +95,7 @@ class Launch(Protocol):
         *,
         model: str | None = None,
         context: Path | None = None,
+        memory: Path | None = None,
     ) -> str | None: ...
 
 
@@ -105,9 +106,12 @@ class Agent(ABC):
     identity is ``(platform, native id)``. ``model`` picks the model for the session
     (the harness's own default when ``None``). ``context`` is a rendered launch-context
     file (see ``chimera.agents.context``) the harness injects by whatever channel it
-    has — never by writing into the repo. ``dangerous`` asks the harness to make its
-    permissions-bypass mode *reachable* (never active); a harness without such a mode
-    ignores it. ``extra`` is forwarded to the harness binary verbatim.
+    has — never by writing into the repo. ``memory`` is where the session's own
+    auto-memory (its scratch notes across sessions) should live: its *seat's* directory
+    (see ``chimera.agents.context.memory_dir``), so seats sharing one git repository
+    stop sharing notes; a harness with no such store ignores it. ``dangerous`` asks the
+    harness to make its permissions-bypass mode *reachable* (never active); a harness
+    without such a mode ignores it. ``extra`` is forwarded to the harness binary verbatim.
 
     Whether a launch is *allowed* — whether something else is already working in that
     worktree — is not asked here: an adapter reports what its registry claims is live
@@ -132,6 +136,7 @@ class Agent(ABC):
         *,
         model: str | None = None,
         context: Path | None = None,
+        memory: Path | None = None,
     ) -> str | None:
         """Launch a new session named ``name`` in ``cwd``; background when ``prompt`` is given.
 
@@ -156,6 +161,7 @@ class Agent(ABC):
         id: str | None = None,
         model: str | None = None,
         context: Path | None = None,
+        memory: Path | None = None,
     ) -> str | None:
         """Revive a session in ``cwd``, continuing it from wherever it left off.
 

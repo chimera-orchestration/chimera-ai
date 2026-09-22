@@ -209,6 +209,26 @@ No workspace (a lone
 project) → nothing rendered, nothing injected, no log line; with one, the role section always
 renders, so every workspace launch injects context.
 
+**Seat memory.** The launchers also hand the harness where the session's own auto-memory
+(claude's `MEMORY.md` and topic files — its scratch notes across sessions) should live:
+`<workspace>/state/memory/<address>/` (`chimera.agents.context.memory_dir`, resolved
+best-effort by `commands.agent.seat_memory` and passed as `Agent.start`/`resume`'s `memory`;
+claude carries it as an inline `--settings '{"autoMemoryDirectory": …}'` token — see
+`agent-docs/sessions.md`, *Auto memory*). Per **address**, because the harness's default is per
+*git repository*: every worktree and subdirectory of one repo shares a single directory, and the
+workspace is one repo holding every project dir, so `@@captain` and every `<project>@@manager`
+were writing one `MEMORY.md` over each other. The address is the seat, so it is the key —
+`@@captain`, `<project>@@manager`, `<project>@<goal>@<actor>` each get their own, and the same
+address resolves to the same directory on every start *and* resume (settings are read afresh
+per launch, so a revival re-asserts it). Gitignored and machine-local like the mailboxes beside
+it. `ch errand` deliberately passes none (its read-only wall blocks memory writes, and a
+per-errand directory would be empty every run), as does a project standing outside any
+workspace; `--dry` shows the choice as a `memory:` line (`(harness default)` when nothing is
+handed over). Notes a seat wrote *before* this under the harness's repo-keyed default
+(`~/.claude/projects/<slug>/memory/`) are not migrated — copy the ones worth keeping into the
+seat's directory by hand. This is scratch memory only: `knowledge/` stays the sanctioned durable
+store for project facts, and nothing moves between the two.
+
 `ch prime` is the *pull* counterpart of this pushed context: run anywhere, it prints the
 scope's role-shaped golden path (the role from the session's own address when chimera
 launched it, else inferred from cwd) — the same text `ch chat` pushes — see

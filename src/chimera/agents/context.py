@@ -103,6 +103,22 @@ def materialize(workspace: Path, name: str, rendered: Rendered) -> Path | None:
     return path
 
 
+def memory_dir(workspace: Path, name: str) -> Path:
+    """
+    Where session ``name``'s auto-memory lives: ``<workspace>/state/memory/<address>``.
+
+    Per *seat*, because the harness's own default is per git repository — every worktree
+    and subdirectory of one repo shares a single memory dir, and the workspace is one
+    repo, so the captain and every manager were writing the same ``MEMORY.md`` over each
+    other. An address names exactly one seat, so it keys the directory, and the same
+    address always resolves to the same one — how a resumed session finds its own notes.
+    Under the gitignored ``state/``, beside the seat's mailbox; absolute, because the
+    harness silently ignores a relative one. Memory is the seat's own working notes —
+    the durable store for project facts stays ``knowledge/``.
+    """
+    return (workspace / 'state' / 'memory' / name).absolute()
+
+
 def _dir_of(project: Project | None, sub: str) -> Path | None:
     return project.dir / sub if project is not None else None
 

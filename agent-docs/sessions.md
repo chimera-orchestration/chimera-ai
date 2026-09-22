@@ -27,7 +27,7 @@ will drift. Detection must be free and automatic — no one will remember to re-
   behaviours needing a real session (does `--bg` still refuse it?) are re-run by hand and the
   result stamped here with its version.
 
-## Claude Code (observed 2.1.212–2.1.220)
+## Claude Code (observed 2.1.212–2.1.278)
 
 ### The five ways a session starts
 
@@ -206,6 +206,36 @@ launcher-side guard carries the weight and the hook can only warn.
 `PreToolUse`, `Stop`, `PostToolBatch`, `PreCompact` and `ConfigChange` — recorded so the
 asymmetry is on file, not as a suggestion.
 
+### Auto memory (observed 2.1.278)
+
+Claude's own cross-session notes (`MEMORY.md` plus topic files) live in
+`~/.claude/projects/<slug>/memory/`, and the slug is derived from the **git repository**,
+never the cwd: probed with a scratch repo, its root, a subdirectory and a *linked worktree*
+all resolved to the main checkout's slug (this repo's goal worktrees write to
+`-Users-cwithers-vcs-chimera-ai`); a directory outside any repo uses its own path. Documented
+on the memory page, and the field case that started this: a workspace is one repo holding
+every project dir, so `@@captain` (cwd `~/lycia`) and `chimera-ai@@manager` (cwd
+`~/lycia/chimera-ai`) shared one slug, wrote the same memory file within minutes, and the
+second plain write replaced the first (2026-09-22).
+
+- **`autoMemoryDirectory` relocates it** — a documented settings key, honoured from
+  `--settings`, which takes inline JSON as well as a file. So it rides the **argv**, which
+  reaches a `--bg` session where a launcher's environment never does (verified: a `--bg`
+  session wrote its redirected memory path back to a file). Claude creates the directory.
+- **A relative value is silently ignored** — no warning, the default slug is used. Absolute only.
+- **A later `--settings` replaces an earlier one wholesale.** No key-merge: a first
+  `{autoMemoryDirectory}` followed by `{autoMemoryEnabled: true}` fell back to the default
+  dir. Anything chimera sets this way must therefore come *after* a `--` passthrough, with
+  the passthrough's own settings folded in rather than shadowed.
+- `CLAUDE_CODE_PROJECT_DIR_NAME` beside `CLAUDE_CONFIG_DIR` (2.1.234+) renames the slug too,
+  but both are environment — one hop, never a `--bg` session — and the config dir drags auth
+  and settings along with it. Not used.
+- A `-p` run has the memory statement in its prompt as well, so an errand *reads* the target
+  repo's default memory. Left alone: its tool wall blocks the writes, and a per-errand
+  directory would be an empty one per run.
+- `--bare`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` and `autoMemoryEnabled: false` each turn
+  auto-memory off altogether.
+
 ### Lifecycle detail
 
 - SessionEnd `reason` carries signal beyond `other`: a clean quit gives `prompt_input_exit`.
@@ -256,6 +286,13 @@ answers the same question over documented surfaces, and an optimisation is not w
 dependency the docs contradict. Reading it as a **cross-check** is a different bargain and
 was built: an absent witness costs nothing, so an undocumented channel can corroborate
 identity without anything resting on it.
+
+**Memory is per seat, never per repository.** Every launcher hands the harness
+`<workspace>/state/memory/<address>` (`commands.agent.seat_memory` → `Agent.start`/`resume`'s
+`memory`; claude renders it as the `--settings` token above, after the passthrough), so the
+captain, each manager and each goal agent keep their own notes; the same address resolves to
+the same directory on every start and resume. A project standing outside any workspace has no
+`state/` to hold one and keeps the harness default. `--dry` previews it as a `memory:` line.
 
 **Liveness needs the `(pid, create_time)` pair**, captured at SessionStart and matched later —
 never an inequality. `Agent.stop` re-verifies immediately before signalling, since that is the
