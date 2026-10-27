@@ -479,16 +479,28 @@ def session_summary(cwd: str, name: str, projects: Path | None = None) -> str | 
     folder = projects / re.sub(r'[^a-zA-Z0-9]', '-', cwd)
     transcripts = sorted(folder.glob('*.jsonl'), key=lambda p: p.stat().st_mtime, reverse=True)
     latest: dict[str, str] = {}
-    for line in reversed(transcripts[0].read_text().splitlines()) if transcripts else ():
+    skipped = 0
+    # split on \n only: a record's text may hold U+2028/U+2029, which splitlines() tears at
+    for line in reversed(transcripts[0].read_text().split('\n')) if transcripts else ():
         if not line.strip():
             continue
-        record = json.loads(line)
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            record = None  # the live session may still be writing this line
+        if not isinstance(record, dict):
+            skipped += 1
+            continue
         field = TITLES.get(str(record.get('type')))
         value = record.get(field) if field else None  # a typed record may omit its value
         if field and value and field not in latest:  # reversed, so first seen is the file's latest
             latest[field] = ' '.join(str(value).split())
             if len(latest) == len(TITLES):
                 break
+    if skipped:
+        logger.bind(transcript=str(transcripts[0]), skipped=skipped).warning(
+            'agent: skipped unreadable transcript lines'
+        )
     return next((latest[f] for f in TITLES.values() if f in latest and latest[f] != name), None)
 
 
