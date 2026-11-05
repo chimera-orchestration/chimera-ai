@@ -11,3 +11,8 @@
   tests/conftest.py's bare_repo`, `# fixes the CI flake`). That density is for agent-docs
   prose, not code; motivation belongs in the commit message, not the comment.
 - run @happy.sh any time you want to see if your code is of sufficient quality to commit.
+- never `splitlines()` over JSONL or any other line-oriented data: it also splits on U+2028,
+  U+2029, `\x1c`–`\x1e`, `\x85`, `\v` and `\f`, which legitimately occur *inside* a record's
+  payload — iterate the open file object or `split('\n')`. Learned when `ch ls` died on a live
+  transcript whose prompt text carried U+2028 (`session_summary` tore the record and
+  `json.loads` raised). Git/porcelain output and chimera's own marker files are fine either way.

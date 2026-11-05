@@ -597,6 +597,62 @@ def test_session_summary_when_transcript_has_no_title_or_prompt(tmpdir: TempDir)
     assert session_summary('/work/proj', 'agent', projects) is None
 
 
+def test_session_summary_keeps_a_record_whole_across_unicode_separators(
+    tmpdir: TempDir, full_logs: LogCapture
+) -> None:
+    projects = tmpdir.makedir('projects')
+    _transcript(
+        projects / '-work-proj',
+        's.jsonl',
+        # pasted text carries U+2028/U+2029 inside the JSON string; a record is one \n line
+        '{"type": "ai-title", "aiTitle": "stale"}\n'
+        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n'
+        '{"type": "ai-title", "aiTitle": "ai topic"}\n',
+        1000,
+    )
+    compare(session_summary('/work/proj', 'agent', projects), expected='ai topic')
+    full_logs.check()
+
+
+def test_session_summary_skips_a_torn_final_line(tmpdir: TempDir, full_logs: LogCapture) -> None:
+    projects = tmpdir.makedir('projects')
+    transcript = _transcript(
+        projects / '-work-proj',
+        's.jsonl',
+        # the live session is still writing the last record when we read it
+        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n{"type": "last-pro',
+        1000,
+    )
+    compare(session_summary('/work/proj', 'agent', projects), expected='fix the bug')
+    full_logs.check(
+        {
+            'level': 'WARNING',
+            'message': 'agent: skipped unreadable transcript lines',
+            'transcript': str(transcript),
+            'skipped': 1,
+        }
+    )
+
+
+def test_session_summary_skips_a_non_dict_record(tmpdir: TempDir, full_logs: LogCapture) -> None:
+    projects = tmpdir.makedir('projects')
+    transcript = _transcript(
+        projects / '-work-proj',
+        's.jsonl',
+        '{"type": "last-prompt", "lastPrompt": "fix the bug"}\n[1, 2]\n"text"\n',
+        1000,
+    )
+    compare(session_summary('/work/proj', 'agent', projects), expected='fix the bug')
+    full_logs.check(
+        {
+            'level': 'WARNING',
+            'message': 'agent: skipped unreadable transcript lines',
+            'transcript': str(transcript),
+            'skipped': 2,
+        }
+    )
+
+
 def test_sessions_enriches_checked_sessions_with_a_summary(
     tmpdir: TempDir, replace: Replacer
 ) -> None:
