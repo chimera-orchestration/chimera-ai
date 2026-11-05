@@ -7,7 +7,7 @@ from loguru import logger
 from chimera.addresses import Manager
 from chimera.agents import Launch
 from chimera.agents.registry import AgentSpec
-from chimera.commands.agent import record_launch, refuse_restricted, resume_target
+from chimera.commands.agent import record_launch, refuse_restricted, resume_target, seat_memory
 from chimera.config import UserError
 from chimera.context import Scope
 from chimera.dry import Dry
@@ -70,7 +70,10 @@ def chat(
     reports instead of refusing — the returned note, echoed with the preview: a preview
     mutates nothing, and the scope's chat being live is its normal state, so refusing
     would make the preview unreachable exactly when it's wanted (the other launchers'
-    liveness checks live inside the launch the ``dry`` switch already skips).
+    liveness checks live inside the launch the ``dry`` switch already skips). The seat's
+    memory dir (``commands.agent.seat_memory``) rides along, as on every launcher: the
+    captain and the managers all sit in the one workspace repo, which is exactly the
+    case the harness's per-repository default collapsed into one shared ``MEMORY.md``.
     """
     refuse_restricted(cwd, spec, extra)
     live = any(session.name == name for session in spec.agent.live())
@@ -94,6 +97,7 @@ def chat(
         dangerous,
         model=spec.model,
         context=context,
+        memory=seat_memory(cwd, name),
         **revive,
     )
     if live:

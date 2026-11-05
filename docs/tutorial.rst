@@ -75,13 +75,17 @@ the context the agent will be given) but changes nothing:
     Would start add-greeting in /Users/you/lycia/demo/worktrees/add-greeting@agent
     harness: claude
     address: demo@add-greeting@agent
+    memory: /Users/you/lycia/state/memory/demo@add-greeting@agent
     prompt: (interactive)
     ...
 
 Note the shape: the agent gets branch ``add-greeting/agent`` checked out in
 worktree ``demo/worktrees/add-greeting@agent`` — its own copy of the
-repository, so nothing it does touches yours. The rest of the preview is the
-context Chimera injects at launch (see :doc:`concepts`).
+repository, so nothing it does touches yours. Its address also names its
+memory directory: the notes the agent keeps for itself across sessions live
+under the workspace's ``state/``, one directory per address, so no two seats
+ever write over each other's. The rest of the preview is the context Chimera
+injects at launch (see :doc:`concepts`).
 
 Now run it for real, from anywhere (``-p demo`` names the project; inside the
 project directory you could drop it):

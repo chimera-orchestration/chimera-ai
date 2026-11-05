@@ -6,6 +6,7 @@ from loguru import logger
 
 from chimera.agent_env import ai_session
 from chimera.agents import BRANCHED, AgentSession
+from chimera.agents.context import memory_dir
 from chimera.agents.registry import AGENTS, AgentSpec
 from chimera.archive import RECONCILED, ArchiveSession, Event, PendingLaunch, archive
 from chimera.config import NotInWorkspaceError, UserError
@@ -275,6 +276,23 @@ def record_launch(cwd: Path, address: str, spec: AgentSpec) -> None:
     )
 
 
+def seat_memory(cwd: Path, address: str) -> Path | None:
+    """
+    The seat's auto-memory dir for a session launched in ``cwd``; ``None`` outside a workspace.
+
+    Every launcher hands this to the harness (``Agent.start``/``resume``'s ``memory``), so
+    each address gets its own notes instead of the harness's per-repository default — in a
+    workspace, one repo holding every seat, that default had the captain and the managers
+    overwriting each other's ``MEMORY.md``. Best-effort like :func:`record_launch`: a project
+    standing outside any workspace has no ``state/`` to hold it, so its session simply keeps
+    the harness default.
+    """
+    try:
+        return memory_dir(resolve_workspace(cwd), address)
+    except NotInWorkspaceError:
+        return None
+
+
 def agent(
     worktree: Path,
     name: str,
@@ -285,7 +303,11 @@ def agent(
     context: Path | None = None,
     dry: Dry = Dry(),
 ) -> None:
-    """Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``)."""
+    """
+    Launch ``spec``'s agent session named ``name`` in the worktree (see ``Agent.start``).
+
+    The seat's memory dir (:func:`seat_memory`) rides along, keyed by ``name`` — the address.
+    """
     refuse_restricted(worktree, spec, extra)
     refuse_occupied(worktree, dry)
     dry(record_launch, worktree, name, spec)
@@ -298,6 +320,7 @@ def agent(
         dangerous,
         model=spec.model,
         context=context,
+        memory=seat_memory(worktree, name),
     )
 
 
@@ -371,6 +394,7 @@ def resume(
         id=id,
         model=spec.model,
         context=context,
+        memory=seat_memory(worktree, name),
     )
 
 

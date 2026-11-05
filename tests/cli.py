@@ -13,6 +13,7 @@ the *annotation*: a bare ``command: testfixtures.Command`` resolves to the stock
 makes the dict-typed ``check`` the one ty sees — with no per-test annotation churn.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -115,6 +116,15 @@ def context_sources(
     for project in [pinned] if pinned is not None else list(knowledge):
         sources[str(project / 'knowledge' / '*.md')] = []
     return sources
+
+
+def memory_args(workspace: Path, address: str) -> list[str]:
+    """
+    The ``--settings`` token a launch inside ``workspace`` carries for ``address``'s seat
+    memory — the harness's own memory dir is per git repository, so every seat in the one
+    workspace repo would otherwise share one (see ``agent-docs/workspace-layout.md``)."""
+    memory = workspace / 'state' / 'memory' / address
+    return ['--settings', json.dumps({'autoMemoryDirectory': str(memory)})]
 
 
 def sources_lines(sources: dict[str, list[str]]) -> list[str]:

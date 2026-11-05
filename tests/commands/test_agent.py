@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from dataclasses import replace as replace_field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from testfixtures import LogCapture, Replacer, ShouldRaise, TempDir, compare
 
@@ -29,6 +29,7 @@ from chimera.commands.agent import (
     resume_target,
     scope_line,
     scoped,
+    seat_memory,
     shown,
     stop,
     under,
@@ -47,9 +48,22 @@ from tests.cli import (
     full_capture,
     launched,
     launching,
+    memory_args,
     SESSION_ID,
     sources_lines,
 )
+
+
+def _workspace_with(tmpdir: TempDir, replace: Replacer, *worktrees: str) -> Path:
+    """
+    A pinned workspace holding the given ``<project>/worktrees/<goal>@<actor>`` dirs.
+    """
+    tmpdir.dump('ws/config.yaml', {'kind': 'workspace'})
+    ws = tmpdir.path / 'ws'
+    for worktree in worktrees:
+        (ws / worktree).mkdir(parents=True)
+    replace.in_environ('CHIMERA_WORKSPACE', str(ws))
+    return ws
 
 
 def _project_obj(directory: Path) -> Project:
@@ -117,6 +131,46 @@ def test_agent_background_carries_bypass_when_dangerous(tmpdir: TempDir, replace
         'fix the bug',
     ]
     compare(calls, expected=[(expected, worktree)])
+
+
+def test_agent_in_a_workspace_scopes_memory_to_its_seat(tmpdir: TempDir, replace: Replacer) -> None:
+    ws = _workspace_with(tmpdir, replace, 'proj/worktrees/g@agent', 'proj/worktrees/h@agent')
+    calls = _stub(replace)
+    agent(ws / 'proj' / 'worktrees' / 'g@agent', 'proj@g@agent')
+    agent(ws / 'proj' / 'worktrees' / 'h@agent', 'proj@h@agent')
+    agent(ws / 'proj' / 'worktrees' / 'g@agent', 'proj@g@agent')
+    argvs = [argv for argv, _ in cast(list[tuple[list[str], Path]], calls)]
+    compare(
+        [argv[-2:] for argv in argvs],
+        expected=[
+            memory_args(ws, 'proj@g@agent'),
+            memory_args(ws, 'proj@h@agent'),
+            memory_args(ws, 'proj@g@agent'),  # the same seat, the same notes
+        ],
+    )
+    assert argvs[0][-1] != argvs[1][-1]
+
+
+def test_resume_in_a_workspace_scopes_memory_to_its_seat(
+    tmpdir: TempDir, replace: Replacer
+) -> None:
+    # re-asserted on every revival: without it a resumed seat would fall back to the
+    # harness's repo-keyed default and lose sight of its own notes
+    ws = _workspace_with(tmpdir, replace, 'proj/worktrees/g@agent')
+    calls = _stub(replace)
+    resume(ws / 'proj' / 'worktrees' / 'g@agent', 'proj@g@agent', id='uuid-1')
+    expected = ['claude', '--resume', 'uuid-1', '--name', 'proj@g@agent']
+    compare(
+        calls,
+        expected=[
+            (expected + memory_args(ws, 'proj@g@agent'), ws / 'proj' / 'worktrees' / 'g@agent')
+        ],
+    )
+
+
+def test_seat_memory_is_none_outside_any_workspace(tmpdir: TempDir) -> None:
+    # a lone project has no state/ to hold it: the session keeps the harness's own default
+    assert seat_memory(tmpdir.makedir('wt'), 'proj@g@agent') is None
 
 
 def test_agent_refuses_when_a_session_is_live(tmpdir: TempDir, replace: Replacer) -> None:
@@ -591,6 +645,7 @@ def test_agent_resume_cli_resolves_the_session_through_the_archive(
         'proj@g@agent',
         '--append-system-prompt-file',
         str(context),
+        *memory_args(ws, 'proj@g@agent'),
     ]
     command.run('agent', 'resume', '-g', 'g').check(
         output=f'Resumed agent in {expected}',
@@ -1170,6 +1225,7 @@ def test_agent_start_cli_model_from_workspace_config(
         'ws-model',
         '--append-system-prompt-file',
         str(context),
+        *memory_args(ws, 'proj@g@agent'),
     ]
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected}',
@@ -1281,6 +1337,7 @@ def test_agent_start_cli_injects_rendered_context(
         'proj@g@agent',
         '--append-system-prompt-file',
         str(context),
+        *memory_args(ws, 'proj@g@agent'),
     ]
     command.run('agent', 'start', '-g', 'g').check(
         output=f'Launched agent in {expected_wt}',
@@ -1348,6 +1405,7 @@ def test_agent_start_cli_dry_previews_without_launching(
                 f'Would launch agent in {expected_wt}',
                 'harness: claude  model: opus',
                 'address: proj@g@agent',
+                f'memory: {ws / "state" / "memory" / "proj@g@agent"}',
                 'prompt: do it',
                 *sources_lines(sources),
                 f'context: {context}',
@@ -1402,6 +1460,7 @@ def test_agent_resume_cli_dry_without_context(
                 'session: (no archived id — by name)',
                 'harness: claude',
                 'address: myproject@g@agent',
+                'memory: (harness default)',
                 'prompt: (interactive)',
                 'passthrough: --verbose',
                 'context: (none)',

@@ -7,6 +7,7 @@ from chimera.agent_env import ROLE_AGENT
 from chimera.agents.claude import Claude
 from chimera.prime import prime
 from tests.cli import (
+    memory_args,
     Command,
     action_logs,
     capture_launches,
@@ -82,6 +83,7 @@ def test_goal_and_actor_before_the_command(
         'myproject@g@reviewer',
         '--append-system-prompt-file',
         str(context),
+        *memory_args(workspace_with_env, 'myproject@g@reviewer'),
     ]
     command.run('agent', '-p', 'myproject', '-g', 'g', '-a', 'reviewer', 'start').check(
         output=f'Launched agent in {worktree}',

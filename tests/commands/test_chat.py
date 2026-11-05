@@ -23,6 +23,7 @@ from tests.cli import (
     context_sources,
     launched,
     launching,
+    memory_args,
     SESSION_ID,
     sources_lines,
 )
@@ -120,9 +121,38 @@ class TestChat:
             calls,
             expected=[
                 (
-                    ['claude', '--resume', 'uuid-the-captains-last-session', '--name', '@@captain'],
+                    ['claude', '--resume', 'uuid-the-captains-last-session', '--name', '@@captain']
+                    + memory_args(ws, '@@captain'),
                     ws,
                 )
+            ],
+        )
+
+    def test_captain_and_manager_get_their_own_memory(
+        self, tmpdir: TempDir, replace: Replacer
+    ) -> None:
+        # the field case: both seats sit in the one workspace repo, so the harness's
+        # repo-keyed default had them writing the same MEMORY.md over each other
+        tmpdir.dump('lycia/config.yaml', {'kind': 'workspace'})
+        replace.in_environ('CHIMERA_WORKSPACE', str(tmpdir / 'lycia'))
+        ws = tmpdir.path / 'lycia'
+        project = tmpdir.makedir('lycia/proj')
+        calls = _stub(replace)
+        chat(ws, str(Captain()))
+        chat(project, 'proj@@manager')
+        compare(
+            calls,
+            expected=[
+                (
+                    ['claude', '--session-id', SESSION_ID, '--name', '@@captain']
+                    + memory_args(ws, '@@captain'),
+                    ws,
+                ),
+                (
+                    ['claude', '--session-id', SESSION_ID, '--name', 'proj@@manager']
+                    + memory_args(ws, 'proj@@manager'),
+                    project,
+                ),
             ],
         )
 
@@ -209,6 +239,7 @@ def test_chat_cli_launches_the_captain(
         'opus',
         '--append-system-prompt-file',
         str(context),
+        *memory_args(ws, '@@captain'),
     ]
     run.check(
         output=f'Launched chat @@captain in {ws}',
@@ -264,6 +295,7 @@ def test_chat_cli_project_scope(tmpdir: TempDir, replace: Replacer, command: Com
         'proj@@manager',
         '--append-system-prompt-file',
         str(context),
+        *memory_args(ws, 'proj@@manager'),
     ]
     command.run('chat').check(
         output=f'Launched chat proj@@manager in {project}',
@@ -332,6 +364,7 @@ def test_chat_cli_manager_layers_project_role_directives(
         'proj@@manager',
         '--append-system-prompt-file',
         str(context),
+        *memory_args(ws, 'proj@@manager'),
     ]
     command.run('chat').check(
         output=f'Launched chat proj@@manager in {Path.cwd()}',
@@ -442,7 +475,14 @@ def test_chat_cli_resume(tmpdir: TempDir, replace: Replacer, command: Command) -
     digest = sha256(text.encode()).hexdigest()
     context = ws / 'state' / 'context' / f'@@captain-{digest[:8]}.md'
     compare(context.read_text(), expected=text)
-    claude_cmd = ['claude', '--resume', '@@captain', '--append-system-prompt-file', str(context)]
+    claude_cmd = [
+        'claude',
+        '--resume',
+        '@@captain',
+        '--append-system-prompt-file',
+        str(context),
+        *memory_args(ws, '@@captain'),
+    ]
     run.check(
         output=f'Resumed chat @@captain in {ws}',
         logging=[
@@ -492,6 +532,7 @@ def test_chat_cli_dry_previews_without_launching(
                 f'Would launch chat @@captain in {ws}',
                 'harness: claude',
                 'address: @@captain',
+                f'memory: {ws / "state" / "memory" / "@@captain"}',
                 'prompt: (interactive)',
                 *sources_lines(context_sources(ws, 'captain')),
                 f'context: {context}',
@@ -545,6 +586,7 @@ def test_chat_cli_dry_previews_beside_the_live_chat(
                 "note: chat '@@captain' is already live — a real launch would refuse",
                 'harness: claude',
                 'address: @@captain',
+                f'memory: {ws / "state" / "memory" / "@@captain"}',
                 'prompt: (interactive)',
                 *sources_lines(context_sources(ws, 'captain')),
                 f'context: {context}',
@@ -602,6 +644,7 @@ def test_chat_cli_dry_project_scope_leads_with_the_manager_role(
                 f'Would launch chat proj@@manager in {project}',
                 'harness: claude',
                 'address: proj@@manager',
+                f'memory: {ws / "state" / "memory" / "proj@@manager"}',
                 'prompt: (interactive)',
                 *sources_lines(context_sources(ws, 'manager', pinned=project)),
                 f'context: {context}',

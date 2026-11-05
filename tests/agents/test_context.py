@@ -3,7 +3,14 @@ from pathlib import Path
 
 from testfixtures import LogCapture, TempDir, compare
 
-from chimera.agents.context import KNOWLEDGE_HINT, Rendered, Source, assemble, materialize
+from chimera.agents.context import (
+    KNOWLEDGE_HINT,
+    Rendered,
+    Source,
+    assemble,
+    materialize,
+    memory_dir,
+)
 from chimera.config import ProjectConfig
 from chimera.context import Project
 
@@ -179,3 +186,19 @@ class TestMaterialize:
         assert materialize(ws, 'n', Rendered('', ())) is None
         assert not (ws / 'state').exists()  # no file either
         full_logs.check()  # and no log line: nothing was rendered
+
+
+class TestMemoryDir:
+    def test_each_address_gets_its_own_dir_under_state(self, tmpdir: TempDir) -> None:
+        ws = tmpdir.makedir('lycia')
+        compare(memory_dir(ws, '@@captain'), expected=ws / 'state' / 'memory' / '@@captain')
+        compare(memory_dir(ws, 'proj@@manager'), expected=ws / 'state' / 'memory' / 'proj@@manager')
+        assert memory_dir(ws, '@@captain') != memory_dir(ws, 'proj@@manager')
+
+    def test_the_same_address_always_resolves_to_the_same_dir(self, tmpdir: TempDir) -> None:
+        ws = tmpdir.makedir('lycia')
+        compare(memory_dir(ws, 'proj@g@agent'), expected=memory_dir(ws, 'proj@g@agent'))
+
+    def test_is_absolute_as_the_harness_requires(self, tmpdir: TempDir) -> None:
+        # claude silently ignores a relative autoMemoryDirectory (observed 2.1.278)
+        assert memory_dir(tmpdir.makedir('lycia'), 'proj@g@agent').is_absolute()

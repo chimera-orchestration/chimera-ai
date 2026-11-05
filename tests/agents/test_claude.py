@@ -13,6 +13,7 @@ from testfixtures.popen import MockPopen
 from chimera import agents
 from chimera.agents import Agent, AgentSession
 from chimera.agents.claude import (
+    ALLOW_BYPASS,
     ENV_FILE_VAR,
     READONLY_TOOLS,
     Claude,
@@ -866,3 +867,120 @@ def test_a_background_start_cannot_name_its_session(tmpdir: TempDir, replace: Re
     Popen = _launched(replace)
     assert Claude().start(tmpdir.makedir('wt'), 'n', 'do it') is None
     assert '--session-id' not in Popen.all_calls[0].args[0]
+
+
+class TestSeatMemory:
+    def test_rides_as_an_inline_settings_json_after_the_passthrough(self) -> None:
+        # after, because a later --settings replaces an earlier one wholesale (2.1.278)
+        compare(
+            _session_args(['--name', 'n'], None, ['--verbose'], False, memory=Path('/ws/m/n')),
+            expected=[
+                '--name',
+                'n',
+                '--verbose',
+                '--settings',
+                '{"autoMemoryDirectory": "/ws/m/n"}',
+            ],
+        )
+
+    def test_background_launch_carries_it_before_the_prompt(self) -> None:
+        compare(
+            _session_args(['--name', 'n'], 'go', [], True, memory=Path('/ws/m/n')),
+            expected=[
+                '--bg',
+                '--name',
+                'n',
+                '--settings',
+                '{"autoMemoryDirectory": "/ws/m/n"}',
+                ALLOW_BYPASS,
+                'go',
+            ],
+        )
+
+    def test_none_adds_nothing(self) -> None:
+        compare(_session_args(['--name', 'n'], None, [], False), expected=['--name', 'n'])
+
+    def test_a_passthrough_settings_json_is_folded_in_not_lost(self) -> None:
+        compare(
+            _session_args(
+                ['--name', 'n'], None, ['--settings', '{"theme": "dark"}'], False, memory=Path('/m')
+            ),
+            expected=[
+                '--name',
+                'n',
+                '--settings',
+                '{"theme": "dark"}',
+                '--settings',
+                '{"theme": "dark", "autoMemoryDirectory": "/m"}',
+            ],
+        )
+
+    def test_a_passthrough_settings_file_is_folded_in_too(self, tmpdir: TempDir) -> None:
+        path = tmpdir.write('settings.json', '{"theme": "light"}')
+        compare(
+            _session_args(['--name', 'n'], None, [f'--settings={path}'], False, memory=Path('/m')),
+            expected=[
+                '--name',
+                'n',
+                f'--settings={path}',
+                '--settings',
+                '{"theme": "light", "autoMemoryDirectory": "/m"}',
+            ],
+        )
+
+    def test_an_explicit_passthrough_memory_dir_beats_the_seat(self) -> None:
+        compare(
+            _session_args(
+                ['--name', 'n'],
+                None,
+                ['--settings', '{"autoMemoryDirectory": "/mine"}'],
+                False,
+                memory=Path('/m'),
+            ),
+            expected=[
+                '--name',
+                'n',
+                '--settings',
+                '{"autoMemoryDirectory": "/mine"}',
+                '--settings',
+                '{"autoMemoryDirectory": "/mine"}',
+            ],
+        )
+
+    def test_only_the_last_passthrough_settings_counts_as_claude_does(self) -> None:
+        compare(
+            _session_args(
+                ['--name', 'n'],
+                None,
+                ['--settings', '{"a": 1}', '--settings', '{"b": 2}'],
+                False,
+                memory=Path('/m'),
+            )[-1],
+            expected='{"b": 2, "autoMemoryDirectory": "/m"}',
+        )
+
+    def test_an_unreadable_passthrough_settings_refuses(self) -> None:
+        with ShouldRaise(
+            UserError("--settings 'nonsense': not a JSON object or a readable settings file")
+        ):
+            _session_args(
+                ['--name', 'n'], None, ['--settings', 'nonsense'], False, memory=Path('/m')
+            )
+
+    def test_a_passthrough_settings_that_is_not_an_object_refuses(self) -> None:
+        with ShouldRaise(
+            UserError("--settings '[1]': not a JSON object or a readable settings file")
+        ):
+            _session_args(['--name', 'n'], None, ['--settings', '[1]'], False, memory=Path('/m'))
+
+    def test_start_and_resume_both_carry_it(self, tmpdir: TempDir, replace: Replacer) -> None:
+        Popen = _launched(replace)
+        wt = tmpdir.makedir('wt')
+        Claude().start(wt, 'n', memory=Path('/m'))
+        Claude().resume(wt, 'n', id='uuid-1', memory=Path('/m'))
+        token = '{"autoMemoryDirectory": "/m"}'
+        started, resumed = [c.args[0] for c in Popen.all_calls if c.args]  # the two spawns
+        compare(started[-2:], expected=['--settings', token])
+        compare(
+            resumed, expected=['claude', '--resume', 'uuid-1', '--name', 'n', '--settings', token]
+        )

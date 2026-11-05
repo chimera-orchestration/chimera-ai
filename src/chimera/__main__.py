@@ -29,7 +29,15 @@ from chimera.agents import AgentSession
 from chimera.agents.context import Source, assemble, materialize
 from chimera.agents.registry import AGENTS, AgentSpec, resolve_spec
 from chimera.archive import archive
-from chimera.commands.agent import agents, reconcile, resume_target, scope_line, scoped, shown
+from chimera.commands.agent import (
+    agents,
+    reconcile,
+    resume_target,
+    scope_line,
+    scoped,
+    seat_memory,
+    shown,
+)
 from chimera.commands.agent import agent as _agent
 from chimera.commands.agent import resume as _resume
 from chimera.commands.agent import stop as _agent_stop
@@ -525,17 +533,20 @@ def _dry_preview(
     context: Path | None,
     address: str,
     *,
+    memory: Path | None = None,
     sources: tuple[Source, ...] = (),
     target: str | None = None,
     out: Path | None = None,
 ) -> None:
     """What a --dry launch would do: the address it records, agent, prompt, passthrough, context.
 
-    ``sources`` lists each glob the render searched with its match count — a ``(0)`` is
-    the silent dead end the preview exists to reveal: a directive in the wrong place, or
-    a layer with nothing in it. ``target``/``out`` are errand's extra axes — the project
-    dispatched into and where the report would land (stdout when ``out`` is None); the
-    other launchers leave them off.
+    ``memory`` is the seat's auto-memory dir the launch would hand the harness
+    (``commands.agent.seat_memory``) — ``(harness default)`` when it hands none, as an
+    errand does, or a project standing outside any workspace. ``sources`` lists each glob
+    the render searched with its match count — a ``(0)`` is the silent dead end the
+    preview exists to reveal: a directive in the wrong place, or a layer with nothing in
+    it. ``target``/``out`` are errand's extra axes — the project dispatched into and where
+    the report would land (stdout when ``out`` is None); the other launchers leave them off.
     """
     if target is not None:
         typer.echo(f'target: {target}')
@@ -544,6 +555,7 @@ def _dry_preview(
     # the address is what a real launch would put on record for the session to claim —
     # and therefore its role and its fence, which the address already encodes
     typer.echo(f'address: {address}')
+    typer.echo(f'memory: {memory}' if memory is not None else 'memory: (harness default)')
     typer.echo(f'prompt: {prompt}' if prompt is not None else 'prompt: (interactive)')
     if extra:
         typer.echo(f'passthrough: {" ".join(extra)}')
@@ -928,12 +940,14 @@ def review(
         if dry:
             template = _source(_prompt_resolve(p.prompts, 'review'))
             filled = f' + --review {review_step!r}' if review_step is not None else ''
+            address = str(Actor(p.name, worktree.name.split(SEP, 1)[0], AGENT))
             _dry_preview(
                 spec,
                 f'review template ({template}) + guardrail{filled}',
                 _passthrough(ctx),
                 context,
-                str(Actor(p.name, worktree.name.split(SEP, 1)[0], AGENT)),
+                address,
+                memory=seat_memory(worktree, address),
                 sources=sources,
             )
 
@@ -1082,7 +1096,15 @@ def chat(
     if note is not None:
         typer.echo(note)
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, name, sources=rendered.sources)
+        _dry_preview(
+            spec,
+            prompt,
+            _passthrough(ctx),
+            context,
+            name,
+            memory=seat_memory(cwd, name),
+            sources=rendered.sources,
+        )
 
 
 project_app = typer.Typer(
@@ -1397,7 +1419,15 @@ def goal_start(
     typer.echo(f'{dry_run.verb("Started", "Would start")} {goal} in {worktree}')
     if dry:
         address = str(Actor(p.name, goal, AGENT))
-        _dry_preview(spec, prompt, _passthrough(ctx), context, address, sources=sources)
+        _dry_preview(
+            spec,
+            prompt,
+            _passthrough(ctx),
+            context,
+            address,
+            memory=seat_memory(worktree, address),
+            sources=sources,
+        )
 
 
 @goal_app.command(
@@ -1441,7 +1471,15 @@ def goal_adopt(
     typer.echo(f'{dry_run.verb("Adopted", "Would adopt")} {goal} in {worktree}')
     if dry:
         address = str(Actor(p.name, goal, AGENT))
-        _dry_preview(spec, prompt, _passthrough(ctx), context, address, sources=sources)
+        _dry_preview(
+            spec,
+            prompt,
+            _passthrough(ctx),
+            context,
+            address,
+            memory=seat_memory(worktree, address),
+            sources=sources,
+        )
 
 
 @goal_app.command(
@@ -1666,7 +1704,15 @@ def agent_start(
     _agent(worktree, name, prompt, _passthrough(ctx), dangerous, spec, context, dry_run)
     typer.echo(f'{dry_run.verb("Launched", "Would launch")} agent in {worktree}')
     if dry:
-        _dry_preview(spec, prompt, _passthrough(ctx), context, name, sources=sources)
+        _dry_preview(
+            spec,
+            prompt,
+            _passthrough(ctx),
+            context,
+            name,
+            memory=seat_memory(worktree, name),
+            sources=sources,
+        )
 
 
 @agent_app.command(
@@ -1700,7 +1746,15 @@ def agent_resume(
     typer.echo(f'{dry_run.verb("Resumed", "Would resume")} agent in {worktree}')
     if dry:
         typer.echo(f'session: {native}' if native else 'session: (no archived id — by name)')
-        _dry_preview(spec, prompt, _passthrough(ctx), context, name, sources=sources)
+        _dry_preview(
+            spec,
+            prompt,
+            _passthrough(ctx),
+            context,
+            name,
+            memory=seat_memory(worktree, name),
+            sources=sources,
+        )
 
 
 @agent_app.command(
